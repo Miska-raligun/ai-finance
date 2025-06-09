@@ -21,17 +21,20 @@ def init_db():
             category TEXT,
             amount REAL,
             note TEXT,
-            date TEXT
+            date TEXT,
+            month TEXT  -- 新增字段，格式如 "2025-06"
         )
     """)
 
-    # 分类预算，默认月度预算
+    # 分类预算，新增按月度分配支持
     cur.execute("""
         CREATE TABLE IF NOT EXISTS budgets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT UNIQUE,
+            category TEXT,
             amount REAL,
-            cycle TEXT DEFAULT 'monthly'
+            cycle TEXT DEFAULT 'monthly',
+            month TEXT,
+            UNIQUE(category, month)
         )
     """)
 

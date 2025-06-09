@@ -4,7 +4,7 @@ from handlers import *
 from dotenv import load_dotenv
 import os, requests
 from flask_cors import CORS
-
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -17,7 +17,9 @@ handlers = {
     "update_budget": update_budget,
     "analyze_spend": analyze_spend,
     "add_category": add_category,
-    "delete_category": delete_category
+    "delete_category": delete_category,
+    "budget_remain": budget_remain,
+    "suggest_budgets": suggest_budgets
 }
 
 # 意图别名映射
@@ -30,6 +32,7 @@ INTENT_ALIAS = {
 def call_deepseek_intent(message):
     import os, requests
 
+    today_str = datetime.now().strftime("%Y-%m-%d")
     api_key = os.getenv("DEEPSEEK_API_KEY")
     url = "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
@@ -38,15 +41,20 @@ def call_deepseek_intent(message):
     }
 
     prompt = (
-        "你是一个智能财务助理。请根据用户输入生成结构化的意图（intent）和参数（params）。\\n"
-        "意图必须为：add_record, set_budget, update_budget, analyze_spend, add_category, delete_category。\\n"
-        "请严格使用以下格式输出：\\n"
-        "意图：add_record\\n"
-        "参数：\\n"
-        "分类：餐饮\\n"
-        "金额：25\\n"
-        "备注：麦当劳\\n"
-        "时间：2025-06-08"
+        f"今天是 {today_str}。\n"
+        "你是一个智能财务助理。请根据用户输入生成结构化的意图（intent）和参数（params）。\n"
+        "意图必须为：add_record, set_budget, update_budget, analyze_spend, add_category, delete_category, budget_remain, suggest_budgets。\n"
+        "请结合“今天、昨天、上周、5月1日”等模糊表达推断具体日期，并同时提取出本次输入所属的月份（格式如 2025-06）。\n"
+        "如果意图为suggest_budgets，在结构化输出中务必使用总预算来表示用户给出的总预算数！\n"
+        "严禁在格式化输出中添加类似于()的附带说明！\n"
+        "请严格使用以下格式输出：\n"
+        "意图：add_record\n"
+        "参数：\n"
+        "分类：餐饮\n"
+        "金额：25\n"
+        "备注：麦当劳\n"
+        "时间：2025-06-08\n"
+        "月份：2025-06"
     )
 
     payload = {
@@ -90,10 +98,11 @@ def call_deepseek_summary(user_msg, handler_result):
         "你是一个财务顾问，请根据用户的操作结果进行总结和建议。\n"
         "用户输入：{user_msg}\n"
         "系统执行结果：{handler_result}\n"
-        "请用自然语言总结这次操作，并提出简短合理的建议（50字以内）,不要添加不必要的格式化符号\n"
-        "回复尽量人性化且风趣\n"
-        "不要做()括起来的额外回复\n"
-        "如果用户此次操作为本月消费分析请求，请给出消费行为详细分析及评分。"
+        "请用自然语言总结这次操作，并提出简短合理的建议（50字以内）,不要添加不必要的格式化符号。\n"
+        "当系统执行结果涉及具体数值时，必须保留全部数值，严禁省略！\n"
+        "回复尽量人性化且风趣。\n"
+        "不要做()括起来的额外回复。\n"
+        "如果用户此次操作为本月消费分析请求，给出消费行为详细分析及评分，此时不限制回答字数，必须分别分析当月消费和总体消费，严禁混淆分析！"
     ).format(user_msg=user_msg, handler_result=handler_result)
 
     data = {
@@ -131,10 +140,6 @@ def parse_response(text):
             k, v = line.split("：", 1)
             params[k.strip()] = v.strip()
 
-    # ✅ 自动填充当前日期
-    from datetime import datetime
-    params["时间"] = datetime.now().strftime("%Y-%m-%d")
-
     return intent, params
 
 @app.route("/chat", methods=["POST"])
@@ -164,16 +169,28 @@ def chat():
     else:
         reply = "⚠️ 暂不支持该操作"
 
-    return jsonify({"reply": reply})
+    return jsonify({"reply": reply}) 
 
-
-
-@app.route("/records", methods=["GET"])
+@app.route('/records')
 def get_records():
     db = get_db()
-    cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
+    month = request.args.get("month")
+    if month:
+        cursor = db.execute("""
+            SELECT *, strftime('%Y-%m', date) as month
+            FROM records
+            WHERE strftime('%Y-%m', date) = ?
+            ORDER BY date DESC
+        """, (month,))
+    else:
+        cursor = db.execute("""
+            SELECT *, strftime('%Y-%m', date) as month
+            FROM records
+            ORDER BY date DESC
+        """)
     results = [dict(row) for row in cursor.fetchall()]
     return jsonify(results)
+
 
 @app.route("/categories", methods=["GET"])
 def get_categories():
@@ -182,13 +199,65 @@ def get_categories():
     results = [dict(row) for row in cursor.fetchall()]
     return jsonify(results)
 
-
-@app.route("/budgets", methods=["GET"])
+month = datetime.now().strftime("%Y-%m")
+@app.route('/budgets')
 def get_budgets():
     db = get_db()
-    cursor = db.execute("SELECT * FROM budgets ORDER BY category ASC")
-    results = [dict(row) for row in cursor.fetchall()]
-    return jsonify(results)
+    month = request.args.get('month')
+
+    result = []
+
+    if month:
+        # ✅ 仅查指定月份预算
+        cursor = db.execute("SELECT category, amount FROM budgets WHERE month = ?", (month,))
+        budgets = cursor.fetchall()
+
+        cursor = db.execute("""
+            SELECT category, SUM(amount) as total
+            FROM records
+            WHERE strftime('%Y-%m', date) = ?
+            GROUP BY category
+        """, (month,))
+        spend_map = {row['category']: row['total'] for row in cursor.fetchall()}
+
+        for b in budgets:
+            spent = spend_map.get(b['category'], 0)
+            remaining = float(b['amount']) - float(spent)
+            result.append({
+                'category': b['category'],
+                'amount': float(b['amount']),
+                'remaining': round(remaining, 2),
+                'month': month
+            })
+
+    else:
+        # ✅ 查所有月份预算
+        cursor = db.execute("SELECT category, amount, month FROM budgets")
+        all_budgets = cursor.fetchall()
+
+        # 一次查出所有记录，按月统计支出
+        cursor = db.execute("""
+            SELECT category, strftime('%Y-%m', date) as month, SUM(amount) as total
+            FROM records
+            GROUP BY category, month
+        """)
+        spend_map = {(row['category'], row['month']): row['total'] for row in cursor.fetchall()}
+
+        for b in all_budgets:
+            key = (b['category'], b['month'])
+            spent = spend_map.get(key, 0)
+            remaining = float(b['amount']) - float(spent)
+            result.append({
+                'category': b['category'],
+                'amount': float(b['amount']),
+                'remaining': round(remaining, 2),
+                'month': b['month']
+            })
+
+    return jsonify(result)
+
+
+
 
 @app.route("/categories", methods=["POST"])
 def add_category_manual():
@@ -218,11 +287,17 @@ def set_budget_manual():
     data = request.get_json()
     category = data.get("category", "").strip()
     amount = float(data.get("amount", 0))
-    cycle = data.get("cycle", "月")  # ✅ 默认值
+    cycle = data.get("cycle", "月")
+    month = data.get("month") or datetime.now().strftime('%Y-%m')
+
     db = get_db()
-    db.execute("INSERT OR REPLACE INTO budgets (category, amount, cycle) VALUES (?, ?, ?)", (category, amount, cycle))
+    db.execute("""
+        INSERT OR REPLACE INTO budgets (category, amount, cycle, month)
+        VALUES (?, ?, ?, ?)
+    """, (category, amount, cycle, month))
     db.commit()
     return jsonify({"success": True})
+
 
 @app.route("/stats/monthly", methods=["GET"])
 def monthly_stats():

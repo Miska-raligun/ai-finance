@@ -104,19 +104,27 @@ async function fetchRecords() {
     axios.get('/categories'),
     axios.get('/budgets')
   ])
+
   const rec = recRes.data
   const cats = catRes.data.map(c => c.name)
+
+  // ✅ 构建预算 Map，带月份
   const budgetMap = {}
   for (const b of budgetRes.data) {
-    budgetMap[b.category] = b.amount
+    budgetMap[b.category + '_' + b.month] = b.amount
   }
 
+  // ✅ 补全每条记录的 month 字段并计算剩余预算
   for (const r of rec) {
+    r.month = r.date.slice(0, 7)  // 添加月份字段
+
     const used = rec
-      .filter(x => x.category === r.category && x.date <= r.date)
+      .filter(x => x.category === r.category && x.date.slice(0, 7) === r.month && x.date <= r.date)
       .reduce((sum, x) => sum + x.amount, 0)
-    r.left_budget = budgetMap[r.category]
-      ? (budgetMap[r.category] - used).toFixed(2)
+
+    const key = r.category + '_' + r.month
+    r.left_budget = budgetMap[key]
+      ? (budgetMap[key] - used).toFixed(2)
       : '—'
   }
 
@@ -124,6 +132,7 @@ async function fetchRecords() {
   categories.value = cats
   applyFilter()
 }
+
 
 onMounted(fetchRecords)
 watch(() => props.refreshFlag, fetchRecords)
