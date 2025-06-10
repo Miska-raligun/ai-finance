@@ -13,7 +13,7 @@
       <el-date-picker
         v-model="selectedTime"
         :type="mode === 'month' ? 'month' : 'year'"
-        value-format="YYYY-MM"
+        :value-format="mode === 'month' ? 'YYYY-MM' : 'YYYY'"
         style="margin-left: 10px"
         @change="fetchChartData"
       />
