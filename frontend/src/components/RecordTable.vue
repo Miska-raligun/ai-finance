@@ -27,6 +27,7 @@
 
       <el-button type="primary" size="small" @click="applyFilter">筛选</el-button>
       <el-button plain size="small" @click="resetFilters">显示全部</el-button>
+      <el-button type="danger" size="small" @click="deleteSelected" :disabled="!selectedRows.length">删除所选</el-button>
     </el-form>
 
     <el-table
@@ -35,12 +36,55 @@
       border
       style="width: 100%"
       :default-sort="{ prop: 'date', order: 'descending' }"
+      @selection-change="handleSelectionChange"
     >
-      <el-table-column prop="category" label="类型" />
-      <el-table-column prop="note" label="备注" />
-      <el-table-column prop="date" label="时间" sortable />
-      <el-table-column prop="amount" :label="showBudget ? '支出金额' : '收入金额'" sortable />
+      <el-table-column type="selection" width="55" />
+      <el-table-column prop="category" label="类型">
+        <template #default="scope">
+          <template v-if="editingId === scope.row.id">
+            <el-select v-model="scope.row.category" style="width: 100px">
+              <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+            </el-select>
+          </template>
+          <template v-else>{{ scope.row.category }}</template>
+        </template>
+      </el-table-column>
+      <el-table-column prop="note" label="备注">
+        <template #default="scope">
+          <template v-if="editingId === scope.row.id">
+            <el-input v-model="scope.row.note" size="small" />
+          </template>
+          <template v-else>{{ scope.row.note }}</template>
+        </template>
+      </el-table-column>
+      <el-table-column prop="date" label="时间" sortable>
+        <template #default="scope">
+          <template v-if="editingId === scope.row.id">
+            <el-date-picker v-model="scope.row.date" type="date" value-format="YYYY-MM-DD" />
+          </template>
+          <template v-else>{{ scope.row.date }}</template>
+        </template>
+      </el-table-column>
+      <el-table-column prop="amount" :label="showBudget ? '支出金额' : '收入金额'" sortable>
+        <template #default="scope">
+          <template v-if="editingId === scope.row.id">
+            <el-input-number v-model="scope.row.amount" :min="0" />
+          </template>
+          <template v-else>{{ scope.row.amount }}</template>
+        </template>
+      </el-table-column>
       <el-table-column v-if="showBudget" prop="left_budget" label="剩余预算" sortable />
+      <el-table-column label="操作" width="150">
+        <template #default="scope">
+          <template v-if="editingId === scope.row.id">
+            <el-button size="small" type="primary" @click="saveEdit(scope.row)">保存</el-button>
+            <el-button size="small" @click="cancelEdit">取消</el-button>
+          </template>
+          <template v-else>
+            <el-button size="small" @click="startEdit(scope.row)">编辑</el-button>
+          </template>
+        </template>
+      </el-table-column>
     </el-table>
 
     <el-pagination
@@ -65,13 +109,15 @@ const props = defineProps({
   title: { type: String, default: '📋 记录表格' },
   showBudget: { type: Boolean, default: true }
 })
+const emit = defineEmits(['refresh'])
 
 const records = ref([])
 const filtered = ref([])
 const categories = ref([])
 const filterCategory = ref('')
 const dateRange = ref([])
-
+const selectedRows = ref([])
+const editingId = ref(null)
 const pageSize = 10
 const currentPage = ref(1)
 
@@ -88,6 +134,37 @@ function resetFilters() {
   filterCategory.value = ''
   dateRange.value = []
   applyFilter()
+}
+
+function handleSelectionChange(val) {
+  selectedRows.value = val
+}
+
+function startEdit(row) {
+  editingId.value = row.id
+}
+
+async function saveEdit(row) {
+  const url = props.type === 'expense' ? `/records/${row.id}` : `/income/${row.id}`
+  await axios.put(url, row)
+  editingId.value = null
+  await fetchData()
+  emit('refresh')
+}
+
+function cancelEdit() {
+  editingId.value = null
+  fetchData()
+}
+
+async function deleteSelected() {
+  for (const r of selectedRows.value) {
+    const url = props.type === 'expense' ? `/records/${r.id}` : `/income/${r.id}`
+    await axios.delete(url)
+  }
+  selectedRows.value = []
+  await fetchData()
+  emit('refresh')
 }
 
 function applyFilter() {

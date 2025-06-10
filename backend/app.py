@@ -205,6 +205,33 @@ def get_records():
     results = [dict(row) for row in cursor.fetchall()]
     return jsonify(results)
 
+@app.route('/records/<int:record_id>', methods=['DELETE'])
+def delete_record(record_id):
+    db = get_db()
+    db.execute("DELETE FROM records WHERE id = ?", (record_id,))
+    db.commit()
+    return jsonify({"success": True})
+
+@app.route('/records/<int:record_id>', methods=['PUT'])
+def update_record(record_id):
+    data = request.get_json()
+    category = data.get('category', '').strip()
+    amount = float(data.get('amount', 0))
+    note = data.get('note', '').strip()
+    date = data.get('date')
+    month = date[:7] if date else ''
+    year = date[:4] if date else ''
+    db = get_db()
+    db.execute(
+        """
+        UPDATE records SET category = ?, amount = ?, note = ?, date = ?, month = ?, year = ?
+        WHERE id = ?
+        """,
+        (category, amount, note, date, month, year, record_id),
+    )
+    db.commit()
+    return jsonify({"success": True})
+
 @app.route('/income')
 def get_income():
     db = get_db()
@@ -233,6 +260,32 @@ def get_income():
 
     return jsonify(results)
 
+@app.route('/income/<int:income_id>', methods=['DELETE'])
+def delete_income(income_id):
+    db = get_db()
+    db.execute("DELETE FROM income WHERE id = ?", (income_id,))
+    db.commit()
+    return jsonify({"success": True})
+
+@app.route('/income/<int:income_id>', methods=['PUT'])
+def update_income(income_id):
+    data = request.get_json()
+    category = data.get('category', '').strip()
+    amount = float(data.get('amount', 0))
+    note = data.get('note', '').strip()
+    date = data.get('date')
+    month = date[:7] if date else ''
+    year = date[:4] if date else ''
+    db = get_db()
+    db.execute(
+        """
+        UPDATE income SET category = ?, amount = ?, note = ?, date = ?, month = ?, year = ?
+        WHERE id = ?
+        """,
+        (category, amount, note, date, month, year, income_id),
+    )
+    db.commit()
+    return jsonify({"success": True})
 
 @app.route("/categories", methods=["GET"])
 def get_categories():

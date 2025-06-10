@@ -5,10 +5,22 @@
     <!-- 上半部分：两个表格并排 -->
     <el-tabs v-model="activeTab">
       <el-tab-pane label="支出记录" name="expense">
-        <RecordTable :type="'expense'" :refresh-flag="refreshFlag" title="📋 支出记录表格" :show-budget="true" />
+        <RecordTable
+          :type="'expense'"
+          :refresh-flag="refreshFlag"
+          title="📋 支出记录表格"
+          :show-budget="true"
+          @refresh="refreshFlag++"
+        />
       </el-tab-pane>
       <el-tab-pane label="收入记录" name="income">
-        <RecordTable :type="'income'" :refresh-flag="refreshFlag" title="📋 收入记录表格" :show-budget="false" />
+        <RecordTable
+          :type="'income'"
+          :refresh-flag="refreshFlag"
+          title="📋 收入记录表格"
+          :show-budget="false"
+          @refresh="refreshFlag++"
+        />
       </el-tab-pane>
     </el-tabs>
 
