@@ -11,6 +11,9 @@ CORS(app)
 init_db()
 load_dotenv()  # 加载 .env 文件
 
+# 在内存中维护最近10条对话记录
+chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
+
 handlers = {
     "add_record": add_record,
     "add_income": add_income,  # ✅ 新增
@@ -45,7 +48,7 @@ def call_deepseek_intent(message):
     prompt = (
         f"今天是 {today_str}。\n"
         "你是一个智能财务助理。请根据用户输入生成结构化的意图（intent）和参数（params）。\n"
-        "意图必须为：add_record, add_income, set_budget, update_budget, analyze_spend, add_category, delete_category, budget_remain, suggest_budgets, query_income。\n"
+        "意图必须为：add_record, add_income, set_budget, update_budget, analyze_spend, add_category, delete_category, budget_remain, suggest_budgets, query_income, chat。\n"
         "请结合“今天、昨天、上周、5月1日”等模糊表达推断具体日期，并提取出对应的月份（格式如 2025-06）。\n"
         "意图为 suggest_budgets 时，参数中务必使用“总预算”字段；\n"
         "意图为 add_record时，需提取：分类、金额、备注、时间、月份；\n"
@@ -132,6 +135,42 @@ def call_deepseek_summary(user_msg, handler_result):
         print("❌ DeepSeek API unexpected response:", result)
         return "❌ 分析失败：LLM 响应格式异常"
 
+def call_deepseek_chat(history):
+    """当用户没有执行记账相关操作时，与其闲聊。"""
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    url = "https://api.siliconflow.cn/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    prompt = (
+        "你是一个友好的记账助手，可以和用户闲聊，并在合适的时候提醒保持良好的记账习惯。\n"
+        "回答控制在50字以内。"
+    )
+
+    messages = [{"role": "system", "content": prompt}] + history[-10:]
+
+    data = {
+        "model": "Pro/deepseek-ai/DeepSeek-V3",
+        "messages": messages,
+    }
+
+    try:
+        res = requests.post(url, headers=headers, json=data, timeout=10)
+        result = res.json()
+        if "choices" in result:
+            return result["choices"][0]["message"]["content"]
+        elif "error" in result:
+            print("❌ DeepSeek chat error:", result["error"])
+            return "⚠️ 暂时无法回复"
+        else:
+            print("❌ DeepSeek chat unexpected response:", result)
+            return "⚠️ 暂时无法回复"
+    except Exception as e:
+        print("DeepSeek chat failed:", e)
+        return "⚠️ 暂时无法回复"
+
 def parse_response(text):
     lines = text.strip().split('\n')
     intent = ""
@@ -153,8 +192,17 @@ def parse_response(text):
 def chat():
     data = request.get_json()
     user_msg = data.get("message", "")
+    latest_msg = user_msg
+    if isinstance(user_msg, str):
+        latest_msg = user_msg.strip().split("\n")[-1]
 
-    llm_output = call_deepseek_intent(user_msg)
+    # 记录对话历史
+    chat_history.append({"role": "user", "content": user_msg})
+    if len(chat_history) > 10:
+        del chat_history[:-10]
+
+    print("最新消息: ",latest_msg)
+    llm_output = call_deepseek_intent(latest_msg)
     print("🧠 LLM 原始结构化输出：", llm_output)
 
     intent, params = parse_response(llm_output)
@@ -179,9 +227,16 @@ def chat():
             for row in cursor.fetchall():
                 print(dict(row))
         # 用 LLM 进行总结生成自然语言
-        reply = call_deepseek_summary(user_msg, result)
+        reply = call_deepseek_summary(latest_msg, result)
     else:
-        reply = "⚠️ 暂不支持该操作"
+        # 如果未识别出意图，直接和用户闲聊几句
+        print("llm输入:",chat_history)
+        reply = call_deepseek_chat(chat_history)
+
+    # 记录 assistant 回复
+    chat_history.append({"role": "assistant", "content": reply})
+    if len(chat_history) > 10:
+        del chat_history[:-10]
 
     return jsonify({"reply": reply}) 
 
