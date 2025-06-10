@@ -20,10 +20,11 @@
       <el-button style="margin-left: 10px" @click="showAll">查看全部</el-button>
     </div>
 
-    <div>
-      <VChart :option="pieOption" style="height: 300px" />
-      <VChart :option="lineOption" style="height: 300px; margin-top: 20px" />
+    <div style="display: flex; gap: 20px; margin-bottom: 20px">
+      <VChart :option="incomePieOption" style="height: 300px; flex: 1" />
+      <VChart :option="spendPieOption" style="height: 300px; flex: 1" />
     </div>
+    <VChart :option="lineOption" style="height: 300px" />
   </el-card>
 </template>
 
@@ -53,7 +54,8 @@ use([
 const props = defineProps({ refreshFlag: Number })
 const mode = ref('month')
 const selectedTime = ref()
-const pieOption = ref({})
+const incomePieOption = ref({})
+const spendPieOption = ref({})
 const lineOption = ref({})
 
 function showAll() {
@@ -66,8 +68,14 @@ const fetchChartData = async () => {
   if (!selectedTime.value && mode.value === 'month') return
 
   const time = selectedTime.value
+  const catParams = {}
+  if (mode.value === 'month' && time) {
+    catParams.month = time
+  } else if (mode.value === 'year' && time) {
+    catParams.year = time
+  }
   const [cats, trend] = await Promise.all([
-    axios.get('/stats/by-category'),
+    axios.get('/stats/by-category', { params: catParams }),
     mode.value === 'month'
       ? axios.get('/stats/daily', { params: { month: time } })
       : axios.get('/stats/monthly')
@@ -76,23 +84,28 @@ const fetchChartData = async () => {
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')
   const spendCats = cats.data.filter(x => x['类型'] === '支出')
 
-  pieOption.value = {
-    title: [{ text: '收入分布', left: '25%' }, { text: '支出分布', left: '75%' }],
+  incomePieOption.value = {
+    title: { text: '收入分布', left: 'center' },
     tooltip: { trigger: 'item' },
-    legend: { bottom: 10 },
+    legend: { bottom: 0, left: 'center' },
     series: [
       {
         name: '收入来源',
         type: 'pie',
-        radius: '40%',
-        center: ['25%', '50%'],
+        radius: '50%',
         data: incomeCats.map(x => ({ name: x['名称'], value: x['金额'] }))
-      },
+      }
+    ]
+  }
+  spendPieOption.value = {
+    title: { text: '支出分布', left: 'center' },
+    tooltip: { trigger: 'item' },
+    legend: { bottom: 0, left: 'center' },
+    series: [
       {
         name: '消费分类',
         type: 'pie',
-        radius: '40%',
-        center: ['75%', '50%'],
+        radius: '50%',
         data: spendCats.map(x => ({ name: x['名称'], value: x['金额'] }))
       }
     ]
@@ -132,6 +145,13 @@ onMounted(() => {
   fetchChartData()
 })
 watch(() => props.refreshFlag, fetchChartData)
+watch(mode, () => {
+  // 清空选择以避免格式不匹配
+  selectedTime.value = mode.value === 'month'
+    ? new Date().toISOString().slice(0, 7)
+    : new Date().getFullYear().toString()
+  fetchChartData()
+})
 </script>
 
 <style scoped>

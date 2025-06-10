@@ -249,7 +249,7 @@ def delete_category(params):
         db.execute("DELETE FROM records WHERE category = ?", (category,))
         db.execute("DELETE FROM budgets WHERE category = ?", (category,))
     elif category_type == '收入':
-        db.execute("DELETE FROM income WHERE source = ?", (category,))
+        db.execute("DELETE FROM income WHERE category = ?", (category,))
 
     db.execute("DELETE FROM categories WHERE name = ?", (category,))
     db.commit()

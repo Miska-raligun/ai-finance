@@ -4,7 +4,7 @@
     <template #header>📁 分类管理</template>
     <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
       <el-input v-model="newCategory" placeholder="新分类" style="flex: 1" />
-      <el-button type="primary" @click="addCategory">添加</el-button>
+      <el-button type="primary" size="small" @click="addCategory">添加</el-button>
     </div>
     <el-tag
       v-for="item in categories"
@@ -57,6 +57,5 @@ async function deleteCategory(name) {
 onMounted(fetchCategories)
 watch([() => props.refreshFlag, () => props.type], fetchCategories)
 </script>
-
 
 

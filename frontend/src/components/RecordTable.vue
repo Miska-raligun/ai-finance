@@ -3,7 +3,7 @@
   <el-card>
     <template #header>{{ title }}</template>
 
-    <el-form :inline="true" size="small" style="margin-bottom: 10px">
+    <el-form :inline="true" size="small" style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px">
       <el-form-item label="类型">
         <el-select v-model="filterCategory" placeholder="全部" clearable style="width: 120px">
           <el-option
@@ -25,8 +25,8 @@
         />
       </el-form-item>
 
-      <el-button type="primary" @click="applyFilter">筛选</el-button>
-      <el-button plain @click="resetFilters">显示全部</el-button>
+      <el-button type="primary" size="small" @click="applyFilter">筛选</el-button>
+      <el-button plain size="small" @click="resetFilters">显示全部</el-button>
     </el-form>
 
     <el-table

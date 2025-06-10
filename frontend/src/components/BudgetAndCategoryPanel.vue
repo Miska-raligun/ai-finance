@@ -45,7 +45,7 @@
       <el-form-item label="预算">
         <el-input-number v-model="budgetForm.amount" :min="0" />
       </el-form-item>
-      <el-button type="primary" @click="submitBudget">确定</el-button>
+      <el-button type="primary" size="small" @click="submitBudget">确定</el-button>
     </el-form>
 
     <el-divider />
@@ -53,18 +53,27 @@
     <!-- 分类管理 -->
     <el-tabs v-model="activeTab">
       <el-tab-pane label="支出分类" name="支出">
-        <CategoryManager type="expense" @refresh="onCategoryChange" />
+        <CategoryManager
+          type="expense"
+          :refresh-flag="props.refreshFlag"
+          @refresh="onCategoryChange"
+        />
       </el-tab-pane>
       <el-tab-pane label="收入分类" name="收入">
-        <CategoryManager type="income" @refresh="onCategoryChange" />
+        <CategoryManager
+          type="income"
+          :refresh-flag="props.refreshFlag"
+          @refresh="onCategoryChange"
+        />
       </el-tab-pane>
     </el-tabs>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 const emit = defineEmits(['refresh'])
+const props = defineProps({ refreshFlag: Number })
 import axios from 'axios'
 import CategoryManager from './CategoryManager.vue'
 
@@ -104,6 +113,7 @@ function onCategoryChange() {
 }
 
 onMounted(fetchBudgets)
+watch(() => props.refreshFlag, fetchBudgets)
 </script>
 
 <style scoped>

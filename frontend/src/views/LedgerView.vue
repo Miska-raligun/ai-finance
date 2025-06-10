@@ -13,22 +13,25 @@
     </el-tabs>
 
     <!-- 下半部分：左右两栏布局 -->
-    <div style="display: flex; gap: 20px; margin-top: 20px">
+    <div style="display: flex; gap: 20px; margin-top: 20px; align-items: flex-start">
       <!-- 左侧：预算管理和分类添加 -->
       <div style="flex: 1">
-        <BudgetAndCategoryPanel @refresh="refreshFlag++" />
+        <BudgetAndCategoryPanel
+          :refresh-flag="refreshFlag"
+          @refresh="refreshFlag++"
+        />
       </div>
 
       <!-- 右侧：图表分析 -->
       <div style="flex: 2">
-        <ChartPanel />
+        <ChartPanel :refresh-flag="refreshFlag" />
       </div>
     </div>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onActivated } from 'vue'
+import { ref, onActivated, onMounted, onBeforeUnmount } from 'vue'
 import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
@@ -39,6 +42,15 @@ const refreshFlag = ref(0)
 onActivated(() => {
   refreshFlag.value++
 })
+
+function onStorage(e) {
+  if (e.key === 'record_added') {
+    refreshFlag.value++
+  }
+}
+
+onMounted(() => window.addEventListener('storage', onStorage))
+onBeforeUnmount(() => window.removeEventListener('storage', onStorage))
 </script>
 
 

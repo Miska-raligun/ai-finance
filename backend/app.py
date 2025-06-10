@@ -434,31 +434,43 @@ def monthly_stats():
 @app.route("/stats/by-category", methods=["GET"])
 def category_stats():
     db = get_db()
+    month = request.args.get("month")
+    year = request.args.get("year")
 
-    # 支出分类统计
-    spend_cursor = db.execute("""
-        SELECT category AS name, SUM(amount) AS total
-        FROM records
-        GROUP BY category
-    """)
-    spend_result = [{
-        "名称": row["name"],
-        "金额": float(row["total"]),
-        "类型": "支出"
-    } for row in spend_cursor.fetchall()]
+    if month:
+        spend_cursor = db.execute(
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE month = ? GROUP BY category",
+            (month,),
+        )
+        income_cursor = db.execute(
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE month = ? GROUP BY category",
+            (month,),
+        )
+    elif year:
+        spend_cursor = db.execute(
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE year = ? GROUP BY category",
+            (year,),
+        )
+        income_cursor = db.execute(
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE year = ? GROUP BY category",
+            (year,),
+        )
+    else:
+        spend_cursor = db.execute(
+            "SELECT category AS name, SUM(amount) AS total FROM records GROUP BY category"
+        )
+        income_cursor = db.execute(
+            "SELECT category AS name, SUM(amount) AS total FROM income GROUP BY category"
+        )
 
-    # 收入来源统计
-    income_cursor = db.execute("""
-        SELECT category AS name, SUM(amount) AS total
-        FROM income
-        GROUP BY category
-    """)
-    income_result = [{
-        "名称": row["name"],
-        "金额": float(row["total"]),
-        "类型": "收入"
-    } for row in income_cursor.fetchall()]
-
+    income_result = [
+        {"名称": row["name"], "金额": float(row["total"]), "类型": "收入"}
+        for row in income_cursor.fetchall()
+    ]
+    spend_result = [
+        {"名称": row["name"], "金额": float(row["total"]), "类型": "支出"}
+        for row in spend_cursor.fetchall()
+    ]
     return jsonify(spend_result + income_result)
 
 @app.route("/stats/summary", methods=["GET"])

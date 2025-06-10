@@ -30,7 +30,7 @@
         placeholder="金额"
         style="width: 30%; margin-left: 10px;"
       />
-      <el-button type="primary" @click="addOrUpdateBudget">设置</el-button>
+      <el-button type="primary" size="small" @click="addOrUpdateBudget">设置</el-button>
     </div>
 
     <!-- 预算列表 -->
