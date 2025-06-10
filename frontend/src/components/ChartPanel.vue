@@ -78,7 +78,7 @@ const fetchChartData = async () => {
     axios.get('/stats/by-category', { params: catParams }),
     mode.value === 'month'
       ? axios.get('/stats/daily', { params: { month: time } })
-      : axios.get('/stats/monthly')
+      : axios.get('/stats/monthly', { params: time ? { year: time } : {} })
   ])
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')

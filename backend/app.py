@@ -401,28 +401,52 @@ def set_budget_manual():
 @app.route("/stats/monthly", methods=["GET"])
 def monthly_stats():
     db = get_db()
+    year = request.args.get("year")
+    if year:
+        # 按年份过滤
+        spend_cursor = db.execute(
+            """
+            SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
+            FROM records WHERE year = ?
+            GROUP BY month
+            """,
+            (year,),
+        )
+        income_cursor = db.execute(
+            """
+            SELECT month, SUM(amount) AS total
+            FROM income WHERE year = ?
+            GROUP BY month
+            """,
+            (year,),
+        )
+    else:
+        # 无年份限制，统计全部月份
+        spend_cursor = db.execute(
+            """
+            SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
+            FROM records
+            GROUP BY month
+            """
+        )
+        income_cursor = db.execute(
+            """
+            SELECT month, SUM(amount) AS total
+            FROM income
+            GROUP BY month
+            """
+        )
 
-    # 支出统计
-    spend_cursor = db.execute("""
-        SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
-        FROM records
-        GROUP BY month
-    """)
     spend_data = {row['month']: float(row['total']) for row in spend_cursor.fetchall()}
-
-    # 收入统计
-    income_cursor = db.execute("""
-        SELECT month, SUM(amount) AS total
-        FROM income
-        GROUP BY month
-    """)
     income_data = {row['month']: float(row['total']) for row in income_cursor.fetchall()}
 
-    # 合并所有月份
-    all_months = sorted(set(spend_data.keys()) | set(income_data.keys()), reverse=True)
+    if year:
+        months = [f"{year}-{i:02d}" for i in range(1, 13)]
+    else:
+        months = sorted(set(spend_data.keys()) | set(income_data.keys()), reverse=True)
 
     result = []
-    for m in all_months:
+    for m in months:
         result.append({
             "month": m,
             "支出": spend_data.get(m, 0.0),
