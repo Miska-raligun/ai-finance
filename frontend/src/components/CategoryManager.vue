@@ -2,8 +2,8 @@
 <template>
   <el-card>
     <template #header>📁 分类管理</template>
-    <div>
-      <el-input v-model="newCategory" placeholder="新分类" style="width: 70%;" />
+    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+      <el-input v-model="newCategory" placeholder="新分类" style="flex: 1" />
       <el-button type="primary" @click="addCategory">添加</el-button>
     </div>
     <el-tag
@@ -20,31 +20,42 @@
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
+const emit = defineEmits(['refresh'])
 import axios from 'axios'
-const props = defineProps({ refreshFlag: Number })
+const props = defineProps({
+  refreshFlag: Number,
+  type: { type: String, default: 'expense' } // 'expense' or 'income'
+})
 
 const categories = ref([])
 const newCategory = ref('')
 
 async function fetchCategories() {
-  const res = await axios.get('/categories')
+  const res = await axios.get('/categories', {
+    params: { type: props.type }
+  })
   categories.value = res.data
 }
 
 async function addCategory() {
   if (!newCategory.value) return
-  await axios.post('/categories', { name: newCategory.value })
+  await axios.post('/categories', {
+    name: newCategory.value,
+    type: props.type === 'income' ? '收入' : '支出'
+  })
   newCategory.value = ''
   await fetchCategories()
+  emit('refresh')
 }
 
 async function deleteCategory(name) {
   await axios.delete(`/categories/${encodeURIComponent(name)}`)
   await fetchCategories()
+  emit('refresh')
 }
 
 onMounted(fetchCategories)
-watch(() => props.refreshFlag, fetchCategories)
+watch([() => props.refreshFlag, () => props.type], fetchCategories)
 </script>
 
 

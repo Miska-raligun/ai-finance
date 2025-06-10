@@ -92,8 +92,8 @@ def set_budget(params):
 
     # ✅ 设置预算（默认使用当前月）
     db.execute(
-        "INSERT OR REPLACE INTO budgets (category, amount, cycle, month, year) VALUES (?, ?, ?, ?, ?)",
-        (category, float(amount), cycle, current_month, current_month[:4])
+        "INSERT OR REPLACE INTO budgets (category, amount, cycle, month) VALUES (?, ?, ?, ?)",
+        (category, float(amount), cycle, current_month)
     )
     db.commit()
 
@@ -453,7 +453,7 @@ def query_income(params):
     else:
         scope += "总"
 
-    return f"💰 {category}收入为 ¥{total:.2f}"
+    return f"💰 {scope}收入为 ¥{total:.2f}"
 
 
 

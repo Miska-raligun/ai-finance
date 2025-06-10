@@ -11,7 +11,9 @@ export default defineConfig({
       '/chat': 'http://localhost:5000',
       '/records': 'http://localhost:5000',
       '/categories': 'http://localhost:5000',
-      '/budgets': 'http://localhost:5000'
+      '/budgets': 'http://localhost:5000',
+      '/income': 'http://localhost:5000',
+      '/stats': 'http://localhost:5000'
     }
   },
   resolve: {

@@ -1,11 +1,11 @@
 <template>
   <el-card>
     <template #header>
-      算符管理和分类管理
+      预算管理和分类管理
     </template>
 
     <!-- 月份选择 -->
-    <el-form :inline="true" size="small" class="mb-2">
+    <el-form :inline="true" size="small" class="mb-2" style="display: flex; align-items: center; gap: 10px">
       <el-form-item label="选择月份">
         <el-date-picker
           v-model="selectedMonth"
@@ -31,7 +31,7 @@
     </el-table>
 
     <!-- 添加/更新预算 -->
-    <el-form :inline="true" size="small" class="mb-3">
+    <el-form :inline="true" size="small" class="mb-3" style="display: flex; align-items: center; gap: 10px">
       <el-form-item label="分类">
         <el-select v-model="budgetForm.category" placeholder="选择分类">
           <el-option
@@ -53,10 +53,10 @@
     <!-- 分类管理 -->
     <el-tabs v-model="activeTab">
       <el-tab-pane label="支出分类" name="支出">
-        <CategoryManager :type="'支出'" @refresh="fetchBudgets" />
+        <CategoryManager type="expense" @refresh="onCategoryChange" />
       </el-tab-pane>
       <el-tab-pane label="收入分类" name="收入">
-        <CategoryManager :type="'收入'" />
+        <CategoryManager type="income" @refresh="onCategoryChange" />
       </el-tab-pane>
     </el-tabs>
   </el-card>
@@ -64,6 +64,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+const emit = defineEmits(['refresh'])
 import axios from 'axios'
 import CategoryManager from './CategoryManager.vue'
 
@@ -81,7 +82,7 @@ async function fetchBudgets() {
   const month = selectedMonth.value
   const [bRes, cRes] = await Promise.all([
     axios.get('/budgets', { params: { month } }),
-    axios.get('/categories', { params: { type: '支出' } })
+    axios.get('/categories', { params: { type: 'expense' } })
   ])
   budgets.value = bRes.data
   expenseCategories.value = cRes.data.map(c => c.name)
@@ -94,6 +95,12 @@ async function submitBudget() {
     month: selectedMonth.value
   })
   await fetchBudgets()
+  emit('refresh')
+}
+
+function onCategoryChange() {
+  fetchBudgets()
+  emit('refresh')
 }
 
 onMounted(fetchBudgets)

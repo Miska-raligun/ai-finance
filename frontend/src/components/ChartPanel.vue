@@ -5,7 +5,7 @@
       📊 收支图表分析
     </template>
 
-    <div style="margin-bottom: 10px">
+    <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px">
       <el-radio-group v-model="mode">
         <el-radio-button label="month">按月</el-radio-button>
         <el-radio-button label="year">按年</el-radio-button>
@@ -17,17 +17,18 @@
         style="margin-left: 10px"
         @change="fetchChartData"
       />
+      <el-button style="margin-left: 10px" @click="showAll">查看全部</el-button>
     </div>
 
     <div>
-      <v-chart :option="pieOption" style="height: 300px" />
-      <v-chart :option="lineOption" style="height: 300px; margin-top: 20px" />
+      <VChart :option="pieOption" style="height: 300px" />
+      <VChart :option="lineOption" style="height: 300px; margin-top: 20px" />
     </div>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { use } from 'echarts/core'
 import VChart from 'vue-echarts'
@@ -49,14 +50,20 @@ use([
   GridComponent,
   CanvasRenderer
 ])
-
+const props = defineProps({ refreshFlag: Number })
 const mode = ref('month')
 const selectedTime = ref()
 const pieOption = ref({})
 const lineOption = ref({})
 
+function showAll() {
+  mode.value = 'year'
+  selectedTime.value = ''
+  fetchChartData()
+}
+
 const fetchChartData = async () => {
-  if (!selectedTime.value) return
+  if (!selectedTime.value && mode.value === 'month') return
 
   const time = selectedTime.value
   const [cats, trend] = await Promise.all([
@@ -124,6 +131,7 @@ onMounted(() => {
   selectedTime.value = new Date().toISOString().slice(0, 7)
   fetchChartData()
 })
+watch(() => props.refreshFlag, fetchChartData)
 </script>
 
 <style scoped>

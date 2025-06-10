@@ -205,6 +205,34 @@ def get_records():
     results = [dict(row) for row in cursor.fetchall()]
     return jsonify(results)
 
+@app.route('/income')
+def get_income():
+    db = get_db()
+    month = request.args.get("month")
+
+    if month:
+        cursor = db.execute("""
+            SELECT id, category, amount, note, date, month, year
+            FROM income
+            WHERE month = ?
+            ORDER BY date DESC
+        """, (month,))
+    else:
+        cursor = db.execute("""
+            SELECT id, category, amount, note, date, month, year
+            FROM income
+            ORDER BY date DESC
+        """)
+
+    results = [dict(row) for row in cursor.fetchall()]
+
+    # ✅ 防御式检查每条记录都有 date 字段
+    for r in results:
+        if "date" not in r or not r["date"]:
+            r["date"] = r.get("month", "") + "-01"
+
+    return jsonify(results)
+
 
 @app.route("/categories", methods=["GET"])
 def get_categories():
@@ -421,9 +449,9 @@ def category_stats():
 
     # 收入来源统计
     income_cursor = db.execute("""
-        SELECT source AS name, SUM(amount) AS total
+        SELECT category AS name, SUM(amount) AS total
         FROM income
-        GROUP BY source
+        GROUP BY category
     """)
     income_result = [{
         "名称": row["name"],
@@ -463,35 +491,6 @@ def summary_stats():
         "总收入": round(income_total, 2),
         "结余": round(balance, 2)
     })
-
-@app.route('/income')
-def get_income():
-    db = get_db()
-    month = request.args.get("month")
-
-    if month:
-        cursor = db.execute("""
-            SELECT id, category, amount, note, date, month, year
-            FROM income
-            WHERE month = ?
-            ORDER BY date DESC
-        """, (month,))
-    else:
-        cursor = db.execute("""
-            SELECT id, category, amount, note, date, month, year
-            FROM income
-            ORDER BY date DESC
-        """)
-
-    results = [dict(row) for row in cursor.fetchall()]
-
-    # ✅ 防御式检查每条记录都有 date 字段
-    for r in results:
-        if "date" not in r or not r["date"]:
-            r["date"] = r.get("month", "") + "-01"
-
-    return jsonify(results)
-
 
 @app.route("/stats/daily")
 def daily_stats():
