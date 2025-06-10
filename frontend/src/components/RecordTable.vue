@@ -1,10 +1,11 @@
+<!-- components/RecordTable.vue -->
 <template>
   <el-card>
-    <template #header>📋 记账记录表格</template>
+    <template #header>{{ title }}</template>
 
     <el-form :inline="true" size="small" style="margin-bottom: 10px">
       <el-form-item label="类型">
-        <el-select v-model="filterCategory" placeholder="全部" clearable style="width: 100px">
+        <el-select v-model="filterCategory" placeholder="全部" clearable style="width: 120px">
           <el-option
             v-for="cat in categories"
             :key="cat"
@@ -38,8 +39,8 @@
       <el-table-column prop="category" label="类型" />
       <el-table-column prop="note" label="备注" />
       <el-table-column prop="date" label="时间" sortable />
-      <el-table-column prop="amount" label="金额" sortable />
-      <el-table-column prop="left_budget" label="剩余预算" sortable />
+      <el-table-column prop="amount" :label="showBudget ? '支出金额' : '收入金额'" sortable />
+      <el-table-column v-if="showBudget" prop="left_budget" label="剩余预算" sortable />
     </el-table>
 
     <el-pagination
@@ -55,10 +56,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import axios from 'axios'
 
-const props = defineProps({ refreshFlag: Number })
+const props = defineProps({
+  type: { type: String, default: 'expense' }, // 'expense' or 'income'
+  refreshFlag: Number,
+  title: { type: String, default: '📋 记录表格' },
+  showBudget: { type: Boolean, default: true }
+})
 
 const records = ref([])
 const filtered = ref([])
@@ -71,8 +77,7 @@ const currentPage = ref(1)
 
 const paginatedData = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  const end = start + pageSize
-  return filtered.value.slice(start, end)
+  return filtered.value.slice(start, start + pageSize)
 })
 
 function handlePageChange(val) {
@@ -87,9 +92,7 @@ function resetFilters() {
 
 function applyFilter() {
   filtered.value = records.value.filter(r => {
-    const matchCategory = filterCategory.value
-      ? r.category === filterCategory.value
-      : true
+    const matchCategory = filterCategory.value ? r.category === filterCategory.value : true
     const matchDate = dateRange.value.length
       ? r.date >= dateRange.value[0] && r.date <= dateRange.value[1]
       : true
@@ -98,44 +101,50 @@ function applyFilter() {
   currentPage.value = 1
 }
 
-async function fetchRecords() {
-  const [recRes, catRes, budgetRes] = await Promise.all([
-    axios.get('/records'),
-    axios.get('/categories'),
-    axios.get('/budgets')
-  ])
+async function fetchData() {
+  try {
+    const [recRes, catRes] = await Promise.all([
+      axios.get(props.type === 'expense' ? '/records' : '/income'),
+      axios.get('/categories', {
+        params: {
+          type: props.type === 'expense' ? 'expense' : 'income'
+        }
+      })
+    ])
 
-  const rec = recRes.data
-  const cats = catRes.data.map(c => c.name)
+    const rec = recRes.data
+    const cats = catRes.data.map(c => c.name)
+    categories.value = cats
+    console.log("📋 收入数据：", rec)
+    console.log("📂 分类数据：", cats)
+    if (props.type === 'expense') {
+      const budgets = (await axios.get('/budgets')).data
+      const budgetMap = {}
+      for (const b of budgets) {
+        budgetMap[b.category + '_' + b.month] = b.amount
+      }
 
-  // ✅ 构建预算 Map，带月份
-  const budgetMap = {}
-  for (const b of budgetRes.data) {
-    budgetMap[b.category + '_' + b.month] = b.amount
+      for (const r of rec) {
+        r.month = r.date.slice(0, 7)
+        const used = rec
+          .filter(x => x.category === r.category && x.date.slice(0, 7) === r.month && x.date <= r.date)
+          .reduce((sum, x) => sum + x.amount, 0)
+        const key = r.category + '_' + r.month
+        r.left_budget = budgetMap[key] ? (budgetMap[key] - used).toFixed(2) : '—'
+      }
+    }
+
+    records.value = rec
+    applyFilter()
+  } catch (err) {
+    console.error("❌ 记录加载失败：", err)
   }
-
-  // ✅ 补全每条记录的 month 字段并计算剩余预算
-  for (const r of rec) {
-    r.month = r.date.slice(0, 7)  // 添加月份字段
-
-    const used = rec
-      .filter(x => x.category === r.category && x.date.slice(0, 7) === r.month && x.date <= r.date)
-      .reduce((sum, x) => sum + x.amount, 0)
-
-    const key = r.category + '_' + r.month
-    r.left_budget = budgetMap[key]
-      ? (budgetMap[key] - used).toFixed(2)
-      : '—'
-  }
-
-  records.value = rec
-  categories.value = cats
-  applyFilter()
 }
 
 
-onMounted(fetchRecords)
-watch(() => props.refreshFlag, fetchRecords)
+onMounted(fetchData)
+watch(() => props.refreshFlag, fetchData)
 </script>
+
 
 
