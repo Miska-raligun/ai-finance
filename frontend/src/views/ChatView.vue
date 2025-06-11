@@ -42,7 +42,6 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
-    const token = localStorage.getItem('token') || ''
     const cfgRaw = localStorage.getItem('llmConfig')
     let llm = null
     if (cfgRaw && cfgRaw !== 'default') {
@@ -52,8 +51,8 @@ async function sendMessage() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
       },
+      credentials: 'include',
       body: JSON.stringify({ message: msg, llm })
     })
     const data = await res.json()
@@ -76,8 +75,8 @@ function scrollToBottom() {
 }
 
 onMounted(() => {
-  const token = localStorage.getItem('token')
-  if (!token) {
+  const name = localStorage.getItem('username')
+  if (!name) {
     router.push('/login')
   } else {
     scrollToBottom()

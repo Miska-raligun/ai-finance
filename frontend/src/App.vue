@@ -149,9 +149,7 @@ function handleSelect(index) {
 }
 
 function logout() {
-  const token = localStorage.getItem('token') || ''
-  fetch('/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }).catch(() => {})
-  localStorage.removeItem('token')
+  fetch('/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
   localStorage.removeItem('username')
   router.push('/login')
 }

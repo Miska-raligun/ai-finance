@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, session
 from db import init_db, get_db
 from handlers import *
 from dotenv import load_dotenv
@@ -8,7 +8,8 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-CORS(app)
+app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
+CORS(app, supports_credentials=True)
 init_db()
 load_dotenv()  # 加载 .env 文件
 
@@ -16,15 +17,12 @@ load_dotenv()  # 加载 .env 文件
 chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
 
 # ===== 简易用户认证 =====
-tokens = {}
 
 def login_required(f):
     from functools import wraps
     @wraps(f)
     def wrapper(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        token = auth.replace("Bearer ", "")
-        user_id = tokens.get(token)
+        user_id = session.get("user_id")
         if not user_id:
             return jsonify({"error": "Unauthorized"}), 401
         g.user_id = user_id
@@ -61,16 +59,15 @@ def login():
     if not row or not check_password_hash(row["password"], password):
         return jsonify({"error": "用户名或密码错误"}), 400
 
-    token = secrets.token_hex(16)
-    tokens[token] = row["id"]
-    return jsonify({"token": token})
+    session["user_id"] = row["id"]
+    session["username"] = username
+    return jsonify({"success": True})
 
 @app.route("/logout", methods=["POST"])
 @login_required
 def logout():
-    auth = request.headers.get("Authorization", "")
-    token = auth.replace("Bearer ", "")
-    tokens.pop(token, None)
+    session.pop("user_id", None)
+    session.pop("username", None)
     return jsonify({"success": True})
 
 handlers = {

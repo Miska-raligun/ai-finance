@@ -24,11 +24,11 @@ async function onLogin() {
   const res = await fetch('/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ username: username.value, password: password.value })
   })
   const data = await res.json()
-  if (data.token) {
-    localStorage.setItem('token', data.token)
+  if (data.success) {
     localStorage.setItem('username', username.value)
     router.push('/chat')
   } else {
@@ -40,6 +40,7 @@ async function onRegister() {
   const res = await fetch('/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ username: username.value, password: password.value })
   })
   const data = await res.json()

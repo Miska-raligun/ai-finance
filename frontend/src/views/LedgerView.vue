@@ -64,8 +64,8 @@ function onStorage(e) {
 }
 
 onMounted(() => {
-  const token = localStorage.getItem('token')
-  if (!token) {
+  const name = localStorage.getItem('username')
+  if (!name) {
     router.push('/login')
   }
   window.addEventListener('storage', onStorage)
