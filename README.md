@@ -20,6 +20,8 @@ frontend/ # Vue 3 + Element Plus 前端应用
 
 在backend/中建立.env文件并设置api密钥
 
+### Linux / macOS
+
 执行以下命令可一键安装依赖并启动前后端：
 
 ```bash
@@ -27,11 +29,20 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
+### Windows
+
+在 PowerShell 中运行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+./deploy.ps1
+```
+
 前端默认运行在 [http://localhost:5173](http://localhost:5173)，后端接口运行在 [http://localhost:5000](http://localhost:5000)。
 
 ## 脚本说明
 
-`deploy.sh` 会完成以下工作：
+`deploy.sh`（Linux/macOS）与 `deploy.ps1`（Windows）会完成以下工作：
 
 1. 在 `backend/venv` 下创建虚拟环境并安装后端依赖；
 2. 安装前端依赖；

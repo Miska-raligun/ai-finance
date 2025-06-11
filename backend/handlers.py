@@ -1,7 +1,8 @@
 from db import get_db
 from datetime import datetime
 current_month = datetime.now().strftime("%Y-%m")
-def add_record(params):
+
+def add_record(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
     note = params.get("备注", "").strip()
@@ -18,24 +19,27 @@ def add_record(params):
         return "⚠️ 分类和金额不能为空"
 
     # ✅ 查询分类类型是否为“收入”，不允许误用
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, user_id)
+    ).fetchone()
     if row:
         if row['type'] == '收入':
             return f"⚠️ 分类「{category}」已被设为收入来源，不能作为支出使用，请更换分类名。"
     else:
         # ✅ 新增分类并标记为“支出”
-        db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (category, '支出'))
+        db.execute("INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)", (user_id, category, '支出'))
 
     # ✅ 插入支出记录
     db.execute(
-        "INSERT INTO records (category, amount, note, date, month, year) VALUES (?, ?, ?, ?, ?, ?)",
-        (category, amount, note, date, month, year)
+        "INSERT INTO records (user_id, category, amount, note, date, month, year) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date, month, year)
     )
     db.commit()
 
     return f"✅ 成功记录一笔消费：你在「{category}」方面支出了 ¥{amount}，备注为「{note}」，日期为 {date}。"
 
-def add_income(params):
+def add_income(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
     note = params.get("备注", "").strip()
@@ -52,24 +56,30 @@ def add_income(params):
         return "⚠️ 收入的来源和金额不能为空"
 
     # ✅ 检查该收入来源是否已存在为“支出”分类
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, user_id)
+    ).fetchone()
     if row:
         if row['type'] == '支出':
             return f"⚠️ 「{category}」已作为支出分类存在，不能记录为收入来源，请更换名称。"
     else:
         # ✅ 新增收入来源分类
-        db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (category, '收入'))
+        db.execute(
+            "INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)",
+            (user_id, category, '收入')
+        )
 
     # ✅ 插入收入记录
     db.execute(
-        "INSERT INTO income (category, amount, note, date, month, year) VALUES (?, ?, ?, ?, ?, ?)",
-        (category, amount, note, date, month, year)
+        "INSERT INTO income (user_id, category, amount, note, date, month, year) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date, month, year)
     )
     db.commit()
 
     return f"✅ 成功记录一笔收入：你从「{category}」获得了 ¥{amount}，备注为「{note}」，日期为 {date}。"
 
-def set_budget(params):
+def set_budget(user_id, params):
     print("🧠 LLM 预算参数:", params)
 
     category = params.get("分类")
@@ -82,24 +92,30 @@ def set_budget(params):
     db = get_db()
 
     # ✅ 查询分类是否存在，检查类型
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, user_id)
+    ).fetchone()
     if row:
         if row['type'] != '支出':
             return f"⚠️ 分类「{category}」不是支出分类，无法设置预算。"
     else:
         # ✅ 如果不存在则创建为支出分类
-        db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (category, '支出'))
+        db.execute(
+            "INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)",
+            (user_id, category, '支出')
+        )
 
     # ✅ 设置预算（默认使用当前月）
     db.execute(
-        "INSERT OR REPLACE INTO budgets (category, amount, cycle, month) VALUES (?, ?, ?, ?)",
-        (category, float(amount), cycle, current_month)
+        "INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month) VALUES (?, ?, ?, ?, ?)",
+        (user_id, category, float(amount), cycle, current_month)
     )
     db.commit()
 
     return f"✅ 已为「{category}」设置 {cycle} 预算 ¥{amount}。理性消费，快乐生活！"
 
-def update_budget(params):
+def update_budget(user_id, params):
     category = params.get("分类")
     amount = params.get("金额") or params.get("预算")
     cycle = params.get("周期", "月")
@@ -110,69 +126,89 @@ def update_budget(params):
     db = get_db()
 
     # ✅ 检查分类是否为支出类型
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, user_id)
+    ).fetchone()
     if row:
         if row['type'] != '支出':
             return f"⚠️ 分类「{category}」不是支出分类，无法更新预算。"
     else:
         # ✅ 若不存在则创建为支出分类
-        db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (category, '支出'))
+        db.execute(
+            "INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)",
+            (user_id, category, '支出')
+        )
 
     # ✅ 更新预算记录
     db.execute(
-        "UPDATE budgets SET amount = ?, cycle = ? WHERE category = ?",
-        (float(amount), cycle, category)
+        "UPDATE budgets SET amount = ?, cycle = ? WHERE category = ? AND user_id = ?",
+        (float(amount), cycle, category, user_id)
     )
     db.commit()
 
     return f"✅ 已更新「{category}」的预算为 ¥{amount}/{cycle}。别忘了定期检查哦！"
 
-def analyze_spend(params):
+def analyze_spend(user_id, params):
     db = get_db()
     month = params.get("月份") or datetime.now().strftime('%Y-%m')
 
     reply = f"📊「{month}」财务分析报告：\n"
 
     # ✅ 本月支出排行
-    cursor = db.execute("""
+    cursor = db.execute(
+        """
         SELECT category, SUM(amount) as total
         FROM records
-        WHERE month = ?
+        WHERE month = ? AND user_id = ?
         GROUP BY category
         ORDER BY total DESC
         LIMIT 5
-    """, (month,))
+    """,
+        (month, user_id)
+    )
     monthly_spend = cursor.fetchall()
 
     # ✅ 历史总支出排行
-    cursor = db.execute("""
+    cursor = db.execute(
+        """
         SELECT category, SUM(amount) as total
         FROM records
+        WHERE user_id = ?
         GROUP BY category
         ORDER BY total DESC
         LIMIT 5
-    """)
+    """,
+        (user_id,)
+    )
     overall_spend = cursor.fetchall()
 
     # ✅ 本月收入排行
-    cursor = db.execute("""
+    cursor = db.execute(
+        """
         SELECT category, SUM(amount) as total
         FROM income
-        WHERE month = ?
+        WHERE month = ? AND user_id = ?
         GROUP BY category
         ORDER BY total DESC
         LIMIT 5
-    """, (month,))
+    """,
+        (month, user_id)
+    )
     monthly_income = cursor.fetchall()
 
     # ✅ 历史总收入排行
-    cursor = db.execute("""
+    cursor = db.execute(
+        """
         SELECT category, SUM(amount) as total
         FROM income
+        WHERE user_id = ?
         GROUP BY category
         ORDER BY total DESC
         LIMIT 5
-    """)
+    """,
+        (user_id,)
+    )
     overall_income = cursor.fetchall()
 
     # === 支出分析输出 ===
@@ -210,7 +246,7 @@ def analyze_spend(params):
 
 
 
-def add_category(params):
+def add_category(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
     category_type = params.get("类型", "支出").strip()  # 默认为“支出”
@@ -220,7 +256,10 @@ def add_category(params):
     if category_type not in ("支出", "收入"):
         return "⚠️ 分类类型无效，应为「支出」或「收入」"
 
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, user_id)
+    ).fetchone()
     if row:
         if row["type"] == category_type:
             return f"⚠️ 分类「{category}」已存在，无需重复添加。"
@@ -228,56 +267,68 @@ def add_category(params):
             return f"⚠️ 分类「{category}」已存在，类型为「{row['type']}」，与当前设置不一致，请更换名称或删除原分类。"
 
     # ✅ 插入新分类
-    db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (category, category_type))
+    db.execute(
+        "INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)",
+        (user_id, category, category_type)
+    )
     db.commit()
     return f"✅ 分类「{category}」（{category_type}）添加成功，快来使用吧！"
 
 
-def delete_category(params):
+def delete_category(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
     if not category:
         return "⚠️ 分类名不能为空"
 
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, user_id)
+    ).fetchone()
     if not row:
         return f"⚠️ 分类「{category}」不存在，无法删除。"
 
     category_type = row['type']
 
     if category_type == '支出':
-        db.execute("DELETE FROM records WHERE category = ?", (category,))
-        db.execute("DELETE FROM budgets WHERE category = ?", (category,))
+        db.execute("DELETE FROM records WHERE category = ? AND user_id = ?", (category, user_id))
+        db.execute("DELETE FROM budgets WHERE category = ? AND user_id = ?", (category, user_id))
     elif category_type == '收入':
-        db.execute("DELETE FROM income WHERE category = ?", (category,))
+        db.execute("DELETE FROM income WHERE category = ? AND user_id = ?", (category, user_id))
 
-    db.execute("DELETE FROM categories WHERE name = ?", (category,))
+    db.execute("DELETE FROM categories WHERE name = ? AND user_id = ?", (category, user_id))
     db.commit()
 
     return f"✅ 已彻底删除分类「{category}」（{category_type}）及其相关记录，清理完毕！"
 
-def budget_remain(params):
+def budget_remain(user_id, params):
     category = params.get("分类")
     month = params.get("月份") or datetime.now().strftime("%Y-%m")
 
     db = get_db()
 
     # ✅ 查询该月份的所有“支出”类预算信息
-    cursor = db.execute("""
+    cursor = db.execute(
+        """
         SELECT b.category, b.amount
         FROM budgets b
-        JOIN categories c ON b.category = c.name
-        WHERE b.month = ? AND c.type = '支出'
-    """, (month,))
+        JOIN categories c ON b.category = c.name AND c.user_id = b.user_id
+        WHERE b.month = ? AND b.user_id = ? AND c.type = '支出'
+    """,
+        (month, user_id)
+    )
     budget_map = {row['category']: float(row['amount']) for row in cursor.fetchall()}
 
     # ✅ 查询该月份的所有“支出”记录
-    cursor = db.execute("""
+    cursor = db.execute(
+        """
         SELECT category, SUM(amount) as total
         FROM records
-        WHERE month = ?
+        WHERE month = ? AND user_id = ?
         GROUP BY category
-    """, (month,))
+    """,
+        (month, user_id)
+    )
     spend_map = {row['category']: float(row['total']) for row in cursor.fetchall()}
 
     if category:
@@ -295,12 +346,14 @@ def budget_remain(params):
         return reply
 
 import re
-def call_deepseek_budget_advice(records, total_budget=None):
+def call_deepseek_budget_advice(user_id, records, total_budget=None, llm=None):
     import os, requests, json
 
+    llm = llm or {}
+
     print("开始分配预算")
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    url = "https://api.siliconflow.cn/v1/chat/completions"
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -308,7 +361,10 @@ def call_deepseek_budget_advice(records, total_budget=None):
 
     # ✅ 过滤掉收入类分类
     db = get_db()
-    cursor = db.execute("SELECT name FROM categories WHERE type = '支出'")
+    cursor = db.execute(
+        "SELECT name FROM categories WHERE type = '支出' AND user_id = ?",
+        (user_id,)
+    )
     valid_categories = set(row['name'] for row in cursor.fetchall())
 
     filtered_records = [
@@ -356,7 +412,7 @@ def call_deepseek_budget_advice(records, total_budget=None):
     )
 
     response = requests.post(url, headers=headers, json={
-        "model": "Pro/deepseek-ai/DeepSeek-V3",
+        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5
     })
@@ -366,15 +422,18 @@ def call_deepseek_budget_advice(records, total_budget=None):
 
 
 
-def suggest_budgets(params=None):
+def suggest_budgets(user_id, params=None, llm=None):
     db = get_db()
-    cursor = db.execute("SELECT category, amount, date FROM records")
+    cursor = db.execute(
+        "SELECT category, amount, date FROM records WHERE user_id = ?",
+        (user_id,)
+    )
     records = [dict(row) for row in cursor.fetchall()]
     if not records:
         return "📊 暂无支出记录，无法生成预算建议。"
 
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
-    llm_reply = call_deepseek_budget_advice(records, total)
+    llm_reply = call_deepseek_budget_advice(user_id, records, total, llm)
     print("🧠 LLM 预算建议回复：\n", llm_reply)
 
     # ✅ 解析 LLM 输出格式
@@ -389,23 +448,32 @@ def suggest_budgets(params=None):
         budget = float(budget)
 
         # ✅ 确保分类存在且是支出类型
-        row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+        row = db.execute(
+            "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+            (category, user_id)
+        ).fetchone()
         if row:
             if row['type'] != '支出':
                 continue  # 跳过收入分类
         else:
-            db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (category, '支出'))
+            db.execute(
+                "INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)",
+                (user_id, category, '支出')
+            )
 
         # ✅ 写入预算（无 year 字段）
-        db.execute("""
-            INSERT OR REPLACE INTO budgets (category, amount, cycle, month)
-            VALUES (?, ?, ?, ?)
-        """, (category, budget, "月", current_month))
+        db.execute(
+            """
+            INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (user_id, category, budget, "月", current_month)
+        )
 
     db.commit()
     return "✅ 已根据智能分析更新预算设置：\n" + llm_reply
 
-def query_income(params):
+def query_income(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
     time_range = params.get("时间范围", "").strip()
@@ -416,7 +484,10 @@ def query_income(params):
 
     # ✅ 查询所有收入记录
     if show_all:
-        cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
+        cursor = db.execute(
+            "SELECT * FROM income WHERE user_id = ? ORDER BY date DESC",
+            (user_id,)
+        )
         results = [dict(row) for row in cursor.fetchall()]
         total = sum(float(r["amount"]) for r in results)
         reply = f"📊 当前共记录 {len(results)} 笔收入，总计 ¥{total:.2f}\n"
@@ -425,8 +496,8 @@ def query_income(params):
         return reply + ("...（仅展示前10条）" if len(results) > 10 else "")
 
     # ✅ 聚合查询（可选时间范围 + 来源）
-    query = "SELECT SUM(amount) AS total FROM income WHERE 1=1"
-    args = []
+    query = "SELECT SUM(amount) AS total FROM income WHERE user_id = ?"
+    args = [user_id]
 
     if time_range:
         if len(time_range) == 7:  # 2025-06（按月）

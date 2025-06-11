@@ -23,12 +23,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onActivated, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 
 const userInput = ref('')
 const messages = ref([{ sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }])
 const loading = ref(false)
 const chatRef = ref(null)
+const router = useRouter()
+const currentUser = ref(localStorage.getItem('username') || '')
 
 async function sendMessage() {
   const msg = userInput.value.trim()
@@ -39,10 +42,19 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
+    const token = localStorage.getItem('token') || ''
+    const cfgRaw = localStorage.getItem('llmConfig')
+    let llm = null
+    if (cfgRaw && cfgRaw !== 'default') {
+      try { llm = JSON.parse(cfgRaw) } catch {}
+    }
     const res = await fetch('/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg })
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ message: msg, llm })
     })
     const data = await res.json()
     messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })
@@ -63,7 +75,24 @@ function scrollToBottom() {
   })
 }
 
-onMounted(scrollToBottom)
+onMounted(() => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    router.push('/login')
+  } else {
+    scrollToBottom()
+  }
+})
+
+onActivated(() => {
+  const name = localStorage.getItem('username') || ''
+  if (name !== currentUser.value) {
+    currentUser.value = name
+    messages.value = [
+      { sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }
+    ]
+  }
+})
 </script>
 
 <style scoped>

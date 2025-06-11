@@ -9,6 +9,8 @@ export default defineConfig({
     open: true,
     proxy: {
       '/chat': 'http://localhost:5000',
+      '/login': 'http://localhost:5000',
+      '/register': 'http://localhost:5000',
       '/records': 'http://localhost:5000',
       '/categories': 'http://localhost:5000',
       '/budgets': 'http://localhost:5000',

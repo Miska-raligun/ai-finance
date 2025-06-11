@@ -44,12 +44,14 @@
 
 <script setup>
 import { ref, onActivated, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 
 const activeTab = ref('expense')
 const refreshFlag = ref(0)
+const router = useRouter()
 
 onActivated(() => {
   refreshFlag.value++
@@ -61,7 +63,13 @@ function onStorage(e) {
   }
 }
 
-onMounted(() => window.addEventListener('storage', onStorage))
+onMounted(() => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    router.push('/login')
+  }
+  window.addEventListener('storage', onStorage)
+})
 onBeforeUnmount(() => window.removeEventListener('storage', onStorage))
 </script>
 

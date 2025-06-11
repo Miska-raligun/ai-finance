@@ -49,7 +49,7 @@
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import axios from 'axios'
+import api from '@/api'
 
 const props = defineProps({ refreshFlag: Number })
 const budgets = ref([])
@@ -60,7 +60,7 @@ const currentMonth = new Date().toISOString().slice(0, 7)
 const selectedMonth = ref(currentMonth)
 
 async function fetchBudgets() {
-  const res = await axios.get('/budgets', {
+  const res = await api.get('/budgets', {
     params: { month: selectedMonth.value }
   })
   budgets.value = res.data
@@ -68,7 +68,7 @@ async function fetchBudgets() {
 
 async function addOrUpdateBudget() {
   if (!newBudget.value.category || !newBudget.value.amount) return
-  await axios.post('/budgets', {
+  await api.post('/budgets', {
     ...newBudget.value,
     month: selectedMonth.value
   })

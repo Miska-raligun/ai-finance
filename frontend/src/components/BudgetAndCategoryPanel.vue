@@ -74,7 +74,7 @@
 import { ref, onMounted, watch } from 'vue'
 const emit = defineEmits(['refresh'])
 const props = defineProps({ refreshFlag: Number })
-import axios from 'axios'
+import api from '@/api'
 import CategoryManager from './CategoryManager.vue'
 
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
@@ -90,15 +90,15 @@ const budgetForm = ref({
 async function fetchBudgets() {
   const month = selectedMonth.value
   const [bRes, cRes] = await Promise.all([
-    axios.get('/budgets', { params: { month } }),
-    axios.get('/categories', { params: { type: 'expense' } })
+    api.get('/budgets', { params: { month } }),
+    api.get('/categories', { params: { type: 'expense' } })
   ])
   budgets.value = bRes.data
   expenseCategories.value = cRes.data.map(c => c.name)
 }
 
 async function submitBudget() {
-  await axios.post('/budgets', {
+  await api.post('/budgets', {
     category: budgetForm.value.category,
     amount: budgetForm.value.amount,
     month: selectedMonth.value
