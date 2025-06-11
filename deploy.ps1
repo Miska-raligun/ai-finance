@@ -11,7 +11,7 @@ if (-Not (Test-Path 'venv')) {
 pip install --upgrade pip
 pip install -r requirements.txt
 $env:FLASK_APP = 'app.py'
-$backendProc = Start-Process 'waitress-serve' '--host=0.0.0.0 --port=5000 app:app' -NoNewWindow -PassThru
+$backendProc = Start-Process 'waitress-serve' '--host=0.0.0.0 --thread=4 --port=5000 app:app' -NoNewWindow -PassThru
 deactivate
 Pop-Location
 
