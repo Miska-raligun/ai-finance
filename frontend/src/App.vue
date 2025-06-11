@@ -1,7 +1,7 @@
 <!-- src/App.vue 最终版本 -->
 <template>
   <el-container style="height: 100vh">
-    <el-aside v-if="route.path !== '/login'" width="200px" class="app-aside">
+    <el-aside v-if="!isMobile && route.path !== '/login'" width="200px" class="app-aside">
       <el-menu
         :default-active="active"
         class="el-menu-vertical-demo app-menu"
@@ -23,9 +23,32 @@
         </div>
       </el-card>
     </el-aside>
+    <el-drawer v-if="isMobile && route.path !== '/login'" v-model="showDrawer" :with-header="false" size="200px" class="app-aside">
+      <el-menu
+        :default-active="active"
+        class="el-menu-vertical-demo app-menu"
+        @select="handleSelect"
+        router
+      >
+        <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
+        <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
+      </el-menu>
+      <el-card class="user-panel" shadow="never">
+        <template #header>
+          <div class="user-title">当前用户：{{ username }}</div>
+        </template>
+        <div class="user-actions">
+          <el-button type="primary" @click="logout">退出</el-button>
+        </div>
+        <div class="user-actions">
+          <el-button @click="openConfigPanel">配置模型</el-button>
+        </div>
+      </el-card>
+    </el-drawer>
 
     <el-container>
       <el-main>
+        <el-button class="mobile-menu-btn" v-if="isMobile && route.path !== '/login'" @click="showDrawer = true">☰</el-button>
         <router-view v-slot="{ Component }">
           <keep-alive>
             <component :is="Component" />
@@ -55,7 +78,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { ref, watchEffect, onMounted, watch } from 'vue'
+import { ref, watchEffect, onMounted, watch, onBeforeUnmount } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,6 +88,18 @@ const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
 const username = ref('')
+const isMobile = ref(window.innerWidth < 600)
+const showDrawer = ref(false)
+
+function updateIsMobile() {
+  isMobile.value = window.innerWidth < 600
+}
+
+onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', updateIsMobile))
 
 watchEffect(() => {
   active.value = route.path
@@ -103,6 +138,7 @@ function useDefault() {
 
 function handleSelect(index) {
   router.push(index)
+  if (isMobile.value) showDrawer.value = false
 }
 
 function logout() {
@@ -147,6 +183,21 @@ body {
 .app-menu {
   flex-grow: 1;
 }
+
+.mobile-menu-btn {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+}
+
+@media (min-width: 600px) {
+  .mobile-menu-btn {
+    display: none;
+  }
+}
 </style>
+
+
 
 
