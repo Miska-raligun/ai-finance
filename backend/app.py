@@ -266,9 +266,9 @@ def chat():
 
     if intent in handlers:
         if intent == "suggest_budgets":
-            result = handlers[intent](params, llm_cfg)
+            result = handlers[intent](g.user_id, params, llm_cfg)
         else:
-            result = handlers[intent](params)
+            result = handlers[intent](g.user_id, params)
         print("📦 handler 执行结果：", result)
 
         if intent == "add_record":
@@ -301,33 +301,46 @@ def chat():
     return jsonify({"reply": reply}) 
 
 @app.route('/records')
+@login_required
 def get_records():
     db = get_db()
     month = request.args.get("month")
     if month:
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT *, strftime('%Y-%m', date) as month
             FROM records
-            WHERE strftime('%Y-%m', date) = ?
+            WHERE strftime('%Y-%m', date) = ? AND user_id = ?
             ORDER BY date DESC
-        """, (month,))
+        """,
+            (month, g.user_id)
+        )
     else:
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT *, strftime('%Y-%m', date) as month
             FROM records
+            WHERE user_id = ?
             ORDER BY date DESC
-        """)
+        """,
+            (g.user_id,)
+        )
     results = [dict(row) for row in cursor.fetchall()]
     return jsonify(results)
 
 @app.route('/records/<int:record_id>', methods=['DELETE'])
+@login_required
 def delete_record(record_id):
     db = get_db()
-    db.execute("DELETE FROM records WHERE id = ?", (record_id,))
+    db.execute(
+        "DELETE FROM records WHERE id = ? AND user_id = ?",
+        (record_id, g.user_id)
+    )
     db.commit()
     return jsonify({"success": True})
 
 @app.route('/records/<int:record_id>', methods=['PUT'])
+@login_required
 def update_record(record_id):
     data = request.get_json()
     category = data.get('category', '').strip()
@@ -340,31 +353,39 @@ def update_record(record_id):
     db.execute(
         """
         UPDATE records SET category = ?, amount = ?, note = ?, date = ?, month = ?, year = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
         """,
-        (category, amount, note, date, month, year, record_id),
+        (category, amount, note, date, month, year, record_id, g.user_id),
     )
     db.commit()
     return jsonify({"success": True})
 
 @app.route('/income')
+@login_required
 def get_income():
     db = get_db()
     month = request.args.get("month")
 
     if month:
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT id, category, amount, note, date, month, year
             FROM income
-            WHERE month = ?
+            WHERE month = ? AND user_id = ?
             ORDER BY date DESC
-        """, (month,))
+        """,
+            (month, g.user_id)
+        )
     else:
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT id, category, amount, note, date, month, year
             FROM income
+            WHERE user_id = ?
             ORDER BY date DESC
-        """)
+        """,
+            (g.user_id,)
+        )
 
     results = [dict(row) for row in cursor.fetchall()]
 
@@ -376,13 +397,18 @@ def get_income():
     return jsonify(results)
 
 @app.route('/income/<int:income_id>', methods=['DELETE'])
+@login_required
 def delete_income(income_id):
     db = get_db()
-    db.execute("DELETE FROM income WHERE id = ?", (income_id,))
+    db.execute(
+        "DELETE FROM income WHERE id = ? AND user_id = ?",
+        (income_id, g.user_id)
+    )
     db.commit()
     return jsonify({"success": True})
 
 @app.route('/income/<int:income_id>', methods=['PUT'])
+@login_required
 def update_income(income_id):
     data = request.get_json()
     category = data.get('category', '').strip()
@@ -395,14 +421,15 @@ def update_income(income_id):
     db.execute(
         """
         UPDATE income SET category = ?, amount = ?, note = ?, date = ?, month = ?, year = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
         """,
-        (category, amount, note, date, month, year, income_id),
+        (category, amount, note, date, month, year, income_id, g.user_id),
     )
     db.commit()
     return jsonify({"success": True})
 
 @app.route("/categories", methods=["GET"])
+@login_required
 def get_categories():
     db = get_db()
     category_type = request.args.get("type")
@@ -414,11 +441,14 @@ def get_categories():
 
     if category_type in type_map:
         cursor = db.execute(
-            "SELECT * FROM categories WHERE type = ? ORDER BY name ASC",
-            (type_map[category_type],)
+            "SELECT * FROM categories WHERE type = ? AND user_id = ? ORDER BY name ASC",
+            (type_map[category_type], g.user_id)
         )
     else:
-        cursor = db.execute("SELECT * FROM categories ORDER BY name ASC")
+        cursor = db.execute(
+            "SELECT * FROM categories WHERE user_id = ? ORDER BY name ASC",
+            (g.user_id,)
+        )
 
     results = [dict(row) for row in cursor.fetchall()]
     if not isinstance(results, list):
@@ -428,6 +458,7 @@ def get_categories():
 
 month = datetime.now().strftime("%Y-%m")
 @app.route('/budgets')
+@login_required
 def get_budgets():
     db = get_db()
     month = request.args.get('month')
@@ -435,20 +466,26 @@ def get_budgets():
 
     if month:
         # ✅ 仅查指定月份支出类预算
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT b.category, b.amount
             FROM budgets b
-            JOIN categories c ON b.category = c.name
-            WHERE b.month = ? AND c.type = '支出'
-        """, (month,))
+            JOIN categories c ON b.category = c.name AND c.user_id = b.user_id
+            WHERE b.month = ? AND b.user_id = ? AND c.type = '支出'
+        """,
+            (month, g.user_id)
+        )
         budgets = cursor.fetchall()
 
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT category, SUM(amount) as total
             FROM records
-            WHERE strftime('%Y-%m', date) = ?
+            WHERE strftime('%Y-%m', date) = ? AND user_id = ?
             GROUP BY category
-        """, (month,))
+        """,
+            (month, g.user_id)
+        )
         spend_map = {row['category']: row['total'] for row in cursor.fetchall()}
 
         for b in budgets:
@@ -463,19 +500,26 @@ def get_budgets():
 
     else:
         # ✅ 查所有月份的支出类预算
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT b.category, b.amount, b.month
             FROM budgets b
-            JOIN categories c ON b.category = c.name
-            WHERE c.type = '支出'
-        """)
+            JOIN categories c ON b.category = c.name AND c.user_id = b.user_id
+            WHERE b.user_id = ? AND c.type = '支出'
+        """,
+            (g.user_id,)
+        )
         all_budgets = cursor.fetchall()
 
-        cursor = db.execute("""
+        cursor = db.execute(
+            """
             SELECT category, strftime('%Y-%m', date) as month, SUM(amount) as total
             FROM records
+            WHERE user_id = ?
             GROUP BY category, month
-        """)
+        """,
+            (g.user_id,)
+        )
         spend_map = {(row['category'], row['month']): row['total'] for row in cursor.fetchall()}
 
         for b in all_budgets:
@@ -492,6 +536,7 @@ def get_budgets():
     return jsonify(result)
 
 @app.route("/categories", methods=["POST"])
+@login_required
 def add_category_manual():
     data = request.get_json()
     name = data.get("name", "").strip()
@@ -504,7 +549,10 @@ def add_category_manual():
 
     db = get_db()
     try:
-        db.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (name, category_type))
+        db.execute(
+            "INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)",
+            (g.user_id, name, category_type)
+        )
         db.commit()
         return jsonify({"success": True})
     except Exception as e:
@@ -513,11 +561,15 @@ def add_category_manual():
 
 
 @app.route("/categories/<name>", methods=["DELETE"])
+@login_required
 def delete_category_manual(name):
     db = get_db()
 
     # ✅ 获取分类类型
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (name,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (name, g.user_id)
+    ).fetchone()
     if not row:
         return jsonify({"error": f"分类「{name}」不存在"}), 404
 
@@ -525,18 +577,19 @@ def delete_category_manual(name):
 
     # ✅ 删除记录
     if category_type == "支出":
-        db.execute("DELETE FROM records WHERE category = ?", (name,))
-        db.execute("DELETE FROM budgets WHERE category = ?", (name,))
+        db.execute("DELETE FROM records WHERE category = ? AND user_id = ?", (name, g.user_id))
+        db.execute("DELETE FROM budgets WHERE category = ? AND user_id = ?", (name, g.user_id))
     elif category_type == "收入":
-        db.execute("DELETE FROM income WHERE source = ?", (name,))
+        db.execute("DELETE FROM income WHERE source = ? AND user_id = ?", (name, g.user_id))
 
     # ✅ 删除分类本身
-    db.execute("DELETE FROM categories WHERE name = ?", (name,))
+    db.execute("DELETE FROM categories WHERE name = ? AND user_id = ?", (name, g.user_id))
     db.commit()
 
     return jsonify({"success": True})
 
 @app.route("/budgets", methods=["POST"])
+@login_required
 def set_budget_manual():
     data = request.get_json()
     category = data.get("category", "").strip()
@@ -550,23 +603,30 @@ def set_budget_manual():
     db = get_db()
 
     # ✅ 检查分类是否存在且为支出类型
-    row = db.execute("SELECT type FROM categories WHERE name = ?", (category,)).fetchone()
+    row = db.execute(
+        "SELECT type FROM categories WHERE name = ? AND user_id = ?",
+        (category, g.user_id)
+    ).fetchone()
     if not row:
         return jsonify({"error": f"分类「{category}」不存在"}), 400
     if row["type"] != "支出":
         return jsonify({"error": f"分类「{category}」不是支出类型，无法设置预算"}), 400
 
     # ✅ 写入预算
-    db.execute("""
-        INSERT OR REPLACE INTO budgets (category, amount, cycle, month)
-        VALUES (?, ?, ?, ?)
-    """, (category, amount, cycle, month))
+    db.execute(
+        """
+        INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month)
+        VALUES (?, ?, ?, ?, ?)
+    """,
+        (g.user_id, category, amount, cycle, month)
+    )
     db.commit()
     return jsonify({"success": True})
 
 
 
 @app.route("/stats/monthly", methods=["GET"])
+@login_required
 def monthly_stats():
     db = get_db()
     year = request.args.get("year")
@@ -575,18 +635,18 @@ def monthly_stats():
         spend_cursor = db.execute(
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
-            FROM records WHERE year = ?
+            FROM records WHERE year = ? AND user_id = ?
             GROUP BY month
             """,
-            (year,),
+            (year, g.user_id),
         )
         income_cursor = db.execute(
             """
             SELECT month, SUM(amount) AS total
-            FROM income WHERE year = ?
+            FROM income WHERE year = ? AND user_id = ?
             GROUP BY month
             """,
-            (year,),
+            (year, g.user_id),
         )
     else:
         # 无年份限制，统计全部月份
@@ -594,15 +654,19 @@ def monthly_stats():
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
             FROM records
+            WHERE user_id = ?
             GROUP BY month
-            """
+            """,
+            (g.user_id,)
         )
         income_cursor = db.execute(
             """
             SELECT month, SUM(amount) AS total
             FROM income
+            WHERE user_id = ?
             GROUP BY month
-            """
+            """,
+            (g.user_id,)
         )
 
     spend_data = {row['month']: float(row['total']) for row in spend_cursor.fetchall()}
@@ -624,6 +688,7 @@ def monthly_stats():
     return jsonify(result)
 
 @app.route("/stats/by-category", methods=["GET"])
+@login_required
 def category_stats():
     db = get_db()
     month = request.args.get("month")
@@ -631,28 +696,30 @@ def category_stats():
 
     if month:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE month = ? GROUP BY category",
-            (month,),
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE month = ? AND user_id = ? GROUP BY category",
+            (month, g.user_id),
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE month = ? GROUP BY category",
-            (month,),
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE month = ? AND user_id = ? GROUP BY category",
+            (month, g.user_id),
         )
     elif year:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE year = ? GROUP BY category",
-            (year,),
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE year = ? AND user_id = ? GROUP BY category",
+            (year, g.user_id),
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE year = ? GROUP BY category",
-            (year,),
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE year = ? AND user_id = ? GROUP BY category",
+            (year, g.user_id),
         )
     else:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records GROUP BY category"
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE user_id = ? GROUP BY category",
+            (g.user_id,)
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income GROUP BY category"
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE user_id = ? GROUP BY category",
+            (g.user_id,)
         )
 
     income_result = [
@@ -666,24 +733,31 @@ def category_stats():
     return jsonify(spend_result + income_result)
 
 @app.route("/stats/summary", methods=["GET"])
+@login_required
 def summary_stats():
     db = get_db()
     month = request.args.get("month") or datetime.now().strftime("%Y-%m")
 
     # ✅ 查询该月总支出
-    spend_cursor = db.execute("""
+    spend_cursor = db.execute(
+        """
         SELECT SUM(amount) AS total
         FROM records
-        WHERE month = ?
-    """, (month,))
+        WHERE month = ? AND user_id = ?
+    """,
+        (month, g.user_id)
+    )
     spend_total = float(spend_cursor.fetchone()["total"] or 0.0)
 
     # ✅ 查询该月总收入
-    income_cursor = db.execute("""
+    income_cursor = db.execute(
+        """
         SELECT SUM(amount) AS total
         FROM income
-        WHERE month = ?
-    """, (month,))
+        WHERE month = ? AND user_id = ?
+    """,
+        (month, g.user_id)
+    )
     income_total = float(income_cursor.fetchone()["total"] or 0.0)
 
     # ✅ 差额计算
@@ -697,6 +771,7 @@ def summary_stats():
     })
 
 @app.route("/stats/daily")
+@login_required
 def daily_stats():
     db = get_db()
     month = request.args.get("month")
@@ -704,21 +779,27 @@ def daily_stats():
         return jsonify({"error": "缺少参数 month"}), 400
 
     # 支出
-    spend_cursor = db.execute("""
+    spend_cursor = db.execute(
+        """
         SELECT date, SUM(amount) AS total
         FROM records
-        WHERE strftime('%Y-%m', date) = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
         GROUP BY date
-    """, (month,))
+    """,
+        (month, g.user_id)
+    )
     spend_map = {row['date']: float(row['total']) for row in spend_cursor.fetchall()}
 
     # 收入
-    income_cursor = db.execute("""
+    income_cursor = db.execute(
+        """
         SELECT date, SUM(amount) AS total
         FROM income
-        WHERE strftime('%Y-%m', date) = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
         GROUP BY date
-    """, (month,))
+    """,
+        (month, g.user_id)
+    )
     income_map = {row['date']: float(row['total']) for row in income_cursor.fetchall()}
 
     all_dates = sorted(set(spend_map) | set(income_map))

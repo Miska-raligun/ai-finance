@@ -30,7 +30,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import axios from 'axios'
+import api from '@/api'
 import { use } from 'echarts/core'
 import VChart from 'vue-echarts'
 import { PieChart, LineChart } from 'echarts/charts'
@@ -75,10 +75,10 @@ const fetchChartData = async () => {
     catParams.year = time
   }
   const [cats, trend] = await Promise.all([
-    axios.get('/stats/by-category', { params: catParams }),
+    api.get('/stats/by-category', { params: catParams }),
     mode.value === 'month'
-      ? axios.get('/stats/daily', { params: { month: time } })
-      : axios.get('/stats/monthly', { params: time ? { year: time } : {} })
+      ? api.get('/stats/daily', { params: { month: time } })
+      : api.get('/stats/monthly', { params: time ? { year: time } : {} })
   ])
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')

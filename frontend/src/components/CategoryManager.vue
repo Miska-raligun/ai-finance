@@ -21,7 +21,7 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 const emit = defineEmits(['refresh'])
-import axios from 'axios'
+import api from '@/api'
 const props = defineProps({
   refreshFlag: Number,
   type: { type: String, default: 'expense' } // 'expense' or 'income'
@@ -31,7 +31,7 @@ const categories = ref([])
 const newCategory = ref('')
 
 async function fetchCategories() {
-  const res = await axios.get('/categories', {
+  const res = await api.get('/categories', {
     params: { type: props.type }
   })
   categories.value = res.data
@@ -39,7 +39,7 @@ async function fetchCategories() {
 
 async function addCategory() {
   if (!newCategory.value) return
-  await axios.post('/categories', {
+  await api.post('/categories', {
     name: newCategory.value,
     type: props.type === 'income' ? '收入' : '支出'
   })
@@ -49,7 +49,7 @@ async function addCategory() {
 }
 
 async function deleteCategory(name) {
-  await axios.delete(`/categories/${encodeURIComponent(name)}`)
+  await api.delete(`/categories/${encodeURIComponent(name)}`)
   await fetchCategories()
   emit('refresh')
 }

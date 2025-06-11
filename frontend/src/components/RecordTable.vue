@@ -101,7 +101,7 @@
 
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
-import axios from 'axios'
+import api from '@/api'
 
 const props = defineProps({
   type: { type: String, default: 'expense' }, // 'expense' or 'income'
@@ -146,7 +146,7 @@ function startEdit(row) {
 
 async function saveEdit(row) {
   const url = props.type === 'expense' ? `/records/${row.id}` : `/income/${row.id}`
-  await axios.put(url, row)
+  await api.put(url, row)
   editingId.value = null
   await fetchData()
   emit('refresh')
@@ -160,7 +160,7 @@ function cancelEdit() {
 async function deleteSelected() {
   for (const r of selectedRows.value) {
     const url = props.type === 'expense' ? `/records/${r.id}` : `/income/${r.id}`
-    await axios.delete(url)
+    await api.delete(url)
   }
   selectedRows.value = []
   await fetchData()
@@ -181,8 +181,8 @@ function applyFilter() {
 async function fetchData() {
   try {
     const [recRes, catRes] = await Promise.all([
-      axios.get(props.type === 'expense' ? '/records' : '/income'),
-      axios.get('/categories', {
+      api.get(props.type === 'expense' ? '/records' : '/income'),
+      api.get('/categories', {
         params: {
           type: props.type === 'expense' ? 'expense' : 'income'
         }
@@ -195,7 +195,7 @@ async function fetchData() {
     console.log("📋 收入数据：", rec)
     console.log("📂 分类数据：", cats)
     if (props.type === 'expense') {
-      const budgets = (await axios.get('/budgets')).data
+      const budgets = (await api.get('/budgets')).data
       const budgetMap = {}
       for (const b of budgets) {
         budgetMap[b.category + '_' + b.month] = b.amount
