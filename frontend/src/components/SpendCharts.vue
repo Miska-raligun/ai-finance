@@ -5,11 +5,7 @@
       📊 消费图表
     </template>
 
-    <el-form
-    :inline="true"
-    size="small"
-    style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;"
-    >
+    <el-form :inline="true" size="small">
     <el-form-item label="月份">
         <el-date-picker
         v-model="selectedMonth"
@@ -99,6 +95,22 @@ async function drawChart() {
 onMounted(drawChart)
 watch(() => props.refreshFlag, drawChart)
 </script>
+
+<style scoped>
+form {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
 
 
 

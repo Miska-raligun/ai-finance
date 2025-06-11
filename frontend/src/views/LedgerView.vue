@@ -25,7 +25,7 @@
     </el-tabs>
 
     <!-- 下半部分：左右两栏布局 -->
-    <div style="display: flex; gap: 20px; margin-top: 20px; align-items: flex-start">
+    <div class="ledger-layout">
       <!-- 左侧：预算管理和分类添加 -->
       <div style="flex: 1">
         <BudgetAndCategoryPanel
@@ -72,6 +72,21 @@ onMounted(() => {
 })
 onBeforeUnmount(() => window.removeEventListener('storage', onStorage))
 </script>
+
+<style scoped>
+.ledger-layout {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+  align-items: flex-start;
+}
+
+@media (max-width: 600px) {
+  .ledger-layout {
+    flex-direction: column;
+  }
+}
+</style>
 
 
 

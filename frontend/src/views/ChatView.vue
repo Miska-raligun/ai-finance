@@ -107,6 +107,7 @@ onActivated(() => {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
+  padding-bottom: 70px;
   background-color: #f9f9f9;
 }
 
@@ -138,7 +139,9 @@ onActivated(() => {
   padding: 10px;
   border-top: 1px solid #ddd;
   background: #fff;
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: 0;
   z-index: 100;
 }
