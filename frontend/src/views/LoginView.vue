@@ -57,5 +57,6 @@ async function onRegister() {
   justify-content: center;
   align-items: center;
   height: 100vh;
+  height: 100dvh;
 }
 </style>

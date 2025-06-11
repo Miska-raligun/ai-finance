@@ -99,6 +99,7 @@ onActivated(() => {
 .chat-page {
   position: relative;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }

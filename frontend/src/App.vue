@@ -1,6 +1,6 @@
 <!-- src/App.vue 最终版本 -->
 <template>
-  <el-container style="height: 100vh">
+  <el-container style="height: 100vh; height: 100dvh">
     <el-aside v-if="!isMobile && route.path !== '/login'" width="200px" class="app-aside">
       <el-menu
         :default-active="active"
