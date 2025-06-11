@@ -27,6 +27,14 @@ Copy-Item -Path 'frontend\dist' -Destination $frontendDest -Recurse
 
 # === Electron Packaging ===
 Write-Host '[electron] Installing dependencies and packaging...'
+
+# Remove old package directory if it exists
+$packageDir = 'electron\ai-finance-win32-x64'
+if (Test-Path $packageDir) {
+    Get-ChildItem $packageDir -Recurse -Force | Remove-Item -Force -ErrorAction SilentlyContinue
+    Remove-Item $packageDir -Force
+}
+
 Push-Location electron
 
 if (-Not (Test-Path 'node_modules')) {

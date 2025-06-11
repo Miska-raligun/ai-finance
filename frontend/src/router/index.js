@@ -1,4 +1,5 @@
-import { createRouter, createWebHistory } from 'vue-router'
+// 使用 hash 模式以便打包后的本地文件也能正常路由
+import { createRouter, createWebHashHistory } from 'vue-router'
 import ChatView from '../views/ChatView.vue'
 import LedgerView from '../views/LedgerView.vue'
 import LoginView from '../views/LoginView.vue'
@@ -11,7 +12,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes
 })
 

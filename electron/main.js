@@ -18,7 +18,15 @@ function createWindow() {
 app.whenReady().then(() => {
   const backendPath = path.join(__dirname, 'backend', process.platform === 'win32' ? 'ai-finance-backend.exe' : 'app.py');
   if (process.platform === 'win32') {
-    backend = spawn(backendPath);
+    backend = spawn(backendPath, [], { cwd: path.join(__dirname, 'backend') });
+
+    // 将后端输出重定向到 Electron 控制台，方便调试
+    backend.stdout.on('data', data => {
+      console.log(`[backend] ${data}`.trim());
+    });
+    backend.stderr.on('data', data => {
+      console.error(`[backend] ${data}`.trim());
+    });
   }
 
   createWindow();
