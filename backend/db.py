@@ -21,6 +21,7 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             category TEXT,
             amount REAL,
             note TEXT,
@@ -34,11 +35,12 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS budgets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             category TEXT,
             amount REAL,
             cycle TEXT DEFAULT 'monthly',
             month TEXT,
-            UNIQUE(category, month)
+            UNIQUE(category, month, user_id)
         )
     """)
 
@@ -46,8 +48,10 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            type TEXT CHECK(type IN ('支出', '收入')) DEFAULT '支出'
+            user_id INTEGER,
+            name TEXT,
+            type TEXT CHECK(type IN ('支出', '收入')) DEFAULT '支出',
+            UNIQUE(name, user_id)
         )
     """)
 
@@ -55,6 +59,7 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS income (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             category TEXT,     -- 收入来源分类名（如“工资”、“奖金”等）
             amount REAL,       -- 收入金额
             note TEXT,         -- 备注（可选）

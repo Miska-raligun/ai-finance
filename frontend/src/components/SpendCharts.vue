@@ -38,7 +38,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import axios from 'axios'
+import api from '@/api'
 import Chart from 'chart.js/auto'
 
 const props = defineProps({ refreshFlag: Number })
@@ -53,7 +53,7 @@ function resetMonth() {
 }
 
 async function drawChart() {
-  const res = await axios.get('/records', {
+  const res = await api.get('/records', {
     params: selectedMonth.value ? { month: selectedMonth.value } : {}
   })
   const data = res.data
