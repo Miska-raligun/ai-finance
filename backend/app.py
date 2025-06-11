@@ -85,12 +85,14 @@ INTENT_ALIAS = {
     "add_record": "add_record"
 }
 
-def call_deepseek_intent(message):
+def call_deepseek_intent(message, llm=None):
     import os, requests
 
+    llm = llm or {}
+
     today_str = datetime.now().strftime("%Y-%m-%d")
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    url = "https://api.siliconflow.cn/v1/chat/completions"
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -119,7 +121,7 @@ def call_deepseek_intent(message):
     )
 
     payload = {
-        "model": "Pro/deepseek-ai/DeepSeek-V3",
+        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
         "temperature": 0.7,
         "messages": [
             {"role": "system", "content": prompt},
@@ -145,11 +147,13 @@ def call_deepseek_intent(message):
         print("DeepSeek 调用失败:", e)
         return "意图：unknown\\n参数："
 
-def call_deepseek_summary(user_msg, handler_result):
+def call_deepseek_summary(user_msg, handler_result, llm=None):
     import os, requests
 
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    url = "https://api.siliconflow.cn/v1/chat/completions"
+    llm = llm or {}
+
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -167,7 +171,7 @@ def call_deepseek_summary(user_msg, handler_result):
     ).format(user_msg=user_msg, handler_result=handler_result)
 
     data = {
-        "model": "Pro/deepseek-ai/DeepSeek-V3",
+        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
         "messages": [
             {"role": "system", "content": "你是一个善于总结和分析的财务顾问。"},
             {"role": "user", "content": summary_prompt}
@@ -186,10 +190,10 @@ def call_deepseek_summary(user_msg, handler_result):
         print("❌ DeepSeek API unexpected response:", result)
         return "❌ 分析失败：LLM 响应格式异常"
 
-def call_deepseek_chat(history):
+def call_deepseek_chat(history, llm=None):
     """当用户没有执行记账相关操作时，与其闲聊。"""
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    url = "https://api.siliconflow.cn/v1/chat/completions"
+    api_key = (llm or {}).get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = (llm or {}).get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -203,7 +207,7 @@ def call_deepseek_chat(history):
     messages = [{"role": "system", "content": prompt}] + history[-10:]
 
     data = {
-        "model": "Pro/deepseek-ai/DeepSeek-V3",
+        "model": (llm or {}).get("model") or "Pro/deepseek-ai/DeepSeek-V3",
         "messages": messages,
     }
 
@@ -243,6 +247,7 @@ def parse_response(text):
 @login_required
 def chat():
     data = request.get_json()
+    llm_cfg = data.get("llm") or {}
     user_msg = data.get("message", "")
     latest_msg = user_msg
     if isinstance(user_msg, str):
@@ -254,13 +259,16 @@ def chat():
         del chat_history[:-10]
 
     print("最新消息: ",latest_msg)
-    llm_output = call_deepseek_intent(latest_msg)
+    llm_output = call_deepseek_intent(latest_msg, llm_cfg)
     print("🧠 LLM 原始结构化输出：", llm_output)
 
     intent, params = parse_response(llm_output)
 
     if intent in handlers:
-        result = handlers[intent](params)
+        if intent == "suggest_budgets":
+            result = handlers[intent](params, llm_cfg)
+        else:
+            result = handlers[intent](params)
         print("📦 handler 执行结果：", result)
 
         if intent == "add_record":
@@ -279,11 +287,11 @@ def chat():
             for row in cursor.fetchall():
                 print(dict(row))
         # 用 LLM 进行总结生成自然语言
-        reply = call_deepseek_summary(latest_msg, result)
+        reply = call_deepseek_summary(latest_msg, result, llm_cfg)
     else:
         # 如果未识别出意图，直接和用户闲聊几句
         print("llm输入:",chat_history)
-        reply = call_deepseek_chat(chat_history)
+        reply = call_deepseek_chat(chat_history, llm_cfg)
 
     # 记录 assistant 回复
     chat_history.append({"role": "assistant", "content": reply})

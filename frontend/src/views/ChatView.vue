@@ -42,13 +42,18 @@ async function sendMessage() {
 
   try {
     const token = localStorage.getItem('token') || ''
+    const cfgRaw = localStorage.getItem('llmConfig')
+    let llm = null
+    if (cfgRaw && cfgRaw !== 'default') {
+      try { llm = JSON.parse(cfgRaw) } catch {}
+    }
     const res = await fetch('/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ message: msg })
+      body: JSON.stringify({ message: msg, llm })
     })
     const data = await res.json()
     messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })

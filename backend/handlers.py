@@ -295,12 +295,14 @@ def budget_remain(params):
         return reply
 
 import re
-def call_deepseek_budget_advice(records, total_budget=None):
+def call_deepseek_budget_advice(records, total_budget=None, llm=None):
     import os, requests, json
 
+    llm = llm or {}
+
     print("开始分配预算")
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    url = "https://api.siliconflow.cn/v1/chat/completions"
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -356,7 +358,7 @@ def call_deepseek_budget_advice(records, total_budget=None):
     )
 
     response = requests.post(url, headers=headers, json={
-        "model": "Pro/deepseek-ai/DeepSeek-V3",
+        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5
     })
@@ -366,7 +368,7 @@ def call_deepseek_budget_advice(records, total_budget=None):
 
 
 
-def suggest_budgets(params=None):
+def suggest_budgets(params=None, llm=None):
     db = get_db()
     cursor = db.execute("SELECT category, amount, date FROM records")
     records = [dict(row) for row in cursor.fetchall()]
@@ -374,7 +376,7 @@ def suggest_budgets(params=None):
         return "📊 暂无支出记录，无法生成预算建议。"
 
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
-    llm_reply = call_deepseek_budget_advice(records, total)
+    llm_reply = call_deepseek_budget_advice(records, total, llm)
     print("🧠 LLM 预算建议回复：\n", llm_reply)
 
     # ✅ 解析 LLM 输出格式
