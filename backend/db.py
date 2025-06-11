@@ -7,6 +7,12 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+def column_exists(cur, table, column):
+    """Check if a column exists in a SQLite table."""
+    cur.execute(f"PRAGMA table_info({table})")
+    return any(row[1] == column for row in cur.fetchall())
+
+
 def init_db():
     conn = get_db()
     cur = conn.cursor()
@@ -79,6 +85,11 @@ def init_db():
         )
     """
     )
+
+    # 兼容旧版数据库，补充缺失的 user_id 字段
+    for tbl in ("records", "budgets", "categories", "income"):
+        if not column_exists(cur, tbl, "user_id"):
+            cur.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER")
 
     conn.commit()
     conn.close()

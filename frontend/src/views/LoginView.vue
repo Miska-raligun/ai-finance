@@ -29,6 +29,7 @@ async function onLogin() {
   const data = await res.json()
   if (data.token) {
     localStorage.setItem('token', data.token)
+    localStorage.setItem('username', username.value)
     router.push('/chat')
   } else {
     alert(data.error || '登录失败')
@@ -43,7 +44,7 @@ async function onRegister() {
   })
   const data = await res.json()
   if (data.success) {
-    alert('注册成功，请登录')
+    await onLogin()
   } else {
     alert(data.error || '注册失败')
   }
