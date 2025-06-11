@@ -1,7 +1,7 @@
 <!-- src/App.vue 最终版本 -->
 <template>
   <el-container style="height: 100vh">
-    <el-aside width="200px" style="background: #f5f5f5;">
+    <el-aside v-if="route.path !== '/login'" width="200px" style="background: #f5f5f5;">
       <el-menu
         :default-active="active"
         class="el-menu-vertical-demo"

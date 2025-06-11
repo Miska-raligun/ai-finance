@@ -1,10 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from db import init_db, get_db
 from handlers import *
 from dotenv import load_dotenv
-import os, requests
+import os, requests, secrets
 from flask_cors import CORS
 from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
@@ -13,6 +14,56 @@ load_dotenv()  # 加载 .env 文件
 
 # 在内存中维护最近10条对话记录
 chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
+
+# ===== 简易用户认证 =====
+tokens = {}
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth = request.headers.get("Authorization", "")
+        token = auth.replace("Bearer ", "")
+        user_id = tokens.get(token)
+        if not user_id:
+            return jsonify({"error": "Unauthorized"}), 401
+        g.user_id = user_id
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.route("/register", methods=["POST"])
+def register():
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    if not username or not password:
+        return jsonify({"error": "用户名和密码不能为空"}), 400
+
+    db = get_db()
+    cursor = db.execute("SELECT id FROM users WHERE username = ?", (username,))
+    if cursor.fetchone():
+        return jsonify({"error": "用户名已存在"}), 400
+
+    pw_hash = generate_password_hash(password)
+    db.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, pw_hash))
+    db.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    db = get_db()
+    row = db.execute("SELECT id, password FROM users WHERE username = ?", (username,)).fetchone()
+    if not row or not check_password_hash(row["password"], password):
+        return jsonify({"error": "用户名或密码错误"}), 400
+
+    token = secrets.token_hex(16)
+    tokens[token] = row["id"]
+    return jsonify({"token": token})
 
 handlers = {
     "add_record": add_record,
@@ -189,6 +240,7 @@ def parse_response(text):
     return intent, params
 
 @app.route("/chat", methods=["POST"])
+@login_required
 def chat():
     data = request.get_json()
     user_msg = data.get("message", "")

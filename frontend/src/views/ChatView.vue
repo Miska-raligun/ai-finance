@@ -24,11 +24,13 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 
 const userInput = ref('')
 const messages = ref([{ sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }])
 const loading = ref(false)
 const chatRef = ref(null)
+const router = useRouter()
 
 async function sendMessage() {
   const msg = userInput.value.trim()
@@ -39,9 +41,13 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
+    const token = localStorage.getItem('token') || ''
     const res = await fetch('/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({ message: msg })
     })
     const data = await res.json()
@@ -63,7 +69,14 @@ function scrollToBottom() {
   })
 }
 
-onMounted(scrollToBottom)
+onMounted(() => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    router.push('/login')
+  } else {
+    scrollToBottom()
+  }
+})
 </script>
 
 <style scoped>
