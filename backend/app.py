@@ -2,10 +2,19 @@ from flask import Flask, request, jsonify, g
 from db import init_db, get_db
 from handlers import *
 from dotenv import load_dotenv
-import os, requests, secrets
+import os, requests, secrets, logging
 from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
 app = Flask(__name__)
 CORS(app)

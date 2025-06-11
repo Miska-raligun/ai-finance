@@ -57,6 +57,9 @@ async function sendMessage() {
       body: JSON.stringify({ message: msg, llm })
     })
     const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Server error')
+    }
     messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })
     if (data.reply?.startsWith('✅')) {
       localStorage.setItem('record_added', Date.now())
