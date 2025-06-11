@@ -99,6 +99,7 @@ onActivated(() => {
 .chat-page {
   position: relative;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -107,6 +108,7 @@ onActivated(() => {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
+  padding-bottom: 70px;
   background-color: #f9f9f9;
 }
 
