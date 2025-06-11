@@ -6,6 +6,7 @@ import os, requests, secrets, logging
 #from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+import signal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -832,6 +833,16 @@ def daily_stats():
         })
 
     return jsonify(result)
+
+@app.route('/shutdown', methods=['POST'])
+def shutdown():
+    """Stop the backend process when the frontend is closed."""
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func:
+        func()
+    else:
+        os.kill(os.getpid(), signal.SIGTERM)
+    return jsonify({'success': True})
 
 from waitress import serve
 serve(app, host="0.0.0.0", port=5000)

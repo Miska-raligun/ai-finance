@@ -11,3 +11,11 @@ app.use(router)
 app.use(ElementPlus)
 
 app.mount('#app')
+
+window.addEventListener('beforeunload', () => {
+  try {
+    navigator.sendBeacon('/shutdown')
+  } catch (e) {
+    fetch('/shutdown', { method: 'POST' })
+  }
+})
