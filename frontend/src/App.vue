@@ -11,6 +11,11 @@
         <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
         <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
       </el-menu>
+      <div style="padding: 10px; text-align: center;">
+        <div style="margin-bottom:6px;">当前用户：{{ username }}</div>
+        <el-button size="small" @click="logout" style="margin-bottom:6px; width:100%">退出</el-button>
+        <el-button size="small" @click="openConfigPanel" style="width:100%">重新配置模型</el-button>
+      </div>
     </el-aside>
 
     <el-container>
@@ -53,9 +58,14 @@ const showConfig = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
+const username = ref(localStorage.getItem('username') || '')
 
 watchEffect(() => {
   active.value = route.path
+})
+
+watchEffect(() => {
+  username.value = localStorage.getItem('username') || ''
 })
 
 function checkConfig() {
@@ -84,6 +94,18 @@ function useDefault() {
 
 function handleSelect(index) {
   router.push(index)
+}
+
+function logout() {
+  const token = localStorage.getItem('token') || ''
+  fetch('/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }).catch(() => {})
+  localStorage.removeItem('token')
+  localStorage.removeItem('username')
+  router.push('/login')
+}
+
+function openConfigPanel() {
+  showConfig.value = true
 }
 </script>
 

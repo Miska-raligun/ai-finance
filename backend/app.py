@@ -65,6 +65,14 @@ def login():
     tokens[token] = row["id"]
     return jsonify({"token": token})
 
+@app.route("/logout", methods=["POST"])
+@login_required
+def logout():
+    auth = request.headers.get("Authorization", "")
+    token = auth.replace("Bearer ", "")
+    tokens.pop(token, None)
+    return jsonify({"success": True})
+
 handlers = {
     "add_record": add_record,
     "add_income": add_income,  # ✅ 新增
