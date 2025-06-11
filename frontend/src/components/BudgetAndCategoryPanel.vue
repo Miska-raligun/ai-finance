@@ -5,7 +5,7 @@
     </template>
 
     <!-- 月份选择 -->
-    <el-form :inline="true" size="small" class="mb-2" style="display: flex; align-items: center; gap: 10px">
+    <el-form :inline="true" size="small" class="mb-2 form-row">
       <el-form-item label="选择月份">
         <el-date-picker
           v-model="selectedMonth"
@@ -31,7 +31,7 @@
     </el-table>
 
     <!-- 添加/更新预算 -->
-    <el-form :inline="true" size="small" class="mb-3" style="display: flex; align-items: center; gap: 10px">
+    <el-form :inline="true" size="small" class="mb-3 form-row">
       <el-form-item label="分类">
         <el-select v-model="budgetForm.category" placeholder="选择分类">
           <el-option
@@ -119,5 +119,17 @@ watch(() => props.refreshFlag, fetchBudgets)
 <style scoped>
 .mb-2 { margin-bottom: 10px; }
 .mb-3 { margin-bottom: 15px; }
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 </style>
 

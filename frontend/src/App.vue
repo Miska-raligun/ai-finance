@@ -23,7 +23,7 @@
         </div>
       </el-card>
     </el-aside>
-        <el-drawer
+    <el-drawer
       v-if="isMobile && route.path !== '/login'"
       v-model="showDrawer"
       :with-header="false"

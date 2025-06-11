@@ -2,7 +2,7 @@
 <template>
   <el-card>
     <template #header>📁 分类管理</template>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+    <div class="input-row">
       <el-input v-model="newCategory" placeholder="新分类" style="flex: 1" />
       <el-button type="primary" size="small" @click="addCategory">添加</el-button>
     </div>
@@ -57,5 +57,21 @@ async function deleteCategory(name) {
 onMounted(fetchCategories)
 watch([() => props.refreshFlag, () => props.type], fetchCategories)
 </script>
+
+<style scoped>
+.input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
 
 

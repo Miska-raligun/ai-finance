@@ -3,7 +3,7 @@
   <el-card>
     <template #header>{{ title }}</template>
 
-    <el-form :inline="true" size="small" style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px">
+    <el-form :inline="true" size="small" class="filter-form">
       <el-form-item label="类型">
         <el-select v-model="filterCategory" placeholder="全部" clearable style="width: 120px">
           <el-option
@@ -222,6 +222,22 @@ async function fetchData() {
 onMounted(fetchData)
 watch(() => props.refreshFlag, fetchData)
 </script>
+
+<style scoped>
+.filter-form {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .filter-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
 
 
 

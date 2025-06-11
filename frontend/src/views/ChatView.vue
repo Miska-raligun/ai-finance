@@ -140,7 +140,9 @@ onActivated(() => {
   padding: 10px;
   border-top: 1px solid #ddd;
   background: #fff;
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: 0;
   z-index: 100;
 }

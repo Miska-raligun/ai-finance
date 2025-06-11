@@ -5,7 +5,7 @@
       📊 收支图表分析
     </template>
 
-    <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px">
+    <div class="toolbar">
       <el-radio-group v-model="mode">
         <el-radio-button label="month">按月</el-radio-button>
         <el-radio-button label="year">按年</el-radio-button>
@@ -14,13 +14,12 @@
         v-model="selectedTime"
         :type="mode === 'month' ? 'month' : 'year'"
         :value-format="mode === 'month' ? 'YYYY-MM' : 'YYYY'"
-        style="margin-left: 10px"
         @change="fetchChartData"
       />
-      <el-button style="margin-left: 10px" @click="showAll">查看全部</el-button>
+      <el-button class="ml" @click="showAll">查看全部</el-button>
     </div>
 
-    <div style="display: flex; gap: 20px; margin-bottom: 20px">
+    <div class="chart-row">
       <VChart :option="incomePieOption" style="height: 300px; flex: 1" />
       <VChart :option="spendPieOption" style="height: 300px; flex: 1" />
     </div>
@@ -157,6 +156,27 @@ watch(mode, () => {
 <style scoped>
 .v-chart {
   width: 100%;
+}
+.toolbar {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.toolbar .ml {
+  margin-left: 10px;
+}
+.chart-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .chart-row {
+    flex-direction: column;
+  }
 }
 </style>
 
