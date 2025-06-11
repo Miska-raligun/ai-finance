@@ -11,11 +11,13 @@
         <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
         <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
       </el-menu>
-      <div style="padding: 10px; text-align: center;">
-        <div style="margin-bottom:6px;">当前用户：{{ username }}</div>
-        <el-button size="small" @click="logout" style="margin-bottom:6px; width:100%">退出</el-button>
+      <el-card class="user-panel" shadow="never">
+        <template #header>
+          <span>当前用户：{{ username }}</span>
+        </template>
+        <el-button type="primary" size="small" @click="logout" style="margin-bottom:8px; width:100%">退出</el-button>
         <el-button size="small" @click="openConfigPanel" style="width:100%">重新配置模型</el-button>
-      </div>
+      </el-card>
     </el-aside>
 
     <el-container>
@@ -58,15 +60,18 @@ const showConfig = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
-const username = ref(localStorage.getItem('username') || '')
+const username = ref('')
 
 watchEffect(() => {
   active.value = route.path
 })
 
-watchEffect(() => {
+function updateUsername() {
   username.value = localStorage.getItem('username') || ''
-})
+}
+
+onMounted(updateUsername)
+watch(() => route.path, updateUsername)
 
 function checkConfig() {
   if (route.path !== '/login' && !localStorage.getItem('llmConfig')) {
@@ -113,6 +118,11 @@ function openConfigPanel() {
 body {
   margin: 0;
   font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+.user-panel {
+  margin: 10px;
+  text-align: center;
+  padding-bottom: 10px;
 }
 </style>
 

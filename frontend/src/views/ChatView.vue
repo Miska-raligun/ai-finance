@@ -23,7 +23,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 
 const userInput = ref('')
@@ -31,6 +31,7 @@ const messages = ref([{ sender: 'assistant', content: '你好，我是你的智�
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
+const currentUser = ref(localStorage.getItem('username') || '')
 
 async function sendMessage() {
   const msg = userInput.value.trim()
@@ -80,6 +81,16 @@ onMounted(() => {
     router.push('/login')
   } else {
     scrollToBottom()
+  }
+})
+
+onActivated(() => {
+  const name = localStorage.getItem('username') || ''
+  if (name !== currentUser.value) {
+    currentUser.value = name
+    messages.value = [
+      { sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }
+    ]
   }
 })
 </script>
