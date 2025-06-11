@@ -25,7 +25,7 @@
 <script setup>
 import { ref, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-
+import api from '@/api'
 const userInput = ref('')
 const messages = ref([{ sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }])
 const loading = ref(false)
@@ -42,24 +42,13 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
-    const token = localStorage.getItem('token') || ''
     const cfgRaw = localStorage.getItem('llmConfig')
     let llm = null
     if (cfgRaw && cfgRaw !== 'default') {
       try { llm = JSON.parse(cfgRaw) } catch {}
     }
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ message: msg, llm })
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data.error || 'Server error')
-    }
+    const res = await api.post('/chat', { message: msg, llm })
+    const data = res.data
     messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })
     if (data.reply?.startsWith('✅')) {
       localStorage.setItem('record_added', Date.now())

@@ -15,18 +15,17 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-
+import api from '@/api'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
 
 async function onLogin() {
-  const res = await fetch('/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: username.value, password: password.value })
+  const res = await api.post('/login', {
+    username: username.value,
+    password: password.value
   })
-  const data = await res.json()
+  const data = res.data
   if (data.token) {
     localStorage.setItem('token', data.token)
     localStorage.setItem('username', username.value)
@@ -37,12 +36,11 @@ async function onLogin() {
 }
 
 async function onRegister() {
-  const res = await fetch('/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: username.value, password: password.value })
+  const res = await api.post('/register', {
+    username: username.value,
+    password: password.value
   })
-  const data = await res.json()
+  const data = res.data
   if (data.success) {
     await onLogin()
   } else {

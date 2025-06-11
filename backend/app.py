@@ -3,7 +3,7 @@ from db import init_db, get_db
 from handlers import *
 from dotenv import load_dotenv
 import os, requests, secrets, logging
-from flask_cors import CORS
+#from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
-CORS(app)
+#CORS(app)
 init_db()
 load_dotenv()  # 加载 .env 文件
 
@@ -832,3 +832,6 @@ def daily_stats():
         })
 
     return jsonify(result)
+
+from waitress import serve
+serve(app, host="0.0.0.0", port=5000)
