@@ -13,10 +13,12 @@
       </el-menu>
       <el-card class="user-panel" shadow="never">
         <template #header>
-          <span>当前用户：{{ username }}</span>
+          <div class="user-title">当前用户：{{ username }}</div>
         </template>
-        <el-button type="primary" size="small" @click="logout" style="margin-bottom:8px; width:100%">退出</el-button>
-        <el-button size="small" @click="openConfigPanel" style="width:100%">重新配置模型</el-button>
+        <div class="user-actions">
+          <el-button type="primary" size="small" @click="logout">退出</el-button>
+          <el-button size="small" @click="openConfigPanel">重新配置模型</el-button>
+        </div>
       </el-card>
     </el-aside>
 
@@ -121,8 +123,18 @@ body {
 }
 .user-panel {
   margin: 10px;
-  text-align: center;
   padding-bottom: 10px;
+}
+.user-title {
+  text-align: left;
+}
+.user-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.user-actions .el-button {
+  width: 100%;
 }
 </style>
 
