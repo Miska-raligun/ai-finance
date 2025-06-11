@@ -1,10 +1,10 @@
 <!-- src/App.vue 最终版本 -->
 <template>
   <el-container style="height: 100vh">
-    <el-aside v-if="route.path !== '/login'" width="200px" style="background: #f5f5f5;">
+    <el-aside v-if="route.path !== '/login'" width="200px" class="app-aside">
       <el-menu
         :default-active="active"
-        class="el-menu-vertical-demo"
+        class="el-menu-vertical-demo app-menu"
         @select="handleSelect"
         router
       >
@@ -16,8 +16,10 @@
           <div class="user-title">当前用户：{{ username }}</div>
         </template>
         <div class="user-actions">
-          <el-button type="primary" size="small" @click="logout">退出</el-button>
-          <el-button size="small" @click="openConfigPanel">重新配置模型</el-button>
+          <el-button type="primary" @click="logout">退出</el-button>  
+        </div>
+        <div class="user-actions">
+          <el-button @click="openConfigPanel">配置模型</el-button>  
         </div>
       </el-card>
     </el-aside>
@@ -123,18 +125,27 @@ body {
 }
 .user-panel {
   margin: 10px;
-  padding-bottom: 10px;
+  padding: 10px;
 }
-.user-title {
-  text-align: left;
-}
+
 .user-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+
 .user-actions .el-button {
   width: 100%;
+}
+
+.app-aside {
+  background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-menu {
+  flex-grow: 1;
 }
 </style>
 
