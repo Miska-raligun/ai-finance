@@ -18,10 +18,11 @@ def init_db():
     cur = conn.cursor()
 
     # ✅ 每次启动清空所有表（调试用）
-    #cur.execute("DROP TABLE IF EXISTS records")
-    #cur.execute("DROP TABLE IF EXISTS budgets")
-    #cur.execute("DROP TABLE IF EXISTS categories")
-    #cur.execute("DROP TABLE IF EXISTS income")  # 👈 清除旧收入表（调试用）
+    cur.execute("DROP TABLE IF EXISTS records")
+    cur.execute("DROP TABLE IF EXISTS budgets")
+    cur.execute("DROP TABLE IF EXISTS categories")
+    cur.execute("DROP TABLE IF EXISTS income")  
+    cur.execute("DROP TABLE IF EXISTS users")
 
     # ✅ 支出记录表
     cur.execute("""
