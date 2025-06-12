@@ -89,6 +89,18 @@ def logout():
     session.pop("is_admin", None)
     return jsonify({"success": True})
 
+
+@app.route("/api/me", methods=["GET"])
+@login_required
+def get_me():
+    """Return current user's basic info."""
+    return jsonify(
+        {
+            "username": session.get("username"),
+            "is_admin": bool(session.get("is_admin")),
+        }
+    )
+
 handlers = {
     "add_record": add_record,
     "add_income": add_income,  # ✅ 新增

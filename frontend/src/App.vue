@@ -88,6 +88,7 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { ref, watchEffect, onMounted, watch, onBeforeUnmount } from 'vue'
+import api from '@/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,8 +117,28 @@ watchEffect(() => {
 })
 
 function updateUsername() {
-  username.value = localStorage.getItem('username') || ''
-  isAdmin.value = localStorage.getItem('is_admin') === '1'
+  api
+    .get('/api/me')
+    .then(res => {
+      username.value = res.data.username || ''
+      isAdmin.value = !!res.data.is_admin
+      if (res.data.username) {
+        localStorage.setItem('username', res.data.username)
+      } else {
+        localStorage.removeItem('username')
+      }
+      if (res.data.is_admin) {
+        localStorage.setItem('is_admin', '1')
+      } else {
+        localStorage.removeItem('is_admin')
+      }
+    })
+    .catch(() => {
+      username.value = ''
+      isAdmin.value = false
+      localStorage.removeItem('username')
+      localStorage.removeItem('is_admin')
+    })
 }
 
 onMounted(updateUsername)
