@@ -30,7 +30,9 @@
         <VChart :option="spendPieOption" style="height: 300px" />
       </div>
     </div>
-    <VChart :option="lineOption" style="height: 300px" />
+    <div class="line-wrapper">
+      <VChart :option="lineOption" style="height: 300px" />
+    </div>
   </el-card>
 </template>
 
@@ -222,6 +224,10 @@ watch(mode, () => {
 .summary-text {
   font-weight: bold;
   margin-left: 10px;
+}
+.line-wrapper {
+  display: flex;
+  justify-content: center;
 }
 </style>
 
