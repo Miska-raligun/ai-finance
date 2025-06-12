@@ -17,20 +17,22 @@
         @change="fetchChartData"
       />
       <el-button class="ml" @click="showAll">查看全部</el-button>
+      <span class="summary-text">总收入：{{ incomeTotal.toFixed(2) }}</span>
+      <span class="summary-text">总支出：{{ spendTotal.toFixed(2) }}</span>
+      <span class="summary-text">结余：{{ balance.toFixed(2) }}</span>
     </div>
 
     <div class="chart-row">
       <div class="pie-wrapper">
         <VChart :option="incomePieOption" style="height: 300px" />
-        <div class="total-text">总收入：{{ incomeTotal.toFixed(2) }}</div>
       </div>
-      <div class="balance-wrapper">结余：{{ balance.toFixed(2) }}</div>
       <div class="pie-wrapper">
         <VChart :option="spendPieOption" style="height: 300px" />
-        <div class="total-text">总支出：{{ spendTotal.toFixed(2) }}</div>
       </div>
     </div>
-    <VChart :option="lineOption" style="height: 300px" />
+    <div class="line-wrapper">
+      <VChart :option="lineOption" style="height: 300px" />
+    </div>
   </el-card>
 </template>
 
@@ -213,28 +215,19 @@ watch(mode, () => {
   display: flex;
   gap: 20px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .pie-wrapper {
   flex: 1;
   text-align: center;
 }
-.total-text {
-  margin-top: 5px;
-  font-size: 14px;
-  color: #555;
-}
-.balance-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 10px;
+.summary-text {
   font-weight: bold;
+  margin-left: 10px;
 }
-@media (max-width: 600px) {
-  .chart-row {
-    flex-direction: column;
-  }
+.line-wrapper {
+  display: flex;
+  justify-content: center;
 }
 </style>
 
