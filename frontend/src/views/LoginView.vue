@@ -21,7 +21,7 @@ const username = ref('')
 const password = ref('')
 
 async function onLogin() {
-  const res = await fetch('/login', {
+  const res = await fetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -37,7 +37,7 @@ async function onLogin() {
 }
 
 async function onRegister() {
-  const res = await fetch('/register', {
+  const res = await fetch('/api/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',

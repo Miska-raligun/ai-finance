@@ -90,15 +90,15 @@ const budgetForm = ref({
 async function fetchBudgets() {
   const month = selectedMonth.value
   const [bRes, cRes] = await Promise.all([
-    api.get('/budgets', { params: { month } }),
-    api.get('/categories', { params: { type: 'expense' } })
+    api.get('/api/budgets', { params: { month } }),
+    api.get('/api/categories', { params: { type: 'expense' } })
   ])
   budgets.value = bRes.data
   expenseCategories.value = cRes.data.map(c => c.name)
 }
 
 async function submitBudget() {
-  await api.post('/budgets', {
+  await api.post('/api/budgets', {
     category: budgetForm.value.category,
     amount: budgetForm.value.amount,
     month: selectedMonth.value

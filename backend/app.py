@@ -30,7 +30,7 @@ def login_required(f):
     return wrapper
 
 
-@app.route("/register", methods=["POST"])
+@app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
     username = data.get("username", "").strip()
@@ -49,7 +49,7 @@ def register():
     return jsonify({"success": True})
 
 
-@app.route("/login", methods=["POST"])
+@app.route("/api/login", methods=["POST"])
 def login():
     data = request.get_json() or {}
     username = data.get("username", "").strip()
@@ -63,7 +63,7 @@ def login():
     session["username"] = username
     return jsonify({"success": True})
 
-@app.route("/logout", methods=["POST"])
+@app.route("/api/logout", methods=["POST"])
 @login_required
 def logout():
     session.pop("user_id", None)
@@ -248,7 +248,7 @@ def parse_response(text):
 
     return intent, params
 
-@app.route("/chat", methods=["POST"])
+@app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
     data = request.get_json()
@@ -305,7 +305,7 @@ def chat():
 
     return jsonify({"reply": reply}) 
 
-@app.route('/records')
+@app.route('/api/records')
 @login_required
 def get_records():
     db = get_db()
@@ -333,7 +333,7 @@ def get_records():
     results = [dict(row) for row in cursor.fetchall()]
     return jsonify(results)
 
-@app.route('/records/<int:record_id>', methods=['DELETE'])
+@app.route('/api/records/<int:record_id>', methods=['DELETE'])
 @login_required
 def delete_record(record_id):
     db = get_db()
@@ -344,7 +344,7 @@ def delete_record(record_id):
     db.commit()
     return jsonify({"success": True})
 
-@app.route('/records/<int:record_id>', methods=['PUT'])
+@app.route('/api/records/<int:record_id>', methods=['PUT'])
 @login_required
 def update_record(record_id):
     data = request.get_json()
@@ -365,7 +365,7 @@ def update_record(record_id):
     db.commit()
     return jsonify({"success": True})
 
-@app.route('/income')
+@app.route('/api/income')
 @login_required
 def get_income():
     db = get_db()
@@ -401,7 +401,7 @@ def get_income():
 
     return jsonify(results)
 
-@app.route('/income/<int:income_id>', methods=['DELETE'])
+@app.route('/api/income/<int:income_id>', methods=['DELETE'])
 @login_required
 def delete_income(income_id):
     db = get_db()
@@ -412,7 +412,7 @@ def delete_income(income_id):
     db.commit()
     return jsonify({"success": True})
 
-@app.route('/income/<int:income_id>', methods=['PUT'])
+@app.route('/api/income/<int:income_id>', methods=['PUT'])
 @login_required
 def update_income(income_id):
     data = request.get_json()
@@ -433,7 +433,7 @@ def update_income(income_id):
     db.commit()
     return jsonify({"success": True})
 
-@app.route("/categories", methods=["GET"])
+@app.route("/api/categories", methods=["GET"])
 @login_required
 def get_categories():
     db = get_db()
@@ -462,7 +462,7 @@ def get_categories():
 
 
 month = datetime.now().strftime("%Y-%m")
-@app.route('/budgets')
+@app.route('/api/budgets')
 @login_required
 def get_budgets():
     db = get_db()
@@ -540,7 +540,7 @@ def get_budgets():
 
     return jsonify(result)
 
-@app.route("/categories", methods=["POST"])
+@app.route("/api/categories", methods=["POST"])
 @login_required
 def add_category_manual():
     data = request.get_json()
@@ -565,7 +565,7 @@ def add_category_manual():
 
 
 
-@app.route("/categories/<name>", methods=["DELETE"])
+@app.route("/api/categories/<name>", methods=["DELETE"])
 @login_required
 def delete_category_manual(name):
     db = get_db()
@@ -593,7 +593,7 @@ def delete_category_manual(name):
 
     return jsonify({"success": True})
 
-@app.route("/budgets", methods=["POST"])
+@app.route("/api/budgets", methods=["POST"])
 @login_required
 def set_budget_manual():
     data = request.get_json()
@@ -630,7 +630,7 @@ def set_budget_manual():
 
 
 
-@app.route("/stats/monthly", methods=["GET"])
+@app.route("/api/stats/monthly", methods=["GET"])
 @login_required
 def monthly_stats():
     db = get_db()
@@ -692,7 +692,7 @@ def monthly_stats():
 
     return jsonify(result)
 
-@app.route("/stats/by-category", methods=["GET"])
+@app.route("/api/stats/by-category", methods=["GET"])
 @login_required
 def category_stats():
     db = get_db()
@@ -737,7 +737,7 @@ def category_stats():
     ]
     return jsonify(spend_result + income_result)
 
-@app.route("/stats/summary", methods=["GET"])
+@app.route("/api/stats/summary", methods=["GET"])
 @login_required
 def summary_stats():
     db = get_db()
@@ -775,7 +775,7 @@ def summary_stats():
         "结余": round(balance, 2)
     })
 
-@app.route("/stats/daily")
+@app.route("/api/stats/daily")
 @login_required
 def daily_stats():
     db = get_db()

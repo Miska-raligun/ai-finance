@@ -49,7 +49,7 @@ function resetMonth() {
 }
 
 async function drawChart() {
-  const res = await api.get('/records', {
+  const res = await api.get('/api/records', {
     params: selectedMonth.value ? { month: selectedMonth.value } : {}
   })
   const data = res.data

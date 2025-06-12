@@ -149,7 +149,7 @@ function handleSelect(index) {
 }
 
 function logout() {
-  fetch('/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
+  fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
   localStorage.removeItem('username')
   router.push('/login')
 }
