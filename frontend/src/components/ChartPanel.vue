@@ -74,10 +74,10 @@ const fetchChartData = async () => {
     catParams.year = time
   }
   const [cats, trend] = await Promise.all([
-    api.get('/stats/by-category', { params: catParams }),
+    api.get('/api/stats/by-category', { params: catParams }),
     mode.value === 'month'
-      ? api.get('/stats/daily', { params: { month: time } })
-      : api.get('/stats/monthly', { params: time ? { year: time } : {} })
+      ? api.get('/api/stats/daily', { params: { month: time } })
+      : api.get('/api/stats/monthly', { params: time ? { year: time } : {} })
   ])
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')

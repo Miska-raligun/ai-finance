@@ -60,7 +60,7 @@ const currentMonth = new Date().toISOString().slice(0, 7)
 const selectedMonth = ref(currentMonth)
 
 async function fetchBudgets() {
-  const res = await api.get('/budgets', {
+  const res = await api.get('/api/budgets', {
     params: { month: selectedMonth.value }
   })
   budgets.value = res.data
@@ -68,7 +68,7 @@ async function fetchBudgets() {
 
 async function addOrUpdateBudget() {
   if (!newBudget.value.category || !newBudget.value.amount) return
-  await api.post('/budgets', {
+  await api.post('/api/budgets', {
     ...newBudget.value,
     month: selectedMonth.value
   })

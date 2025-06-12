@@ -9,7 +9,7 @@ backend/  # Flask 后端服务 + sqlite 数据库
 frontend/ # Vue 3 + Element Plus 前端应用
 ```
 
-后端提供 `/chat` 等接口用于接收自然语言指令，前端包含聊天界面和账本管理页。
+后端提供 `/api/chat` 等接口用于接收自然语言指令，前端包含聊天界面和账本管理页。
 
 ## 快速开始
 

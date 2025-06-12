@@ -47,7 +47,7 @@ async function sendMessage() {
     if (cfgRaw && cfgRaw !== 'default') {
       try { llm = JSON.parse(cfgRaw) } catch {}
     }
-    const res = await fetch('/chat', {
+    const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

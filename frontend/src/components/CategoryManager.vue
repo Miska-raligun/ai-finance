@@ -31,7 +31,7 @@ const categories = ref([])
 const newCategory = ref('')
 
 async function fetchCategories() {
-  const res = await api.get('/categories', {
+  const res = await api.get('/api/categories', {
     params: { type: props.type }
   })
   categories.value = res.data
@@ -39,7 +39,7 @@ async function fetchCategories() {
 
 async function addCategory() {
   if (!newCategory.value) return
-  await api.post('/categories', {
+  await api.post('/api/categories', {
     name: newCategory.value,
     type: props.type === 'income' ? '收入' : '支出'
   })
@@ -49,7 +49,7 @@ async function addCategory() {
 }
 
 async function deleteCategory(name) {
-  await api.delete(`/categories/${encodeURIComponent(name)}`)
+  await api.delete(`/api/categories/${encodeURIComponent(name)}`)
   await fetchCategories()
   emit('refresh')
 }

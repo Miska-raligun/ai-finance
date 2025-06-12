@@ -145,7 +145,7 @@ function startEdit(row) {
 }
 
 async function saveEdit(row) {
-  const url = props.type === 'expense' ? `/records/${row.id}` : `/income/${row.id}`
+  const url = props.type === 'expense' ? `/api/records/${row.id}` : `/api/income/${row.id}`
   await api.put(url, row)
   editingId.value = null
   await fetchData()
@@ -159,7 +159,7 @@ function cancelEdit() {
 
 async function deleteSelected() {
   for (const r of selectedRows.value) {
-    const url = props.type === 'expense' ? `/records/${r.id}` : `/income/${r.id}`
+    const url = props.type === 'expense' ? `/api/records/${r.id}` : `/api/income/${r.id}`
     await api.delete(url)
   }
   selectedRows.value = []
@@ -181,8 +181,8 @@ function applyFilter() {
 async function fetchData() {
   try {
     const [recRes, catRes] = await Promise.all([
-      api.get(props.type === 'expense' ? '/records' : '/income'),
-      api.get('/categories', {
+      api.get(props.type === 'expense' ? '/api/records' : '/api/income'),
+      api.get('/api/categories', {
         params: {
           type: props.type === 'expense' ? 'expense' : 'income'
         }
@@ -195,7 +195,7 @@ async function fetchData() {
     console.log("📋 收入数据：", rec)
     console.log("📂 分类数据：", cats)
     if (props.type === 'expense') {
-      const budgets = (await api.get('/budgets')).data
+      const budgets = (await api.get('/api/budgets')).data
       const budgetMap = {}
       for (const b of budgets) {
         budgetMap[b.category + '_' + b.month] = b.amount
