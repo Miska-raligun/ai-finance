@@ -13,12 +13,20 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const username = ref('')
 const password = ref('')
+
+function reset() {
+  username.value = ''
+  password.value = ''
+}
+
+onMounted(reset)
+onActivated(reset)
 
 async function onLogin() {
   const res = await fetch('/api/login', {
