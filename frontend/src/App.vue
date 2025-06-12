@@ -10,6 +10,7 @@
       >
         <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
         <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/admin">🛠 用户管理</el-menu-item>
       </el-menu>
       <el-card class="user-panel" shadow="never">
         <template #header>
@@ -39,6 +40,7 @@
       >
         <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
         <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/admin">🛠 用户管理</el-menu-item>
       </el-menu>
       <el-card class="user-panel" shadow="never">
         <template #header>
@@ -95,6 +97,7 @@ const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
 const username = ref('')
+const isAdmin = ref(false)
 const isMobile = ref(window.innerWidth < 600)
 const showDrawer = ref(false)
 
@@ -114,6 +117,7 @@ watchEffect(() => {
 
 function updateUsername() {
   username.value = localStorage.getItem('username') || ''
+  isAdmin.value = localStorage.getItem('is_admin') === '1'
 }
 
 onMounted(updateUsername)
@@ -151,6 +155,7 @@ function handleSelect(index) {
 function logout() {
   fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
   localStorage.removeItem('username')
+  localStorage.removeItem('is_admin')
   router.push('/login')
 }
 

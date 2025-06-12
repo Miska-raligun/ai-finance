@@ -30,6 +30,20 @@ def login_required(f):
     return wrapper
 
 
+def admin_required(f):
+    """Require the current user to be an administrator."""
+    from functools import wraps
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("is_admin"):
+            return jsonify({"error": "Admin only"}), 403
+        g.user_id = session.get("user_id")
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
@@ -55,19 +69,24 @@ def login():
     username = data.get("username", "").strip()
     password = data.get("password", "")
     db = get_db()
-    row = db.execute("SELECT id, password FROM users WHERE username = ?", (username,)).fetchone()
+    row = db.execute(
+        "SELECT id, password, is_admin FROM users WHERE username = ?",
+        (username,),
+    ).fetchone()
     if not row or not check_password_hash(row["password"], password):
         return jsonify({"error": "用户名或密码错误"}), 400
 
     session["user_id"] = row["id"]
     session["username"] = username
-    return jsonify({"success": True})
+    session["is_admin"] = bool(row.get("is_admin"))
+    return jsonify({"success": True, "is_admin": bool(row.get("is_admin"))})
 
 @app.route("/api/logout", methods=["POST"])
 @login_required
 def logout():
     session.pop("user_id", None)
     session.pop("username", None)
+    session.pop("is_admin", None)
     return jsonify({"success": True})
 
 handlers = {
@@ -820,3 +839,65 @@ def daily_stats():
         })
 
     return jsonify(result)
+
+
+# ===== 管理员接口 =====
+
+@app.route("/api/users", methods=["GET"])
+@admin_required
+def list_users():
+    """列出除当前管理员外的所有用户"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, username, is_admin FROM users WHERE id != ?",
+        (session.get("user_id"),),
+    ).fetchall()
+    result = [
+        {
+            "id": r["id"],
+            "username": r["username"],
+            "is_admin": bool(r["is_admin"]),
+        }
+        for r in rows
+    ]
+    return jsonify(result)
+
+
+@app.route("/api/users/<int:user_id>/password", methods=["PUT"])
+@admin_required
+def admin_change_password(user_id):
+    data = request.get_json() or {}
+    new_pwd = data.get("password", "").strip()
+    if not new_pwd:
+        return jsonify({"error": "缺少密码"}), 400
+    db = get_db()
+    db.execute(
+        "UPDATE users SET password = ? WHERE id = ?",
+        (generate_password_hash(new_pwd), user_id),
+    )
+    db.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/api/users/batch_delete", methods=["POST"])
+@admin_required
+def admin_batch_delete():
+    data = request.get_json() or {}
+    ids = data.get("user_ids") or []
+    if not isinstance(ids, list):
+        return jsonify({"error": "user_ids 必须是列表"}), 400
+
+    # 不允许删除自身
+    ids = [i for i in ids if i != session.get("user_id")]
+    if not ids:
+        return jsonify({"success": True})
+
+    placeholders = ",".join(["?"] * len(ids))
+    db = get_db()
+    db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
+    db.commit()
+    return jsonify({"success": True})

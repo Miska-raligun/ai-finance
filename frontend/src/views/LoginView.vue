@@ -30,6 +30,11 @@ async function onLogin() {
   const data = await res.json()
   if (data.success) {
     localStorage.setItem('username', username.value)
+    if (data.is_admin) {
+      localStorage.setItem('is_admin', '1')
+    } else {
+      localStorage.removeItem('is_admin')
+    }
     router.push('/chat')
   } else {
     alert(data.error || '登录失败')
