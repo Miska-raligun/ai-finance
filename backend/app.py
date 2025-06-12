@@ -78,8 +78,8 @@ def login():
 
     session["user_id"] = row["id"]
     session["username"] = username
-    session["is_admin"] = bool(row.get("is_admin"))
-    return jsonify({"success": True, "is_admin": bool(row.get("is_admin"))})
+    session["is_admin"] = bool(row["is_admin"])
+    return jsonify({"success": True, "is_admin": bool(row["is_admin"])})
 
 @app.route("/api/logout", methods=["POST"])
 @login_required
