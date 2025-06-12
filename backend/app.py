@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, g, session
+from flask import Flask, request, jsonify, g, session, send_from_directory
 from db import init_db, get_db
 from handlers import *
 from dotenv import load_dotenv
@@ -538,8 +538,6 @@ def get_budgets():
                 'month': b['month']
             })
 
-    return jsonify(result)
-
 @app.route("/api/categories", methods=["POST"])
 @login_required
 def add_category_manual():
@@ -820,3 +818,17 @@ def daily_stats():
         })
 
     return jsonify(result)
+
+# ======= Serve Frontend =======
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    """Serve built frontend assets for any non-API GET route."""
+    if path.startswith("api"):
+        return jsonify({"error": "Not Found"}), 404
+
+    dist_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+    file_path = os.path.join(dist_dir, path)
+    if path and os.path.isfile(file_path):
+        return send_from_directory(dist_dir, path)
+    return send_from_directory(dist_dir, "index.html")
