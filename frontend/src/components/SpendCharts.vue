@@ -57,11 +57,11 @@ async function drawChart() {
   // 分组
   const grouped = {}
   for (const item of data) {
-    grouped[item.category] = (grouped[item.category] || 0) + item.amount
+    grouped[item.category] = (grouped[item.category] || 0) + Number(item.amount)
   }
 
   const labels = Object.keys(grouped)
-  const amounts = Object.values(grouped)
+  const amounts = Object.values(grouped).map(v => Number(v.toFixed(2)))
 
   if (chartInstance) chartInstance.destroy()
   chartInstance = new Chart(chartRef.value.getContext('2d'), {
