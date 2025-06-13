@@ -17,20 +17,23 @@
         @change="fetchChartData"
       />
       <el-button class="ml" @click="showAll">查看全部</el-button>
+      <span class="summary-text">总收入：{{ incomeTotal.toFixed(2) }}</span>
+      <span class="summary-text">总支出：{{ spendTotal.toFixed(2) }}</span>
+      <span class="summary-text">结余：{{ balance.toFixed(2) }}</span>
     </div>
 
     <div class="chart-row">
       <div class="pie-wrapper">
         <VChart :option="incomePieOption" style="height: 300px" />
-        <div class="total-text">总收入：{{ incomeTotal.toFixed(2) }}</div>
       </div>
-      <div class="balance-wrapper">结余：{{ balance.toFixed(2) }}</div>
       <div class="pie-wrapper">
         <VChart :option="spendPieOption" style="height: 300px" />
-        <div class="total-text">总支出：{{ spendTotal.toFixed(2) }}</div>
       </div>
     </div>
-    <VChart :option="lineOption" style="height: 300px" />
+    <div class="line-wrapper">
+      <VChart :option="lineOption" style="height: 300px" />
+      <div class="line-title">{{ lineChartTitle }}</div>
+    </div>
   </el-card>
 </template>
 
@@ -66,6 +69,9 @@ const lineOption = ref({})
 const incomeTotal = ref(0)
 const spendTotal = ref(0)
 const balance = computed(() => incomeTotal.value - spendTotal.value)
+const lineChartTitle = computed(() =>
+  mode.value === 'month' ? '本月每日收支情况' : '年度收支趋势'
+)
 
 function showAll() {
   mode.value = 'year'
@@ -130,7 +136,6 @@ const fetchChartData = async () => {
 
   if (mode.value === 'month') {
     lineOption.value = {
-      title: { text: '本月每日收支情况' },
       tooltip: { trigger: 'axis' },
       legend: { data: ['收入', '支出', '结余'] },
       xAxis: { type: 'category', data: trend.data.map(d => d.date) },
@@ -155,7 +160,6 @@ const fetchChartData = async () => {
     }
   } else {
     lineOption.value = {
-      title: { text: '年度收支趋势' },
       tooltip: { trigger: 'axis' },
       legend: { data: ['收入', '支出', '结余'] },
       xAxis: { type: 'category', data: trend.data.map(m => m.month) },
@@ -213,28 +217,24 @@ watch(mode, () => {
   display: flex;
   gap: 20px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .pie-wrapper {
   flex: 1;
   text-align: center;
 }
-.total-text {
-  margin-top: 5px;
-  font-size: 14px;
-  color: #555;
-}
-.balance-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 10px;
+.summary-text {
   font-weight: bold;
+  margin-left: 10px;
 }
-@media (max-width: 600px) {
-  .chart-row {
-    flex-direction: column;
-  }
+.line-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.line-title {
+  margin-top: 5px;
+  font-weight: bold;
 }
 </style>
 
