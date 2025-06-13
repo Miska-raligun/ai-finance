@@ -70,7 +70,7 @@
           <template v-if="editingId === scope.row.id">
             <el-input-number v-model="scope.row.amount" :min="0" />
           </template>
-          <template v-else>{{ scope.row.amount }}</template>
+          <template v-else>{{ Number(scope.row.amount).toFixed(2) }}</template>
         </template>
       </el-table-column>
       <el-table-column v-if="showBudget" prop="left_budget" label="剩余预算" sortable />

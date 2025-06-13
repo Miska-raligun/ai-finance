@@ -17,18 +17,27 @@
         @change="fetchChartData"
       />
       <el-button class="ml" @click="showAll">查看全部</el-button>
+      <span class="summary-text">总收入：{{ incomeTotal.toFixed(2) }}</span>
+      <span class="summary-text">总支出：{{ spendTotal.toFixed(2) }}</span>
+      <span class="summary-text">结余：{{ balance.toFixed(2) }}</span>
     </div>
 
     <div class="chart-row">
-      <VChart :option="incomePieOption" style="height: 300px; flex: 1" />
-      <VChart :option="spendPieOption" style="height: 300px; flex: 1" />
+      <div class="pie-wrapper">
+        <VChart :option="incomePieOption" style="height: 300px" />
+      </div>
+      <div class="pie-wrapper">
+        <VChart :option="spendPieOption" style="height: 300px" />
+      </div>
     </div>
-    <VChart :option="lineOption" style="height: 300px" />
+    <div class="line-wrapper">
+      <VChart :option="lineOption" style="height: 300px" />
+    </div>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api'
 import { use } from 'echarts/core'
 import VChart from 'vue-echarts'
@@ -56,6 +65,9 @@ const selectedTime = ref()
 const incomePieOption = ref({})
 const spendPieOption = ref({})
 const lineOption = ref({})
+const incomeTotal = ref(0)
+const spendTotal = ref(0)
+const balance = computed(() => incomeTotal.value - spendTotal.value)
 
 function showAll() {
   mode.value = 'year'
@@ -82,6 +94,8 @@ const fetchChartData = async () => {
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')
   const spendCats = cats.data.filter(x => x['类型'] === '支出')
+  incomeTotal.value = incomeCats.reduce((s, x) => s + Number(x['金额']), 0)
+  spendTotal.value = spendCats.reduce((s, x) => s + Number(x['金额']), 0)
 
   incomePieOption.value = {
     title: { text: '收入分布', left: 'center' },
@@ -92,7 +106,10 @@ const fetchChartData = async () => {
         name: '收入来源',
         type: 'pie',
         radius: '50%',
-        data: incomeCats.map(x => ({ name: x['名称'], value: x['金额'] }))
+        data: incomeCats.map(x => ({
+          name: x['名称'],
+          value: Number(Number(x['金额']).toFixed(2))
+        }))
       }
     ]
   }
@@ -105,7 +122,10 @@ const fetchChartData = async () => {
         name: '消费分类',
         type: 'pie',
         radius: '50%',
-        data: spendCats.map(x => ({ name: x['名称'], value: x['金额'] }))
+        data: spendCats.map(x => ({
+          name: x['名称'],
+          value: Number(Number(x['金额']).toFixed(2))
+        }))
       }
     ]
   }
@@ -118,9 +138,21 @@ const fetchChartData = async () => {
       xAxis: { type: 'category', data: trend.data.map(d => d.date) },
       yAxis: { type: 'value' },
       series: [
-        { name: '收入', type: 'line', data: trend.data.map(d => d['收入']) },
-        { name: '支出', type: 'line', data: trend.data.map(d => d['支出']) },
-        { name: '结余', type: 'line', data: trend.data.map(d => d['结余']) }
+        {
+          name: '收入',
+          type: 'line',
+          data: trend.data.map(d => Number(Number(d['收入']).toFixed(2)))
+        },
+        {
+          name: '支出',
+          type: 'line',
+          data: trend.data.map(d => Number(Number(d['支出']).toFixed(2)))
+        },
+        {
+          name: '结余',
+          type: 'line',
+          data: trend.data.map(d => Number(Number(d['结余']).toFixed(2)))
+        }
       ]
     }
   } else {
@@ -131,9 +163,21 @@ const fetchChartData = async () => {
       xAxis: { type: 'category', data: trend.data.map(m => m.month) },
       yAxis: { type: 'value' },
       series: [
-        { name: '收入', type: 'line', data: trend.data.map(m => m['收入']) },
-        { name: '支出', type: 'line', data: trend.data.map(m => m['支出']) },
-        { name: '结余', type: 'line', data: trend.data.map(m => m['收入'] - m['支出']) }
+        {
+          name: '收入',
+          type: 'line',
+          data: trend.data.map(m => Number(Number(m['收入']).toFixed(2)))
+        },
+        {
+          name: '支出',
+          type: 'line',
+          data: trend.data.map(m => Number(Number(m['支出']).toFixed(2)))
+        },
+        {
+          name: '结余',
+          type: 'line',
+          data: trend.data.map(m => Number((m['收入'] - m['支出']).toFixed(2)))
+        }
       ]
     }
   }
@@ -171,12 +215,19 @@ watch(mode, () => {
   display: flex;
   gap: 20px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
-@media (max-width: 600px) {
-  .chart-row {
-    flex-direction: column;
-  }
+.pie-wrapper {
+  flex: 1;
+  text-align: center;
+}
+.summary-text {
+  font-weight: bold;
+  margin-left: 10px;
+}
+.line-wrapper {
+  display: flex;
+  justify-content: center;
 }
 </style>
 

@@ -8,6 +8,7 @@
         <el-button type="primary" @click="onLogin">登录</el-button>
         <el-button @click="onRegister">注册</el-button>
       </div>
+      <p class="register-tip">新用户请输入用户名和密码后点击注册即可登录</p>
     </el-card>
   </div>
 </template>
@@ -72,5 +73,10 @@ async function onRegister() {
   align-items: center;
   height: 100vh;
   height: 100dvh;
+}
+.register-tip {
+  color: #888;
+  margin-top: 10px;
+  font-size: 13px;
 }
 </style>

@@ -36,8 +36,12 @@
     <!-- 预算列表 -->
     <el-table :data="budgets" style="margin-top: 10px">
       <el-table-column prop="category" label="分类" />
-      <el-table-column prop="amount" label="预算金额" />
-      <el-table-column prop="remaining" label="剩余预算" />
+      <el-table-column prop="amount" label="预算金额">
+        <template #default="scope">{{ Number(scope.row.amount).toFixed(2) }}</template>
+      </el-table-column>
+      <el-table-column prop="remaining" label="剩余预算">
+        <template #default="scope">{{ Number(scope.row.remaining).toFixed(2) }}</template>
+      </el-table-column>
     </el-table>
 
     <!-- 底部说明 -->
