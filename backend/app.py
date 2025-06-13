@@ -30,6 +30,20 @@ def login_required(f):
     return wrapper
 
 
+def admin_required(f):
+    """Require the current user to be an administrator."""
+    from functools import wraps
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("is_admin"):
+            return jsonify({"error": "Admin only"}), 403
+        g.user_id = session.get("user_id")
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
@@ -55,20 +69,37 @@ def login():
     username = data.get("username", "").strip()
     password = data.get("password", "")
     db = get_db()
-    row = db.execute("SELECT id, password FROM users WHERE username = ?", (username,)).fetchone()
+    row = db.execute(
+        "SELECT id, password, is_admin FROM users WHERE username = ?",
+        (username,),
+    ).fetchone()
     if not row or not check_password_hash(row["password"], password):
         return jsonify({"error": "用户名或密码错误"}), 400
 
     session["user_id"] = row["id"]
     session["username"] = username
-    return jsonify({"success": True})
+    session["is_admin"] = bool(row["is_admin"])
+    return jsonify({"success": True, "is_admin": bool(row["is_admin"])})
 
 @app.route("/api/logout", methods=["POST"])
 @login_required
 def logout():
     session.pop("user_id", None)
     session.pop("username", None)
+    session.pop("is_admin", None)
     return jsonify({"success": True})
+
+
+@app.route("/api/me", methods=["GET"])
+@login_required
+def get_me():
+    """Return current user's basic info."""
+    return jsonify(
+        {
+            "username": session.get("username"),
+            "is_admin": bool(session.get("is_admin")),
+        }
+    )
 
 handlers = {
     "add_record": add_record,
@@ -137,7 +168,7 @@ def call_deepseek_intent(message, llm=None):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
+        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
 
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
@@ -165,7 +196,7 @@ def call_deepseek_summary(user_msg, handler_result, llm=None):
     }
 
     summary_prompt = (
-        "你是一个财务顾问，请根据用户的操作结果进行总结和建议。\n"
+        "你是一个有点傲娇的财务顾问，你的名字叫Anon。请根据用户的操作结果进行总结和建议。\n"
         "用户输入：{user_msg}\n"
         "系统执行结果：{handler_result}\n"
         "请用自然语言总结这次操作及执行结果，并提出简短合理的建议（50字以内）,不要添加不必要的格式化符号。\n"
@@ -205,7 +236,7 @@ def call_deepseek_chat(history, llm=None):
     }
 
     prompt = (
-        "你是一个友好的记账助手，可以和用户闲聊，并在合适的时候提醒保持良好的记账习惯。\n"
+        "你是一个傲娇的记账助手，你的名字叫Anon。可以和用户闲聊，并在合适的时候提醒保持良好的记账习惯。\n"
         "回答控制在50字以内。"
     )
 
@@ -263,9 +294,9 @@ def chat():
     if len(chat_history) > 10:
         del chat_history[:-10]
 
-    print("最新消息: ",latest_msg)
+    #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    print("🧠 LLM 原始结构化输出：", llm_output)
+    #print("🧠 LLM 原始结构化输出：", llm_output)
 
     intent, params = parse_response(llm_output)
 
@@ -276,26 +307,26 @@ def chat():
             result = handlers[intent](g.user_id, params)
         print("📦 handler 执行结果：", result)
 
-        if intent == "add_record":
-            from db import get_db
-            db = get_db()
-            cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
-            print("📒 当前记录：")
-            for row in cursor.fetchall():
-                print(dict(row))
+        #if intent == "add_record":
+            #from db import get_db
+            #db = get_db()
+            #cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
+            #print("📒 当前记录：")
+            #for row in cursor.fetchall():
+                #print(dict(row))
 
-        if intent == "add_income":
-            from db import get_db
-            db = get_db()
-            cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
-            print("📒 当前记录：")
-            for row in cursor.fetchall():
-                print(dict(row))
+        #if intent == "add_income":
+            #from db import get_db
+            #db = get_db()
+            #cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
+            #print("📒 当前记录：")
+            #for row in cursor.fetchall():
+                #print(dict(row))
         # 用 LLM 进行总结生成自然语言
         reply = call_deepseek_summary(latest_msg, result, llm_cfg)
     else:
         # 如果未识别出意图，直接和用户闲聊几句
-        print("llm输入:",chat_history)
+        #print("llm输入:",chat_history)
         reply = call_deepseek_chat(chat_history, llm_cfg)
 
     # 记录 assistant 回复
@@ -820,3 +851,65 @@ def daily_stats():
         })
 
     return jsonify(result)
+
+
+# ===== 管理员接口 =====
+
+@app.route("/api/users", methods=["GET"])
+@admin_required
+def list_users():
+    """列出除当前管理员外的所有用户"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, username, is_admin FROM users WHERE id != ?",
+        (session.get("user_id"),),
+    ).fetchall()
+    result = [
+        {
+            "id": r["id"],
+            "username": r["username"],
+            "is_admin": bool(r["is_admin"]),
+        }
+        for r in rows
+    ]
+    return jsonify(result)
+
+
+@app.route("/api/users/<int:user_id>/password", methods=["PUT"])
+@admin_required
+def admin_change_password(user_id):
+    data = request.get_json() or {}
+    new_pwd = data.get("password", "").strip()
+    if not new_pwd:
+        return jsonify({"error": "缺少密码"}), 400
+    db = get_db()
+    db.execute(
+        "UPDATE users SET password = ? WHERE id = ?",
+        (generate_password_hash(new_pwd), user_id),
+    )
+    db.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/api/users/batch_delete", methods=["POST"])
+@admin_required
+def admin_batch_delete():
+    data = request.get_json() or {}
+    ids = data.get("user_ids") or []
+    if not isinstance(ids, list):
+        return jsonify({"error": "user_ids 必须是列表"}), 400
+
+    # 不允许删除自身
+    ids = [i for i in ids if i != session.get("user_id")]
+    if not ids:
+        return jsonify({"success": True})
+
+    placeholders = ",".join(["?"] * len(ids))
+    db = get_db()
+    db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
+    db.commit()
+    return jsonify({"success": True})

@@ -48,6 +48,17 @@ Set-ExecutionPolicy -Scope Process Bypass
 2. 安装前端依赖；
 3. 分别启动Waitress WSGI 服务和 Vite 开发服务器，按下 `Ctrl+C` 即可结束。
 
+## 管理员功能
+
+初始化数据库时会自动创建默认管理员账号 **admin/admin**。管理员登录后可以访问以
+下接口：
+
+- `GET /api/users`：查看所有普通用户；
+- `PUT /api/users/<id>/password`：修改指定用户的密码；
+- `POST /api/users/batch_delete`：批量删除用户，参数 `user_ids` 为用户 ID 数组。
+
+前端提供了“🛠 用户管理”页面，管理员登录后可在侧边菜单中进入该页面，对用户列表进行查看、修改密码和批量删除操作。
+
 ## License
 
 MIT

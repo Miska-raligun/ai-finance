@@ -13,12 +13,20 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const username = ref('')
 const password = ref('')
+
+function reset() {
+  username.value = ''
+  password.value = ''
+}
+
+onMounted(reset)
+onActivated(reset)
 
 async function onLogin() {
   const res = await fetch('/api/login', {
@@ -30,6 +38,11 @@ async function onLogin() {
   const data = await res.json()
   if (data.success) {
     localStorage.setItem('username', username.value)
+    if (data.is_admin) {
+      localStorage.setItem('is_admin', '1')
+    } else {
+      localStorage.removeItem('is_admin')
+    }
     router.push('/chat')
   } else {
     alert(data.error || '登录失败')
