@@ -346,7 +346,7 @@ def budget_remain(user_id, params):
         return reply
 
 import re
-def call_deepseek_budget_advice(user_id, records, total_budget=None, llm=None):
+def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
     import os, requests, json
 
     llm = llm or {}
@@ -359,24 +359,41 @@ def call_deepseek_budget_advice(user_id, records, total_budget=None, llm=None):
         "Content-Type": "application/json"
     }
 
-    # ✅ 过滤掉收入类分类
+    from collections import defaultdict
+
+    # 当前月份字符串，格式为 "2025-06"
+    month = datetime.now().strftime("%Y-%m")
+
+    # ✅ 获取该月所有支出记录
     db = get_db()
     cursor = db.execute(
-        "SELECT name FROM categories WHERE type = '支出' AND user_id = ?",
-        (user_id,)
+        """
+        SELECT category, amount
+        FROM records
+        WHERE user_id = ? AND month = ? AND category IN (
+            SELECT name FROM categories WHERE type = '支出' AND user_id = ?
+        )
+        """,
+        (user_id, month, user_id)
     )
-    valid_categories = set(row['name'] for row in cursor.fetchall())
+    monthly_summary = defaultdict(float)
 
-    filtered_records = [
-        r for r in records if r['category'] in valid_categories
+    for row in cursor.fetchall():
+        monthly_summary[row['category']] += float(row['amount'])
+
+    if not monthly_summary:
+        return "📭 没有本月支出记录，无法生成预算建议。"
+
+    summary_data = [
+        {"category": category, "amount": round(amount, 2)}
+        for category, amount in monthly_summary.items()
     ]
+    history_json = json.dumps(summary_data, ensure_ascii=False)
 
-    if not filtered_records:
-        return "📭 没有可用于分析的支出记录，无法生成预算建议。"
-
-    history_json = json.dumps(filtered_records, ensure_ascii=False)
-    print("🎯 用于预算分析的分类：", list(valid_categories))
-    print("🎯 传给 LLM 的记录条数：", len(filtered_records))
+    print("📈 本月每个分类消费总额：", summary_data)
+    print("🎯 设定总预算：", total_budget)
+    print("🎯 用于预算分析的分类：", list(monthly_summary.keys()))
+    print("🎯 传给 LLM 的分类数量：", len(monthly_summary))
     print("🎯 设定总预算：", total_budget)
 
     if total_budget:
@@ -433,7 +450,7 @@ def suggest_budgets(user_id, params=None, llm=None):
         return "📊 暂无支出记录，无法生成预算建议。"
 
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
-    llm_reply = call_deepseek_budget_advice(user_id, records, total, llm)
+    llm_reply = call_deepseek_budget_advice(user_id, total, llm)
     print("🧠 LLM 预算建议回复：\n", llm_reply)
 
     # ✅ 解析 LLM 输出格式

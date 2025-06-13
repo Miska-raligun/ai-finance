@@ -13,7 +13,6 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
 CORS(app, supports_credentials=True)
 
-
 # 在内存中维护最近10条对话记录
 chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
 
@@ -160,7 +159,7 @@ def call_deepseek_intent(message, llm=None):
 
     payload = {
         "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
-        "temperature": 0.7,
+        "temperature": 0.5,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": message}
@@ -170,7 +169,7 @@ def call_deepseek_intent(message, llm=None):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
+        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
 
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
@@ -301,7 +300,7 @@ def chat():
     if len(chat_history) > 10:
         del chat_history[:-10]
 
-    print("最新消息: ",latest_msg)
+    #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
     print("🧠 LLM 原始结构化输出：", llm_output)
 
@@ -315,7 +314,7 @@ def chat():
             else:
                 r = handlers[intent](g.user_id, params)
             results.append(r)
-            print("📦 handler 执行结果：", r)
+            #print("📦 handler 执行结果：", r)
 
     if results:
         result = "\n".join(results)
