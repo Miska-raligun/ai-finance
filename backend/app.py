@@ -7,11 +7,12 @@ from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
+init_db()
+load_dotenv()  # 加载 .env 文件
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
 CORS(app, supports_credentials=True)
-init_db()
-load_dotenv()  # 加载 .env 文件
+
 
 # 在内存中维护最近10条对话记录
 chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
@@ -169,7 +170,7 @@ def call_deepseek_intent(message, llm=None):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
+        print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
 
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
@@ -300,9 +301,9 @@ def chat():
     if len(chat_history) > 10:
         del chat_history[:-10]
 
-    #print("最新消息: ",latest_msg)
+    print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    #print("🧠 LLM 原始结构化输出：", llm_output)
+    print("🧠 LLM 原始结构化输出：", llm_output)
 
     intent_results = parse_response(llm_output)
 
