@@ -10,6 +10,7 @@
       >
         <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
         <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/admin">🛠 用户管理</el-menu-item>
       </el-menu>
       <el-card class="user-panel" shadow="never">
         <template #header>
@@ -39,6 +40,7 @@
       >
         <el-menu-item index="/chat">💬 聊天记账</el-menu-item>
         <el-menu-item index="/ledger">📒 账本管理</el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/admin">🛠 用户管理</el-menu-item>
       </el-menu>
       <el-card class="user-panel" shadow="never">
         <template #header>
@@ -86,6 +88,7 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { ref, watchEffect, onMounted, watch, onBeforeUnmount } from 'vue'
+import api from '@/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,6 +98,7 @@ const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
 const username = ref('')
+const isAdmin = ref(false)
 const isMobile = ref(window.innerWidth < 600)
 const showDrawer = ref(false)
 
@@ -113,7 +117,28 @@ watchEffect(() => {
 })
 
 function updateUsername() {
-  username.value = localStorage.getItem('username') || ''
+  api
+    .get('/api/me')
+    .then(res => {
+      username.value = res.data.username || ''
+      isAdmin.value = !!res.data.is_admin
+      if (res.data.username) {
+        localStorage.setItem('username', res.data.username)
+      } else {
+        localStorage.removeItem('username')
+      }
+      if (res.data.is_admin) {
+        localStorage.setItem('is_admin', '1')
+      } else {
+        localStorage.removeItem('is_admin')
+      }
+    })
+    .catch(() => {
+      username.value = ''
+      isAdmin.value = false
+      localStorage.removeItem('username')
+      localStorage.removeItem('is_admin')
+    })
 }
 
 onMounted(updateUsername)
@@ -151,6 +176,7 @@ function handleSelect(index) {
 function logout() {
   fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
   localStorage.removeItem('username')
+  localStorage.removeItem('is_admin')
   router.push('/login')
 }
 

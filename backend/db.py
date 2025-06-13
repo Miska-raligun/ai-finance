@@ -82,15 +82,40 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
-            password TEXT
+            password TEXT,
+            is_admin INTEGER DEFAULT 0
         )
     """
     )
+
+    # ✅ 补充缺失的 is_admin 字段（向后兼容）
+    if not column_exists(cur, "users", "is_admin"):
+        cur.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
 
     # 兼容旧版数据库，补充缺失的 user_id 字段
     for tbl in ("records", "budgets", "categories", "income"):
         if not column_exists(cur, tbl, "user_id"):
             cur.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER")
+
+    admin_row = cur.execute(
+        "SELECT id FROM users WHERE username = ? AND is_admin = 1", ("admin",)
+    ).fetchone()
+
+    if not admin_row:
+        from werkzeug.security import generate_password_hash
+
+        # ⚠️ 确保不会因为已有非管理员 admin 用户而报错
+        cur.execute("SELECT id FROM users WHERE username = ?", ("admin",))
+        existing_user = cur.fetchone()
+
+        if existing_user:
+            print("⚠️ 已存在名为 admin 的用户，无法创建默认管理员。请手动检查权限。")
+        else:
+            cur.execute(
+                "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)",
+                ("admin", generate_password_hash("admin")),
+            )
+
 
     conn.commit()
     conn.close()
