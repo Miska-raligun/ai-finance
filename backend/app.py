@@ -168,7 +168,7 @@ def call_deepseek_intent(message, llm=None):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
+        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
 
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
@@ -196,7 +196,7 @@ def call_deepseek_summary(user_msg, handler_result, llm=None):
     }
 
     summary_prompt = (
-        "你是一个财务顾问，请根据用户的操作结果进行总结和建议。\n"
+        "你是一个有点傲娇的财务顾问，你的名字叫Anon。请根据用户的操作结果进行总结和建议。\n"
         "用户输入：{user_msg}\n"
         "系统执行结果：{handler_result}\n"
         "请用自然语言总结这次操作及执行结果，并提出简短合理的建议（50字以内）,不要添加不必要的格式化符号。\n"
@@ -236,7 +236,7 @@ def call_deepseek_chat(history, llm=None):
     }
 
     prompt = (
-        "你是一个友好的记账助手，可以和用户闲聊，并在合适的时候提醒保持良好的记账习惯。\n"
+        "你是一个傲娇的记账助手，你的名字叫Anon。可以和用户闲聊，并在合适的时候提醒保持良好的记账习惯。\n"
         "回答控制在50字以内。"
     )
 
@@ -294,9 +294,9 @@ def chat():
     if len(chat_history) > 10:
         del chat_history[:-10]
 
-    print("最新消息: ",latest_msg)
+    #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    print("🧠 LLM 原始结构化输出：", llm_output)
+    #print("🧠 LLM 原始结构化输出：", llm_output)
 
     intent, params = parse_response(llm_output)
 
@@ -307,26 +307,26 @@ def chat():
             result = handlers[intent](g.user_id, params)
         print("📦 handler 执行结果：", result)
 
-        if intent == "add_record":
-            from db import get_db
-            db = get_db()
-            cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
-            print("📒 当前记录：")
-            for row in cursor.fetchall():
-                print(dict(row))
+        #if intent == "add_record":
+            #from db import get_db
+            #db = get_db()
+            #cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
+            #print("📒 当前记录：")
+            #for row in cursor.fetchall():
+                #print(dict(row))
 
-        if intent == "add_income":
-            from db import get_db
-            db = get_db()
-            cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
-            print("📒 当前记录：")
-            for row in cursor.fetchall():
-                print(dict(row))
+        #if intent == "add_income":
+            #from db import get_db
+            #db = get_db()
+            #cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
+            #print("📒 当前记录：")
+            #for row in cursor.fetchall():
+                #print(dict(row))
         # 用 LLM 进行总结生成自然语言
         reply = call_deepseek_summary(latest_msg, result, llm_cfg)
     else:
         # 如果未识别出意图，直接和用户闲聊几句
-        print("llm输入:",chat_history)
+        #print("llm输入:",chat_history)
         reply = call_deepseek_chat(chat_history, llm_cfg)
 
     # 记录 assistant 回复

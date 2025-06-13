@@ -97,16 +97,25 @@ def init_db():
         if not column_exists(cur, tbl, "user_id"):
             cur.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER")
 
-    # ✅ 如无管理员则创建默认管理员账号 admin/admin
     admin_row = cur.execute(
-        "SELECT id FROM users WHERE is_admin = 1"
+        "SELECT id FROM users WHERE username = ? AND is_admin = 1", ("admin",)
     ).fetchone()
+
     if not admin_row:
         from werkzeug.security import generate_password_hash
-        cur.execute(
-            "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)",
-            ("admin", generate_password_hash("admin")),
-        )
+
+        # ⚠️ 确保不会因为已有非管理员 admin 用户而报错
+        cur.execute("SELECT id FROM users WHERE username = ?", ("admin",))
+        existing_user = cur.fetchone()
+
+        if existing_user:
+            print("⚠️ 已存在名为 admin 的用户，无法创建默认管理员。请手动检查权限。")
+        else:
+            cur.execute(
+                "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)",
+                ("admin", generate_password_hash("admin")),
+            )
+
 
     conn.commit()
     conn.close()
