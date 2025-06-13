@@ -146,6 +146,7 @@ def call_deepseek_intent(message, llm=None):
         "① 来源：如 工资、兼职（可选）\n"
         "② 时间范围：如 2025-06 或 2025（可选）\n"
         "③ 全部：是（表示查询所有收入记录）\n"
+        "当用户一次输入包含多个操作时，请为每个操作单独输出一组“意图/参数”，并用空行分隔多组结构。\n"
         "请严格使用以下结构化格式输出，不得添加自然语言解释或括号说明：\n"
         "意图：add_record\n"
         "参数：\n"
@@ -263,21 +264,26 @@ def call_deepseek_chat(history, llm=None):
         return "⚠️ 暂时无法回复"
 
 def parse_response(text):
-    lines = text.strip().split('\n')
-    intent = ""
-    params = {}
-    mode = None
-    for line in lines:
-        if line.startswith("意图："):
-            intent_raw = line.split("：", 1)[1].strip()
-            intent = INTENT_ALIAS.get(intent_raw, intent_raw)
-        elif line.startswith("参数："):
-            mode = "param"
-        elif "：" in line and mode == "param":
-            k, v = line.split("：", 1)
-            params[k.strip()] = v.strip()
-
-    return intent, params
+    """Parse LLM structured output into a list of (intent, params) tuples."""
+    blocks = [b for b in text.strip().split("\n\n") if b.strip()]
+    results = []
+    for block in blocks:
+        lines = block.strip().split("\n")
+        intent = ""
+        params = {}
+        mode = None
+        for line in lines:
+            if line.startswith("意图："):
+                intent_raw = line.split("：", 1)[1].strip()
+                intent = INTENT_ALIAS.get(intent_raw, intent_raw)
+            elif line.startswith("参数："):
+                mode = "param"
+            elif "：" in line and mode == "param":
+                k, v = line.split("：", 1)
+                params[k.strip()] = v.strip()
+        if intent:
+            results.append((intent, params))
+    return results
 
 @app.route("/api/chat", methods=["POST"])
 @login_required
@@ -298,16 +304,22 @@ def chat():
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
     #print("🧠 LLM 原始结构化输出：", llm_output)
 
-    intent, params = parse_response(llm_output)
+    intent_results = parse_response(llm_output)
 
-    if intent in handlers:
-        if intent == "suggest_budgets":
-            result = handlers[intent](g.user_id, params, llm_cfg)
-        else:
-            result = handlers[intent](g.user_id, params)
-        print("📦 handler 执行结果：", result)
+    results = []
+    for intent, params in intent_results:
+        if intent in handlers:
+            if intent == "suggest_budgets":
+                r = handlers[intent](g.user_id, params, llm_cfg)
+            else:
+                r = handlers[intent](g.user_id, params)
+            results.append(r)
+            print("📦 handler 执行结果：", r)
 
-        #if intent == "add_record":
+    if results:
+        result = "\n".join(results)
+
+        #if any(i[0] == "add_record" for i in intent_results):
             #from db import get_db
             #db = get_db()
             #cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
@@ -315,7 +327,7 @@ def chat():
             #for row in cursor.fetchall():
                 #print(dict(row))
 
-        #if intent == "add_income":
+        #if any(i[0] == "add_income" for i in intent_results):
             #from db import get_db
             #db = get_db()
             #cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
