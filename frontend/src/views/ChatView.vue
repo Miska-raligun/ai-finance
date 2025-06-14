@@ -27,7 +27,7 @@ import { ref, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 
 const userInput = ref('')
-const messages = ref([{ sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }])
+const messages = ref([{ sender: 'assistant', content: '你好，我是你的记账助手Anon，有什么可以帮你？' }])
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
@@ -88,7 +88,7 @@ onActivated(() => {
   if (name !== currentUser.value) {
     currentUser.value = name
     messages.value = [
-      { sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }
+      { sender: 'assistant', content: '你好，我是你的记账助手Anon，有什么可以帮你？' }
     ]
   }
 })

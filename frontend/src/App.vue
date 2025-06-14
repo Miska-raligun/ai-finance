@@ -74,6 +74,9 @@
             <el-form-item label="模型名称">
               <el-input v-model="llmModel" placeholder="Pro/deepseek-ai/DeepSeek-V3" />
             </el-form-item>
+            <el-form-item label="人格设定">
+              <el-input v-model="llmPersona" placeholder="例如 傲娇的助手" />
+            </el-form-item>
           </el-form>
           <template #footer>
             <el-button @click="useDefault">加载系统默认配置</el-button>
@@ -97,6 +100,7 @@ const showConfig = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
+const llmPersona = ref('')
 const username = ref('')
 const isAdmin = ref(false)
 const isMobile = ref(window.innerWidth < 600)
@@ -157,7 +161,8 @@ function saveConfig() {
   const cfg = {
     url: llmUrl.value,
     apikey: llmKey.value,
-    model: llmModel.value
+    model: llmModel.value,
+    persona: llmPersona.value
   }
   localStorage.setItem('llmConfig', JSON.stringify(cfg))
   showConfig.value = false
@@ -181,6 +186,16 @@ function logout() {
 }
 
 function openConfigPanel() {
+  const raw = localStorage.getItem('llmConfig')
+  if (raw && raw !== 'default') {
+    try {
+      const cfg = JSON.parse(raw)
+      llmUrl.value = cfg.url || ''
+      llmKey.value = cfg.apikey || ''
+      llmModel.value = cfg.model || ''
+      llmPersona.value = cfg.persona || ''
+    } catch {}
+  }
   showConfig.value = true
 }
 </script>
