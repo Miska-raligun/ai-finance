@@ -101,6 +101,38 @@ def get_me():
         }
     )
 
+
+@app.route("/api/llm_config", methods=["GET", "POST"])
+@login_required
+def llm_config_api():
+    db = get_db()
+    if request.method == "GET":
+        row = db.execute(
+            "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+            (g.user_id,),
+        ).fetchone()
+        return jsonify(dict(row)) if row else jsonify({})
+
+    data = request.get_json() or {}
+    url = data.get("url", "").strip()
+    apikey = data.get("apikey", "").strip()
+    model = data.get("model", "").strip()
+    persona = data.get("persona", "").strip()
+    db.execute(
+        """
+        INSERT INTO llm_config (user_id, url, apikey, model, persona)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            url=excluded.url,
+            apikey=excluded.apikey,
+            model=excluded.model,
+            persona=excluded.persona
+        """,
+        (g.user_id, url, apikey, model, persona),
+    )
+    db.commit()
+    return jsonify({"success": True})
+
 handlers = {
     "add_record": add_record,
     "add_income": add_income,  # ✅ 新增

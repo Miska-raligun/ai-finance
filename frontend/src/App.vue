@@ -150,7 +150,16 @@ watch(() => route.path, updateUsername)
 
 function checkConfig() {
   if (route.path !== '/login' && !localStorage.getItem('llmConfig')) {
-    showConfig.value = true
+    fetch('/api/llm_config', { credentials: 'include' })
+      .then(res => res.ok ? res.json() : null)
+      .then(cfg => {
+        if (cfg && Object.keys(cfg).length) {
+          localStorage.setItem('llmConfig', JSON.stringify(cfg))
+        } else {
+          showConfig.value = true
+        }
+      })
+      .catch(() => { showConfig.value = true })
   }
 }
 
@@ -164,11 +173,23 @@ function saveConfig() {
     model: llmModel.value,
     persona: llmPersona.value
   }
+  fetch('/api/llm_config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(cfg)
+  }).catch(() => {})
   localStorage.setItem('llmConfig', JSON.stringify(cfg))
   showConfig.value = false
 }
 
 function useDefault() {
+  fetch('/api/llm_config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({})
+  }).catch(() => {})
   localStorage.setItem('llmConfig', 'default')
   showConfig.value = false
 }
@@ -182,6 +203,7 @@ function logout() {
   fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
   localStorage.removeItem('username')
   localStorage.removeItem('is_admin')
+  localStorage.removeItem('llmConfig')
   router.push('/login')
 }
 

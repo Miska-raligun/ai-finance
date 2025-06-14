@@ -88,6 +88,19 @@ def init_db():
     """
     )
 
+    # ✅ LLM 配置表，每个用户一条记录
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS llm_config (
+            user_id INTEGER PRIMARY KEY,
+            url TEXT,
+            apikey TEXT,
+            model TEXT,
+            persona TEXT
+        )
+    """
+    )
+
     # ✅ 补充缺失的 is_admin 字段（向后兼容）
     if not column_exists(cur, "users", "is_admin"):
         cur.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
