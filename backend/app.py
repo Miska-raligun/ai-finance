@@ -131,6 +131,11 @@ def llm_config_api():
         (g.user_id, url, apikey, model, persona),
     )
     db.commit()
+    # Output the current config for debugging
+    print(
+        "Updated llm_config for user", g.user_id,
+        {"url": url, "apikey": apikey, "model": model, "persona": persona}
+    )
     return jsonify({"success": True})
 
 handlers = {
@@ -201,20 +206,20 @@ def call_deepseek_intent(message, llm=None):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
+        print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
 
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
         elif "error" in data:
             print("❌ DeepSeek API 错误：", data["error"])
-            return "意图：unknown\\n参数："
+            return "意图：unknown\n参数："
         else:
             print("❓ 未知格式响应：", data)
-            return "意图：unknown\\n参数："
+            return "意图：unknown\n参数："
 
     except Exception as e:
         print("DeepSeek 调用失败:", e)
-        return "意图：unknown\\n参数："
+        return "意图：unknown\n参数："
 
 def call_deepseek_summary(user_msg, handler_result, llm=None):
     import os, requests
@@ -324,6 +329,15 @@ def parse_response(text):
 def chat():
     data = request.get_json()
     llm_cfg = data.get("llm") or {}
+    db = get_db()
+    row = db.execute(
+        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        (g.user_id,),
+    ).fetchone()
+    if row:
+        saved_cfg = dict(row)
+        for k, v in saved_cfg.items():
+            llm_cfg.setdefault(k, v)
     user_msg = data.get("message", "")
     latest_msg = user_msg
     if isinstance(user_msg, str):
@@ -334,7 +348,7 @@ def chat():
     if len(chat_history) > 10:
         del chat_history[:-10]
 
-    #print("最新消息: ",latest_msg)
+    print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
     print("🧠 LLM 原始结构化输出：", llm_output)
 
