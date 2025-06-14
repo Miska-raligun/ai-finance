@@ -24,14 +24,14 @@
 
     <div class="chart-row">
       <div class="pie-wrapper">
-        <VChart :option="incomePieOption" style="height: 300px" />
+        <VChart class="v-chart" :option="incomePieOption" style="height: 300px" />
       </div>
       <div class="pie-wrapper">
-        <VChart :option="spendPieOption" style="height: 300px" />
+        <VChart class="v-chart" :option="spendPieOption" style="height: 300px" />
       </div>
     </div>
     <div class="line-wrapper">
-      <VChart :option="lineOption" style="height: 300px" />
+      <VChart class="v-chart" :option="lineOption" style="height: 300px" />
       <div class="line-title">{{ lineChartTitle }}</div>
     </div>
   </el-card>
