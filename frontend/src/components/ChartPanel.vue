@@ -235,6 +235,7 @@ watch(mode, () => {
 .line-title {
   margin-top: 5px;
   font-weight: bold;
+  text-align: center;
 }
 </style>
 
