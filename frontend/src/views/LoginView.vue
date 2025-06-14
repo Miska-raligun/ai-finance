@@ -44,6 +44,17 @@ async function onLogin() {
     } else {
       localStorage.removeItem('is_admin')
     }
+    try {
+      const cfgRes = await fetch('/api/llm_config', { credentials: 'include' })
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json()
+        if (Object.keys(cfg).length) {
+          localStorage.setItem('llmConfig', JSON.stringify(cfg))
+        } else {
+          localStorage.removeItem('llmConfig')
+        }
+      }
+    } catch {}
     router.push('/chat')
   } else {
     alert(data.error || '登录失败')
