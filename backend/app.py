@@ -134,10 +134,10 @@ def llm_config_api():
     )
     db.commit()
     # Output the current config for debugging
-    print(
-        "Updated llm_config for user", g.user_id,
-        {"url": url, "apikey": apikey, "model": model, "persona": persona}
-    )
+    #print(
+        #"Updated llm_config for user", g.user_id,
+        #{"url": url, "apikey": apikey, "model": model, "persona": persona}
+    #)
     return jsonify({"success": True})
 
 handlers = {
@@ -150,7 +150,8 @@ handlers = {
     "delete_category": delete_category,
     "budget_remain": budget_remain,
     "suggest_budgets": suggest_budgets,
-    "query_income": query_income
+    "query_income": query_income,
+    "category_sum": category_sum
 }
 
 # 意图别名映射
@@ -176,15 +177,20 @@ def call_deepseek_intent(message, llm=None):
     prompt = (
         f"今天是 {today_str}。\n"
         "你是一个智能财务助理。请根据用户输入生成结构化的意图（intent）和参数（params）。\n"
-        "意图必须为：add_record, add_income, set_budget, update_budget, analyze_spend, add_category, delete_category, budget_remain, suggest_budgets, query_income, chat。\n"
+        "意图必须为：add_record, add_income, set_budget, update_budget, analyze_spend, "
+        "add_category, delete_category, budget_remain, suggest_budgets, query_income, "
+        "category_sum, chat。\n"
         "请结合“今天、昨天、上周、5月1日”等模糊表达推断具体日期，并提取出对应的月份（格式如 2025-06）。\n"
+
         "意图为 suggest_budgets 时，参数中务必使用“总预算”字段；\n"
         "意图为 add_record时，需提取：分类、金额、备注、时间、月份；\n"
         "意图为 add_income时，需提取：分类、金额、备注、时间、月份；\n"
+        "意图为 category_sum 时，需提取：分类、起始时间、结束时间。\n"
         "意图为 query_income 时，参数可包含以下之一或组合：\n"
         "① 来源：如 工资、兼职（可选）\n"
         "② 时间范围：如 2025-06 或 2025（可选）\n"
         "③ 全部：是（表示查询所有收入记录）\n"
+
         "当用户一次输入包含多个操作时，请为每个操作单独输出一组“意图/参数”，并用空行分隔多组结构。\n"
         "请严格使用以下结构化格式输出，不得添加自然语言解释或括号说明：\n"
         "意图：add_record\n"
@@ -208,7 +214,7 @@ def call_deepseek_intent(message, llm=None):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
+        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
 
         if "choices" in data:
             return data["choices"][0]["message"]["content"]
@@ -350,9 +356,9 @@ def chat():
     if len(chat_history) > 10:
         del chat_history[:-10]
 
-    print("最新消息: ",latest_msg)
+    #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    print("🧠 LLM 原始结构化输出：", llm_output)
+    #print("🧠 LLM 原始结构化输出：", llm_output)
 
     intent_results = parse_response(llm_output)
 

@@ -361,40 +361,44 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
 
     from collections import defaultdict
 
-    # 当前月份字符串，格式为 "2025-06"
-    month = datetime.now().strftime("%Y-%m")
-
-    # ✅ 获取该月所有支出记录
+    # ✅ 获取所有支出记录（历史所有月份）
     db = get_db()
-    cursor = db.execute(
-        """
-        SELECT category, amount
+    cursor = db.execute("""
+        SELECT category, amount, month
         FROM records
-        WHERE user_id = ? AND month = ? AND category IN (
+        WHERE user_id = ? AND category IN (
             SELECT name FROM categories WHERE type = '支出' AND user_id = ?
         )
-        """,
-        (user_id, month, user_id)
-    )
-    monthly_summary = defaultdict(float)
+    """, (user_id, user_id))
+
+    category_totals = defaultdict(float)
+    category_months = defaultdict(set)
 
     for row in cursor.fetchall():
-        monthly_summary[row['category']] += float(row['amount'])
+        category = row['category']
+        amount = float(row['amount'])
+        month = row['month']
+        category_totals[category] += amount
+        category_months[category].add(month)
 
-    if not monthly_summary:
-        return "📭 没有本月支出记录，无法生成预算建议。"
+    # ✅ 构造历史数据摘要
+    summary_data = []
+    for category in category_totals:
+        total = round(category_totals[category], 2)
+        months = len(category_months[category])
+        average = round(total / months, 2) if months else 0
+        summary_data.append({
+            "category": category,
+            "total": total,
+            "average": average
+        })
 
-    summary_data = [
-        {"category": category, "amount": round(amount, 2)}
-        for category, amount in monthly_summary.items()
-    ]
     history_json = json.dumps(summary_data, ensure_ascii=False)
 
-    print("📈 本月每个分类消费总额：", summary_data)
+    print("📊 分类历史消费汇总：", summary_data)
     print("🎯 设定总预算：", total_budget)
-    print("🎯 用于预算分析的分类：", list(monthly_summary.keys()))
-    print("🎯 传给 LLM 的分类数量：", len(monthly_summary))
-    print("🎯 设定总预算：", total_budget)
+    print("🎯 用于预算分析的分类：", [item['category'] for item in summary_data])
+    print("🎯 传给 LLM 的分类数量：", len(summary_data))
 
     if total_budget:
         budget_instruction = (
@@ -424,7 +428,7 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
     prompt = (
         budget_instruction +
         format_instruction +
-        "\n用户历史记录如下（JSON 列表，每项包含 category, amount, date）：\n" +
+        "\n用户各分类的历史消费情况如下（JSON 列表，每项包含 category、total 和 average）：\n"+
         history_json
     )
 
@@ -542,6 +546,36 @@ def query_income(user_id, params):
         scope += "总"
 
     return f"💰 {scope}收入为 ¥{total:.2f}"
+
+def category_sum(user_id, params):
+    # 从 params 中提取分类和时间范围
+    category = params.get("分类")
+    start_date = params.get("开始时间")
+    end_date = params.get("结束时间")
+
+    db = get_db()
+    cur = db.cursor()
+    query = "SELECT SUM(amount) FROM records WHERE user_id = ?"
+    args = [user_id]
+
+    if category:
+        query += " AND category = ?"
+        args.append(category)
+    if start_date:
+        query += " AND date >= ?"
+        args.append(start_date)
+    if end_date:
+        query += " AND date <= ?"
+        args.append(end_date)
+
+    cur.execute(query, args)
+    total = cur.fetchone()[0] or 0.0
+
+    scope = f"{start_date} 至 {end_date}" if start_date and end_date else "所选范围内"
+    if category:
+        return f"📊 你在 {scope} 的“{category}”支出为 ¥{total:.2f}"
+    else:
+        return f"📊 你在 {scope} 的总支出为 ¥{total:.2f}"
 
 
 
