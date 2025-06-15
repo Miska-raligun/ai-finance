@@ -6,10 +6,12 @@ import os, requests, secrets
 from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+from llm_security_middleware import register_llm_security
 
 init_db()
 load_dotenv()  # 加载 .env 文件
 app = Flask(__name__)
+register_llm_security(app)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
 CORS(app, supports_credentials=True)
 
