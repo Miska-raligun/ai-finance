@@ -110,6 +110,8 @@ const fetchChartData = async () => {
       {
         name: '收入来源',
         type: 'pie',
+        label: { show: false },
+        labelLine: { show: false },
         radius: '50%',
         data: incomeCats.map(x => ({
           name: x['名称'],
@@ -122,10 +124,12 @@ const fetchChartData = async () => {
     title: { text: '支出', left: 'center' },
     tooltip: { trigger: 'item' },
     legend: { bottom: 0, left: 'center' },
-    series: [
+     series: [
       {
         name: '消费分类',
         type: 'pie',
+        label: { show: false },
+        labelLine: { show: false },
         radius: '50%',
         data: spendCats.map(x => ({
           name: x['名称'],
