@@ -346,7 +346,7 @@ def budget_remain(user_id, params):
         return reply
 
 import re
-def call_deepseek_budget_advice(user_id, records, total_budget=None, llm=None):
+def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
     import os, requests, json
 
     llm = llm or {}
@@ -359,25 +359,46 @@ def call_deepseek_budget_advice(user_id, records, total_budget=None, llm=None):
         "Content-Type": "application/json"
     }
 
-    # ✅ 过滤掉收入类分类
+    from collections import defaultdict
+
+    # ✅ 获取所有支出记录（历史所有月份）
     db = get_db()
-    cursor = db.execute(
-        "SELECT name FROM categories WHERE type = '支出' AND user_id = ?",
-        (user_id,)
-    )
-    valid_categories = set(row['name'] for row in cursor.fetchall())
+    cursor = db.execute("""
+        SELECT category, amount, month
+        FROM records
+        WHERE user_id = ? AND category IN (
+            SELECT name FROM categories WHERE type = '支出' AND user_id = ?
+        )
+    """, (user_id, user_id))
 
-    filtered_records = [
-        r for r in records if r['category'] in valid_categories
-    ]
+    category_totals = defaultdict(float)
+    category_months = defaultdict(set)
 
-    if not filtered_records:
-        return "📭 没有可用于分析的支出记录，无法生成预算建议。"
+    for row in cursor.fetchall():
+        category = row['category']
+        amount = float(row['amount'])
+        month = row['month']
+        category_totals[category] += amount
+        category_months[category].add(month)
 
-    history_json = json.dumps(filtered_records, ensure_ascii=False)
-    print("🎯 用于预算分析的分类：", list(valid_categories))
-    print("🎯 传给 LLM 的记录条数：", len(filtered_records))
+    # ✅ 构造历史数据摘要
+    summary_data = []
+    for category in category_totals:
+        total = round(category_totals[category], 2)
+        months = len(category_months[category])
+        average = round(total / months, 2) if months else 0
+        summary_data.append({
+            "category": category,
+            "total": total,
+            "average": average
+        })
+
+    history_json = json.dumps(summary_data, ensure_ascii=False)
+
+    print("📊 分类历史消费汇总：", summary_data)
     print("🎯 设定总预算：", total_budget)
+    print("🎯 用于预算分析的分类：", [item['category'] for item in summary_data])
+    print("🎯 传给 LLM 的分类数量：", len(summary_data))
 
     if total_budget:
         budget_instruction = (
@@ -407,7 +428,7 @@ def call_deepseek_budget_advice(user_id, records, total_budget=None, llm=None):
     prompt = (
         budget_instruction +
         format_instruction +
-        "\n用户历史记录如下（JSON 列表，每项包含 category, amount, date）：\n" +
+        "\n用户各分类的历史消费情况如下（JSON 列表，每项包含 category、total 和 average）：\n"+
         history_json
     )
 
@@ -433,7 +454,7 @@ def suggest_budgets(user_id, params=None, llm=None):
         return "📊 暂无支出记录，无法生成预算建议。"
 
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
-    llm_reply = call_deepseek_budget_advice(user_id, records, total, llm)
+    llm_reply = call_deepseek_budget_advice(user_id, total, llm)
     print("🧠 LLM 预算建议回复：\n", llm_reply)
 
     # ✅ 解析 LLM 输出格式
@@ -525,6 +546,37 @@ def query_income(user_id, params):
         scope += "总"
 
     return f"💰 {scope}收入为 ¥{total:.2f}"
+
+def category_sum(user_id, params):
+    # 从 params 中提取分类和时间范围
+    category = params.get("分类")
+    start_date = params.get("开始时间")
+    end_date = params.get("结束时间")
+
+    db = get_db()
+    cur = db.cursor()
+    query = "SELECT SUM(amount) FROM records WHERE user_id = ?"
+    args = [user_id]
+
+    if category:
+        query += " AND category = ?"
+        args.append(category)
+    if start_date:
+        query += " AND date >= ?"
+        args.append(start_date)
+    if end_date:
+        query += " AND date <= ?"
+        args.append(end_date)
+
+    cur.execute(query, args)
+    total = cur.fetchone()[0] or 0.0
+
+    scope = f"{start_date} 至 {end_date}" if start_date and end_date else "所选范围内"
+    if category:
+        return f"📊 你在 {scope} 的“{category}”支出为 ¥{total:.2f}"
+    else:
+        return f"📊 你在 {scope} 的总支出为 ¥{total:.2f}"
+
 
 
 
