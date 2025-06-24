@@ -105,7 +105,7 @@ const fetchChartData = async () => {
   incomePieOption.value = {
     title: { text: '收入', left: 'center' },
     tooltip: { trigger: 'item' },
-    legend: { bottom: 0, left: 'center' },
+    //legend: { bottom: 0, left: 'center' },
     series: [
       {
         name: '收入来源',
@@ -123,7 +123,7 @@ const fetchChartData = async () => {
   spendPieOption.value = {
     title: { text: '支出', left: 'center' },
     tooltip: { trigger: 'item' },
-    legend: { bottom: 0, left: 'center' },
+    //legend: { bottom: 0, left: 'center' },
      series: [
       {
         name: '消费分类',

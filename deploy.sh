@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -exs
 
 echo "[start] Deploy script started..."
 
