@@ -415,7 +415,7 @@ def get_records():
             SELECT *, strftime('%Y-%m', date) as month
             FROM records
             WHERE strftime('%Y-%m', date) = ? AND user_id = ?
-            ORDER BY date DESC
+            ORDER BY date DESC, id DESC
         """,
             (month, g.user_id)
         )
@@ -425,7 +425,7 @@ def get_records():
             SELECT *, strftime('%Y-%m', date) as month
             FROM records
             WHERE user_id = ?
-            ORDER BY date DESC
+            ORDER BY date DESC, id DESC
         """,
             (g.user_id,)
         )
@@ -476,7 +476,7 @@ def get_income():
             SELECT id, category, amount, note, date, month, year
             FROM income
             WHERE month = ? AND user_id = ?
-            ORDER BY date DESC
+            ORDER BY date DESC, id DESC
         """,
             (month, g.user_id)
         )
@@ -486,7 +486,7 @@ def get_income():
             SELECT id, category, amount, note, date, month, year
             FROM income
             WHERE user_id = ?
-            ORDER BY date DESC
+            ORDER BY date DESC, id DESC
         """,
             (g.user_id,)
         )
