@@ -35,7 +35,6 @@
       stripe
       border
       style="width: 100%"
-      :default-sort="{ prop: 'date', order: 'descending' }"
       @selection-change="handleSelectionChange"
     >
       <el-table-column type="selection" width="55" />
