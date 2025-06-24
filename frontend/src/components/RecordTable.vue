@@ -116,6 +116,7 @@ const filtered = ref([])
 const categories = ref([])
 const filterCategory = ref('')
 const dateRange = ref([])
+const today = new Date().toISOString().slice(0, 10)
 const selectedRows = ref([])
 const editingId = ref(null)
 const pageSize = 10
@@ -189,7 +190,10 @@ async function fetchData() {
       })
     ])
 
-    const rec = recRes.data
+    const rec = recRes.data.sort((a, b) => {
+      if (a.date === b.date) return b.id - a.id
+      return b.date.localeCompare(a.date)
+    })
     const cats = catRes.data.map(c => c.name)
     categories.value = cats
     console.log("📋 收入数据：", rec)
@@ -219,7 +223,10 @@ async function fetchData() {
 }
 
 
-onMounted(fetchData)
+onMounted(() => {
+  dateRange.value = [today, today]
+  fetchData()
+})
 watch(() => props.refreshFlag, fetchData)
 </script>
 
