@@ -25,9 +25,39 @@
     <div class="chart-row">
       <div class="pie-wrapper">
         <VChart class="v-chart" :option="incomePieOption" style="height: 300px" />
+        <div class="top-tags">
+          <el-tag
+            v-for="item in topIncomeTags"
+            :key="item.name"
+            size="small"
+            :style="{
+              margin: '2px',
+              backgroundColor: item.color,
+              borderColor: item.color,
+              color: '#fff'
+            }"
+          >
+            {{ item.name }}
+          </el-tag>
+        </div>
       </div>
       <div class="pie-wrapper">
         <VChart class="v-chart" :option="spendPieOption" style="height: 300px" />
+        <div class="top-tags">
+          <el-tag
+            v-for="item in topSpendTags"
+            :key="item.name"
+            size="small"
+            :style="{
+              margin: '2px',
+              backgroundColor: item.color,
+              borderColor: item.color,
+              color: '#fff'
+            }"
+          >
+            {{ item.name }}
+          </el-tag>
+        </div>
       </div>
     </div>
     <div class="line-wrapper">
@@ -68,6 +98,21 @@ const spendPieOption = ref({})
 const lineOption = ref({})
 const incomeTotal = ref(0)
 const spendTotal = ref(0)
+const topIncomeTags = ref([])
+const topSpendTags = ref([])
+const pieColors = [
+  '#5470C6',
+  '#91CC75',
+  '#FAC858',
+  '#EE6666',
+  '#73C0DE',
+  '#3BA272',
+  '#FC8452',
+  '#9A60B4',
+  '#EA7CCC'
+]
+const incomeColorMap = {}
+const spendColorMap = {}
 const balance = computed(() => incomeTotal.value - spendTotal.value)
 
 const lineChartTitle = computed(() =>
@@ -102,10 +147,27 @@ const fetchChartData = async () => {
   incomeTotal.value = incomeCats.reduce((s, x) => s + Number(x['金额']), 0)
   spendTotal.value = spendCats.reduce((s, x) => s + Number(x['金额']), 0)
 
+  const sortedIncome = incomeCats
+    .slice()
+    .sort((a, b) => b['金额'] - a['金额'])
+  const sortedSpend = spendCats
+    .slice()
+    .sort((a, b) => b['金额'] - a['金额'])
+
+  topIncomeTags.value = sortedIncome.slice(0, 3).map(x => ({
+    name: x['名称'],
+    color: incomeColorMap[x['名称']]
+  }))
+  topSpendTags.value = sortedSpend.slice(0, 3).map(x => ({
+    name: x['名称'],
+    color: spendColorMap[x['名称']]
+  }))
+
+  for (const k in incomeColorMap) delete incomeColorMap[k]
   incomePieOption.value = {
     title: { text: '收入', left: 'center' },
     tooltip: { trigger: 'item' },
-    //legend: { bottom: 0, left: 'center' },
+    color: pieColors,
     series: [
       {
         name: '收入来源',
@@ -113,28 +175,39 @@ const fetchChartData = async () => {
         label: { show: false },
         labelLine: { show: false },
         radius: '50%',
-        data: incomeCats.map(x => ({
-          name: x['名称'],
-          value: Number(Number(x['金额']).toFixed(2))
-        }))
+        data: incomeCats.map((x, idx) => {
+          const color = pieColors[idx % pieColors.length]
+          incomeColorMap[x['名称']] = color
+          return {
+            name: x['名称'],
+            value: Number(Number(x['金额']).toFixed(2)),
+            itemStyle: { color }
+          }
+        })
       }
     ]
   }
+  for (const k in spendColorMap) delete spendColorMap[k]
   spendPieOption.value = {
     title: { text: '支出', left: 'center' },
     tooltip: { trigger: 'item' },
-    //legend: { bottom: 0, left: 'center' },
-     series: [
+    color: pieColors,
+    series: [
       {
         name: '消费分类',
         type: 'pie',
         label: { show: false },
         labelLine: { show: false },
         radius: '50%',
-        data: spendCats.map(x => ({
-          name: x['名称'],
-          value: Number(Number(x['金额']).toFixed(2))
-        }))
+        data: spendCats.map((x, idx) => {
+          const color = pieColors[idx % pieColors.length]
+          spendColorMap[x['名称']] = color
+          return {
+            name: x['名称'],
+            value: Number(Number(x['金额']).toFixed(2)),
+            itemStyle: { color }
+          }
+        })
       }
     ]
   }
@@ -229,6 +302,9 @@ watch(mode, () => {
 .pie-wrapper {
   flex: 1;
   text-align: center;
+}
+.top-tags {
+  margin-top: 5px;
 }
 .summary-text {
   font-weight: bold;

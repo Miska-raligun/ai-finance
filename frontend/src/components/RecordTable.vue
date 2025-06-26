@@ -22,6 +22,7 @@
           start-placeholder="开始"
           end-placeholder="结束"
           value-format="YYYY-MM-DD"
+          style="width: 100%"
         />
       </el-form-item>
 
@@ -244,7 +245,22 @@ watch(() => props.refreshFlag, fetchData)
 @media (max-width: 600px) {
   .filter-form {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
+    overflow-x: auto;
+    flex-wrap: wrap; /* 允许换行 */
+  }
+
+  .filter-form .el-form-item {
+    width: 100%;
+  }
+
+  .filter-form .el-date-editor {
+    width: 100%;
+  }
+
+  .filter-form .el-button {
+    width: auto;
+    margin-right: 8px; /* 可选，增加间隔 */
   }
 }
 </style>
