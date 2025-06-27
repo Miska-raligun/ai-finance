@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, g, session
-from db import init_db, get_db
+from db import init_db, get_db, add_chat_message, get_chat_history
 from handlers import *
 from dotenv import load_dotenv
 import os, requests, secrets
@@ -15,8 +15,6 @@ register_llm_security(app)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
 CORS(app, supports_credentials=True)
 
-# 在内存中维护最近10条对话记录
-chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
 
 # ===== 简易用户认证 =====
 
@@ -351,10 +349,9 @@ def chat():
     if isinstance(user_msg, str):
         latest_msg = user_msg.strip().split("\n")[-1]
 
-    # 记录对话历史
-    chat_history.append({"role": "user", "content": user_msg})
-    if len(chat_history) > 10:
-        del chat_history[:-10]
+    # 记录对话历史到数据库
+    add_chat_message(g.user_id, "user", user_msg)
+    chat_history = get_chat_history(g.user_id)
 
     print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
@@ -394,13 +391,10 @@ def chat():
         reply = call_deepseek_summary(latest_msg, result, llm_cfg)
     else:
         # 如果未识别出意图，直接和用户闲聊几句
-        #print("llm输入:",chat_history)
         reply = call_deepseek_chat(chat_history, llm_cfg)
 
     # 记录 assistant 回复
-    chat_history.append({"role": "assistant", "content": reply})
-    if len(chat_history) > 10:
-        del chat_history[:-10]
+    add_chat_message(g.user_id, "assistant", reply)
 
     return jsonify({"reply": reply}) 
 
