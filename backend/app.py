@@ -7,6 +7,7 @@ from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from llm_security_middleware import register_llm_security
+import logging
 
 init_db()
 load_dotenv()  # 加载 .env 文件
@@ -15,6 +16,17 @@ register_llm_security(app)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
 CORS(app, supports_credentials=True)
 
+# 初始化日志记录器
+llm_logger = logging.getLogger("llm_return")
+llm_logger.setLevel(logging.INFO)
+if not llm_logger.handlers:
+    handler = logging.FileHandler("llm_return.log", encoding="utf-8")
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    llm_logger.addHandler(handler)
+
+# 在内存中维护最近10条对话记录
+chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
 
 # ===== 简易用户认证 =====
 
@@ -174,31 +186,55 @@ def call_deepseek_intent(message, llm=None):
 
     prompt = (
         f"今天是 {today_str}。\n"
-        "你是一个智能财务助理。请根据用户输入生成结构化的意图（intent）和参数（params）。\n"
-        "意图必须为：add_record, add_income, set_budget, update_budget, analyze_spend, "
-        "add_category, delete_category, budget_remain, suggest_budgets, query_income, "
-        "category_sum, chat。\n"
-        "请结合“今天、昨天、上周、5月1日”等模糊表达推断具体日期，并提取出对应的月份（格式如 2025-06）。\n"
-
-        "意图为 suggest_budgets 时，参数中务必使用“总预算”字段；\n"
-        "意图为 add_record时，需提取：分类、金额、备注、时间、月份；\n"
-        "意图为 add_income时，需提取：分类、金额、备注、时间、月份；\n"
-        "意图为 category_sum 时，需提取：分类、起始时间、结束时间。\n"
-        "意图为 query_income 时，参数可包含以下之一或组合：\n"
-        "① 来源：如 工资、兼职（可选）\n"
-        "② 时间范围：如 2025-06 或 2025（可选）\n"
-        "③ 全部：是（表示查询所有收入记录）\n"
-
-        "当用户一次输入包含多个操作时，请为每个操作单独输出一组“意图/参数”，并用空行分隔多组结构。\n"
-        "请严格使用以下结构化格式输出，不得添加自然语言解释或括号说明：\n"
+        "你是智能财务助手。请严格按照以下要求处理用户输入：\n"
+        "1. 你的唯一任务是：根据用户输入，准确提取结构化意图（intent）和参数（params）。\n"
+        "2. 意图只能为以下之一，禁止自创、扩展或模糊表达：\n"
+        "   - add_record（记录支出）\n"
+        "   - add_income（记录收入）\n"
+        "   - set_budget（设置预算）\n"
+        "   - update_budget（更新预算）\n"
+        "   - analyze_spend（整体消费分析，生成消费排行、收入排行和建议）\n"
+        "   - add_category（新增分类）\n"
+        "   - delete_category（删除分类）\n"
+        "   - budget_remain（查询预算剩余）\n"
+        "   - suggest_budgets（智能推荐预算）\n"
+        "   - query_income（查询收入）\n"
+        "   - category_sum（统计指定分类或时间范围内的消费总额）\n"
+        "   - chat（普通闲聊）\n"
+        "3. 具体参数要求：\n"
+        "   - add_record、add_income：必须提取分类、金额、备注、时间（具体日期）、月份（如 2025-06）\n"
+        "   - set_budget、update_budget：必须提取分类、金额、月份\n"
+        "   - suggest_budgets：必须提取“总预算”字段\n"
+        "   - analyze_spend：仅当用户明确表达“整体消费分析”、“消费习惯分析”、“消费排行”、“消费建议”时使用。禁止用于统计具体分类或金额。严禁与 category_sum 混淆。\n"
+        "   - category_sum：仅用于统计“某分类”或“某时间段”的总消费金额。当用户使用“花了多少钱”、“消费总额”、“统计支出”、“总共花了多少”、“总消费”、“一共花了”类似表达时，必须使用 category_sum。即使用户未指定分类，仍使用 category_sum。\n"
+        "   - query_income：可提取来源、时间范围、是否查询全部\n"
+        "4. 当用户输入包含多个操作时，请为每个操作分别输出一组意图与参数，中间用空行隔开\n"
+        "5. 严格遵循以下输出格式，禁止添加任何额外解释或符号：\n"
         "意图：add_record\n"
         "参数：\n"
         "分类：餐饮\n"
         "金额：25\n"
         "备注：麦当劳\n"
         "时间：2025-06-08\n"
-        "月份：2025-06"
+        "月份：2025-06\n"
+        "6. 请结合模糊时间表达推断出具体日期和月份，例如“今天、昨天、上周、5月1日”等\n"
+        "7. 严禁输出多余内容\n"
+        "8. 【示例】以下用户输入及正确输出：\n"
+        "   - 用户输入：“帮我统计上周花了多少钱”\n"
+        "     正确输出：\n"
+        "     意图：category_sum\n"
+        "     参数：\n"
+        "     分类：\n"
+        "     开始时间：2025-06-17\n"
+        "     结束时间：2025-06-23\n"
+        "   - 用户输入：“分析一下我上个月的消费情况”\n"
+        "     正确输出：\n"
+        "     意图：analyze_spend\n"
+        "     参数：\n"
+        "     月份：2025-05\n"
     )
+
+
 
     payload = {
         "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
@@ -353,9 +389,9 @@ def chat():
     add_chat_message(g.user_id, "user", user_msg)
     chat_history = get_chat_history(g.user_id)
 
-    print("最新消息: ",latest_msg)
+    #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    print("🧠 LLM 原始结构化输出：", llm_output)
+    llm_logger.info(f"🧠 LLM 原始结构化输出：{llm_output}")
 
     intent_results = parse_response(llm_output)
 
@@ -391,6 +427,7 @@ def chat():
         reply = call_deepseek_summary(latest_msg, result, llm_cfg)
     else:
         # 如果未识别出意图，直接和用户闲聊几句
+        #print("llm输入:",chat_history)
         reply = call_deepseek_chat(chat_history, llm_cfg)
 
     # 记录 assistant 回复
@@ -968,10 +1005,12 @@ def admin_batch_delete():
 
     placeholders = ",".join(["?"] * len(ids))
     db = get_db()
-    db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
-    db.commit()
+    with db:
+        db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM llm_config WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM chat_history WHERE user_id IN ({placeholders})", ids)
     return jsonify({"success": True})
