@@ -101,6 +101,18 @@ def init_db():
     """
     )
 
+    # ✅ 聊天记录表，保存每个用户最近10条对话
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            role TEXT,
+            content TEXT
+        )
+    """
+    )
+
     # ✅ 补充缺失的 is_admin 字段（向后兼容）
     if not column_exists(cur, "users", "is_admin"):
         cur.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
@@ -132,4 +144,35 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+
+def add_chat_message(user_id: int, role: str, content: str):
+    """Insert a chat message and keep only the latest 10 records for the user."""
+    db = get_db()
+    db.execute(
+        "INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)",
+        (user_id, role, content),
+    )
+    db.execute(
+        """
+        DELETE FROM chat_history
+        WHERE user_id = ? AND id NOT IN (
+            SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 10
+        )
+        """,
+        (user_id, user_id),
+    )
+    db.commit()
+    db.close()
+
+
+def get_chat_history(user_id: int):
+    """Return the chat history list for the user ordered by id."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT role, content FROM chat_history WHERE user_id = ? ORDER BY id",
+        (user_id,),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
 
