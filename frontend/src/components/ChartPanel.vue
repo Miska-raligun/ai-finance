@@ -154,15 +154,6 @@ const fetchChartData = async () => {
     .slice()
     .sort((a, b) => b['金额'] - a['金额'])
 
-  topIncomeTags.value = sortedIncome.slice(0, 3).map(x => ({
-    name: x['名称'],
-    color: incomeColorMap[x['名称']]
-  }))
-  topSpendTags.value = sortedSpend.slice(0, 3).map(x => ({
-    name: x['名称'],
-    color: spendColorMap[x['名称']]
-  }))
-
   for (const k in incomeColorMap) delete incomeColorMap[k]
   incomePieOption.value = {
     title: { text: '收入', left: 'center' },
@@ -211,6 +202,16 @@ const fetchChartData = async () => {
       }
     ]
   }
+
+  // Update the top tag color mappings after pie options are built
+  topIncomeTags.value = sortedIncome.slice(0, 3).map(x => ({
+    name: x['名称'],
+    color: incomeColorMap[x['名称']]
+  }))
+  topSpendTags.value = sortedSpend.slice(0, 3).map(x => ({
+    name: x['名称'],
+    color: spendColorMap[x['名称']]
+  }))
 
   if (mode.value === 'month') {
     lineOption.value = {
