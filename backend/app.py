@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, g, session
-from db import init_db, get_db
+from db import init_db, get_db, add_chat_message, get_chat_history
 from handlers import *
 from dotenv import load_dotenv
 import os, requests, secrets
@@ -385,10 +385,9 @@ def chat():
     if isinstance(user_msg, str):
         latest_msg = user_msg.strip().split("\n")[-1]
 
-    # 记录对话历史
-    chat_history.append({"role": "user", "content": user_msg})
-    if len(chat_history) > 10:
-        del chat_history[:-10]
+    # 记录对话历史到数据库
+    add_chat_message(g.user_id, "user", user_msg)
+    chat_history = get_chat_history(g.user_id)
 
     #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
@@ -432,9 +431,7 @@ def chat():
         reply = call_deepseek_chat(chat_history, llm_cfg)
 
     # 记录 assistant 回复
-    chat_history.append({"role": "assistant", "content": reply})
-    if len(chat_history) > 10:
-        del chat_history[:-10]
+    add_chat_message(g.user_id, "assistant", reply)
 
     return jsonify({"reply": reply}) 
 
@@ -1008,10 +1005,12 @@ def admin_batch_delete():
 
     placeholders = ",".join(["?"] * len(ids))
     db = get_db()
-    db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
-    db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
-    db.commit()
+    with db:
+        db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM llm_config WHERE user_id IN ({placeholders})", ids)
+        db.execute(f"DELETE FROM chat_history WHERE user_id IN ({placeholders})", ids)
     return jsonify({"success": True})
