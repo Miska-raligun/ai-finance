@@ -391,7 +391,7 @@ def chat():
 
     #print("最新消息: ",latest_msg)
     llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    llm_logger.info(f"🧠 LLM 原始结构化输出：{llm_output}")
+    llm_logger.info(f"LLM：{llm_output}")
 
     intent_results = parse_response(llm_output)
 
