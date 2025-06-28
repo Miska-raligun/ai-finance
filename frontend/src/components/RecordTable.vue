@@ -87,15 +87,23 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination
-      background
-      layout="prev, pager, next, total"
-      :total="filtered.length"
-      :page-size="pageSize"
-      :current-page="currentPage"
-      @current-change="handlePageChange"
-      style="margin-top: 15px; text-align: right"
-    />
+    <div class="page-select">
+      <span>第</span>
+      <el-select
+        v-model="currentPage"
+        size="small"
+        style="width: 70px"
+        @change="handlePageChange"
+      >
+        <el-option
+          v-for="n in totalPages"
+          :key="n"
+          :label="n"
+          :value="n"
+        />
+      </el-select>
+      <span>页，共 {{ totalPages }} 页</span>
+    </div>
   </el-card>
 </template>
 
@@ -121,6 +129,9 @@ const selectedRows = ref([])
 const editingId = ref(null)
 const pageSize = 10
 const currentPage = ref(1)
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filtered.value.length / pageSize))
+)
 
 const paginatedData = computed(() => {
   const start = (currentPage.value - 1) * pageSize
@@ -241,6 +252,10 @@ watch(() => props.refreshFlag, fetchData)
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.page-select {
+  margin-top: 15px;
+  text-align: right;
 }
 @media (max-width: 600px) {
   .filter-form {
