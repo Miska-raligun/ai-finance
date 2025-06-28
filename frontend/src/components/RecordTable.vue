@@ -102,7 +102,7 @@
           :value="n"
         />
       </el-select>
-      <span>页，共 {{ totalPages }} 页</span>
+      <span>页 共 {{ totalPages }} 页</span>
     </div>
   </el-card>
 </template>
@@ -255,7 +255,10 @@ watch(() => props.refreshFlag, fetchData)
 }
 .page-select {
   margin-top: 15px;
-  text-align: right;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
 }
 @media (max-width: 600px) {
   .filter-form {
