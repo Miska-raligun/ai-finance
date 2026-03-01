@@ -132,7 +132,22 @@ def set_budget(category: str, amount: float, month: str = "") -> str:
     db.commit()
     return f"✅ 已设置{month}「{category}」预算：¥{amount}"
 
+MCP_API_KEY = os.getenv("MCP_API_KEY", "changeme")
+
 if __name__ == "__main__":
+    import uvicorn
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    class BearerAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            auth = request.headers.get("Authorization", "")
+            if auth != f"Bearer {MCP_API_KEY}":
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return await call_next(request)
+
     port = int(os.getenv("MCP_PORT", "5001"))
-    print(f"🚀 AI Finance MCP Server 启动，端口{port}，用户ID {MCP_USER_ID}")
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    app = mcp.http_app(path="/mcp")
+    app.add_middleware(BearerAuthMiddleware)
+    print(f"🚀 AI Finance MCP Server 启动，端口{port}，用户ID {MCP_USER_ID}，鉴权已启用")
+    uvicorn.run(app, host="0.0.0.0", port=port)
