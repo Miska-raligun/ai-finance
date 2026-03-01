@@ -62,3 +62,65 @@ Set-ExecutionPolicy -Scope Process Bypass
 ## License
 
 MIT
+
+## MCP Server（Agent 接口）
+
+MCP Server 提供结构化工具接口，供 AI Agent 直接调用记账功能，无需经过自然语言解析。
+
+### 支持的工具
+
+| 工具 | 说明 |
+|------|------|
+| `add_record` | 记录支出 |
+| `add_income` | 记录收入 |
+| `category_sum` | 统计支出总额 |
+| `query_records` | 查询支出明细 |
+| `query_income` | 查询收入 |
+| `budget_remain` | 查询预算剩余 |
+| `analyze_spend` | 消费分析 |
+| `list_categories` | 列出所有分类 |
+| `set_budget` | 设置月预算 |
+
+### 云服务器部署（systemd）
+
+1. 安装依赖：
+```bash
+cd /path/to/ai-finance/backend
+source venv/bin/activate
+pip install fastmcp "httpx[socks]"
+```
+
+2. 创建 systemd 服务：
+```bash
+sudo cp deploy/ai-finance-mcp.service /etc/systemd/system/
+# 按需编辑路径
+sudo nano /etc/systemd/system/ai-finance-mcp.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ai-finance-mcp
+```
+
+3. 查看状态：
+```bash
+sudo systemctl status ai-finance-mcp
+journalctl -u ai-finance-mcp -f
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MCP_PORT` | `5001` | 监听端口 |
+| `MCP_USER_ID` | `1` | 操作的用户 ID |
+
+### 接入 OpenClaw
+
+在 `openclaw.json` 中添加：
+```json
+{
+  "mcpServers": {
+    "ai-finance": {
+      "url": "http://117.72.194.170:5001/mcp"
+    }
+  }
+}
+```

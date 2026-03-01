@@ -1,0 +1,18 @@
+[Unit]
+Description=AI Finance MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ai-finance/backend
+ExecStart=/root/ai-finance/backend/venv/bin/python mcp_server.py
+Environment=MCP_PORT=5001
+Environment=MCP_USER_ID=1
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
