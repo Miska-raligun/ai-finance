@@ -1,5 +1,15 @@
 from db import get_db
 from datetime import datetime
+import logging
+
+llm_logger = logging.getLogger("llm_budget_suggest")
+llm_logger.setLevel(logging.INFO)
+if not llm_logger.handlers:
+    handler = logging.FileHandler("llm_budget_suggest.log", encoding="utf-8")
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    llm_logger.addHandler(handler)
+    
 current_month = datetime.now().strftime("%Y-%m")
 
 def add_record(user_id, params):
@@ -456,6 +466,7 @@ def suggest_budgets(user_id, params=None, llm=None):
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
     llm_reply = call_deepseek_budget_advice(user_id, total, llm)
     print("🧠 LLM 预算建议回复：\n", llm_reply)
+    llm_logger.info(f"LLM：{llm_reply}")
 
     # ✅ 解析 LLM 输出格式
     pattern = r"分类：(.+?)\n建议预算：([\d.]+)"
