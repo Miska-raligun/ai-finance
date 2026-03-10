@@ -257,8 +257,6 @@ def call_llm_intent(message, llm=None):
         return None
 
 def call_llm_summary(user_msg, handler_result, llm=None):
-    import os, requests
-
     llm = llm or {}
 
     api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
@@ -271,14 +269,14 @@ def call_llm_summary(user_msg, handler_result, llm=None):
     persona = llm.get("persona") or "一个有点傲娇的财务顾问"
     summary_prompt = (
         f"你是{persona}，你的名字叫Anon。请根据用户的操作结果进行总结和建议。\n"
-        "用户输入：{user_msg}\n"
-        "系统执行结果：{handler_result}\n"
+        f"用户输入：{user_msg}\n"
+        f"系统执行结果：{handler_result}\n"
         "请用自然语言总结这次操作及执行结果，并提出简短合理的建议（50字以内）,不要添加不必要的格式化符号。\n"
         "当系统执行结果涉及具体数值时，必须保留全部数值，严禁省略！\n"
         "回复尽量人性化且风趣。\n"
         "不要做()括起来的额外回复。\n"
         "如果用户此次操作为本月消费分析请求，给出消费行为详细分析及评分，此时不限制回答字数，必须分别分析当月消费和总体消费，严禁混淆分析！"
-    ).format(user_msg=user_msg, handler_result=handler_result)
+    )
 
     data = {
         "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
@@ -302,8 +300,9 @@ def call_llm_summary(user_msg, handler_result, llm=None):
 
 def call_llm_chat(history, llm=None):
     """当用户没有执行记账相关操作时，与其闲聊。"""
-    api_key = (llm or {}).get("apikey") or os.getenv("DEEPSEEK_API_KEY")
-    url = (llm or {}).get("url") or "https://api.siliconflow.cn/v1/chat/completions"
+    llm = llm or {}
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -318,7 +317,7 @@ def call_llm_chat(history, llm=None):
     messages = [{"role": "system", "content": prompt}] + history[-10:]
 
     data = {
-        "model": (llm or {}).get("model") or "Pro/deepseek-ai/DeepSeek-V3",
+        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
         "messages": messages,
     }
 

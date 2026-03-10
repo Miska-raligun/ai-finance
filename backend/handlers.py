@@ -10,7 +10,6 @@ if not llm_logger.handlers:
     handler.setFormatter(formatter)
     llm_logger.addHandler(handler)
     
-current_month = datetime.now().strftime("%Y-%m")
 
 def add_record(user_id, params):
     db = get_db()
@@ -119,7 +118,7 @@ def set_budget(user_id, params):
     # ✅ 设置预算（默认使用当前月）
     db.execute(
         "INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month) VALUES (?, ?, ?, ?, ?)",
-        (user_id, category, float(amount), cycle, current_month)
+        (user_id, category, float(amount), cycle, datetime.now().strftime("%Y-%m"))
     )
     db.commit()
 
@@ -499,7 +498,7 @@ def suggest_budgets(user_id, params=None, llm=None):
             INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month)
             VALUES (?, ?, ?, ?, ?)
         """,
-            (user_id, category, budget, "月", current_month)
+            (user_id, category, budget, "月", datetime.now().strftime("%Y-%m"))
         )
 
     db.commit()
