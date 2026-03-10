@@ -47,11 +47,9 @@ cp backend/.env.example backend/.env
 |---|---|
 | `DEEPSEEK_API_KEY` | LLM API Key（SiliconFlow / DeepSeek 等） |
 | `SECRET_KEY` | Flask Session 密钥，随机字符串即可 |
-| `MCP_API_KEY` | MCP 接口鉴权 Token，自定义任意字符串 |
-| `MCP_USER_ID` | MCP 操作归属的用户 ID（默认 `1`，即 admin） |
 | `MCP_PORT` | MCP 监听端口（默认 `5001`） |
 
-> **多用户说明**：MCP Server 每次启动只绑定一个用户（`MCP_USER_ID`）。如需让不同的 Agent 操作不同用户的账本，可以在前端注册新用户，查看其数据库 ID，修改 `.env` 中的 `MCP_USER_ID` 后重启 MCP Server，也可以同时启动多个实例（不同端口、不同 `MCP_USER_ID`）。
+> **无需配置独立 API Key**：MCP Server 直接使用 Web 账号的用户名和密码进行鉴权，注册好账号即可接入。
 
 ### 2. 启动服务
 
@@ -110,18 +108,18 @@ MCP Server 使用 **SSE 传输**，兼容所有支持 MCP 协议的客户端。
       "type": "sse",
       "url": "http://localhost:5001/mcp/sse",
       "headers": {
-        "Authorization": "Bearer your_mcp_api_key_here"
+        "Authorization": "Bearer your_username:your_password"
       }
     }
   }
 }
 ```
 
-重启 Claude Code 后即可使用。
+将 `your_username:your_password` 替换为你在 Web 前端注册的账号和密码，重启 Claude Code 后即可使用。每个用户填入自己的凭据，数据天然隔离。
 
 ### 其他 MCP 客户端
 
-任何支持 SSE 传输的 MCP 客户端均可按相同方式配置，填入 SSE 端点地址与 Authorization Header 即可。
+任何支持 SSE 传输的 MCP 客户端均可按相同方式配置，`Authorization` Header 格式固定为 `Bearer username:password`。
 
 ### Agent Skill
 
@@ -134,7 +132,7 @@ MCP Server 使用 **SSE 传输**，兼容所有支持 MCP 协议的客户端。
 
 **Claude Code 用法**：将 `ai-finance.md` 复制到 `~/.claude/skills/ai-finance.md`，在对话中执行 `/ai-finance` 即可激活。
 
-**非 MCP Agent**：激活 `backend/venv`，设置 `FINANCE_MCP_URL` 和 `MCP_API_KEY` 环境变量后，直接调用 `finance_client.py`：
+**非 MCP Agent**：激活 `backend/venv`，设置 `FINANCE_USERNAME` 和 `FINANCE_PASSWORD` 环境变量后，直接调用 `finance_client.py`：
 ```bash
 python finance_client.py add_record --category 餐饮 --amount 25.0
 python finance_client.py query_records --month 2026-03

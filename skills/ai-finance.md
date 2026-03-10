@@ -66,9 +66,10 @@ Use `skills/finance_client.py` from the repository. It requires the same Python 
 # activate the backend venv
 source /path/to/ai-finance/backend/venv/bin/activate
 
-# set env vars (or export them in your agent's environment)
+# set env vars — use the same username/password as the web frontend
 export FINANCE_MCP_URL=http://localhost:5001/mcp/sse
-export MCP_API_KEY=your_mcp_api_key_here
+export FINANCE_USERNAME=your_username
+export FINANCE_PASSWORD=your_password
 ```
 
 ### CLI usage (subprocess)

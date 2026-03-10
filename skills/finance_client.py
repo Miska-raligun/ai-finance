@@ -10,18 +10,27 @@ AI Finance MCP Client
     result = call_tool("add_record", {"category": "餐饮", "amount": 25.0})
 
 环境变量:
-    FINANCE_MCP_URL  MCP SSE 端点（默认 http://localhost:5001/mcp/sse）
-    MCP_API_KEY      Bearer Token（与服务端 .env 中的 MCP_API_KEY 保持一致）
+    FINANCE_MCP_URL   MCP SSE 端点（默认 http://localhost:5001/mcp/sse）
+    FINANCE_USERNAME  Web 账号用户名
+    FINANCE_PASSWORD  Web 账号密码
 """
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 
-MCP_URL = os.getenv("FINANCE_MCP_URL", "http://localhost:5001/mcp/sse")
-MCP_API_KEY = os.getenv("MCP_API_KEY", "changeme")
+MCP_URL  = os.getenv("FINANCE_MCP_URL", "http://localhost:5001/mcp/sse")
+_USERNAME = os.getenv("FINANCE_USERNAME", "")
+_PASSWORD = os.getenv("FINANCE_PASSWORD", "")
+
+
+def _auth_header() -> dict:
+    if not _USERNAME or not _PASSWORD:
+        raise RuntimeError(
+            "请设置环境变量 FINANCE_USERNAME 和 FINANCE_PASSWORD（与 Web 登录账号相同）"
+        )
+    return {"Authorization": f"Bearer {_USERNAME}:{_PASSWORD}"}
 
 
 # ---------------------------------------------------------------------------
@@ -32,8 +41,7 @@ async def _call_tool_async(tool_name: str, args: dict) -> str:
     from mcp.client.sse import sse_client
     from mcp import ClientSession
 
-    headers = {"Authorization": f"Bearer {MCP_API_KEY}"}
-    async with sse_client(MCP_URL, headers=headers) as (read, write):
+    async with sse_client(MCP_URL, headers=_auth_header()) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool_name, args)
@@ -75,9 +83,9 @@ def query_records(category: str = "", month: str = "", start_date: str = "",
 def query_income(source: str = "", month: str = "", show_all: bool = False) -> str:
     """查询收入记录，所有参数可选。"""
     args = {}
-    if source:    args["source"] = source
-    if month:     args["month"] = month
-    if show_all:  args["show_all"] = True
+    if source:   args["source"] = source
+    if month:    args["month"] = month
+    if show_all: args["show_all"] = True
     return call_tool("query_income", args)
 
 
