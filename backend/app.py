@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify, g, session
 from db import init_db, get_db, add_chat_message, get_chat_history
 from handlers import *
 from dotenv import load_dotenv
-import os, requests, secrets
+import os, requests, secrets, json, time
+from collections import defaultdict
 from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -25,8 +26,21 @@ if not llm_logger.handlers:
     handler.setFormatter(formatter)
     llm_logger.addHandler(handler)
 
-# 在内存中维护最近10条对话记录
-chat_history = []  # [{"role": "user"/"assistant", "content": "..."}]
+# ===== 登录频率限制 =====
+_login_attempts: dict = defaultdict(list)
+_LOGIN_MAX = 10
+_LOGIN_LOCKOUT = 30 * 60  # 30 分钟
+
+def _login_allowed(ip: str) -> bool:
+    now = time.time()
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < _LOGIN_LOCKOUT]
+    return len(_login_attempts[ip]) < _LOGIN_MAX
+
+def _record_failure(ip: str):
+    _login_attempts[ip].append(time.time())
+
+def _clear_attempts(ip: str):
+    _login_attempts.pop(ip, None)
 
 # ===== 简易用户认证 =====
 
@@ -77,6 +91,10 @@ def register():
 
 @app.route("/api/login", methods=["POST"])
 def login():
+    ip = request.headers.get("X-Real-IP") or request.remote_addr
+    if not _login_allowed(ip):
+        return jsonify({"error": "登录尝试次数过多，请 30 分钟后再试"}), 429
+
     data = request.get_json() or {}
     username = data.get("username", "").strip()
     password = data.get("password", "")
@@ -86,8 +104,10 @@ def login():
         (username,),
     ).fetchone()
     if not row or not check_password_hash(row["password"], password):
+        _record_failure(ip)
         return jsonify({"error": "用户名或密码错误"}), 400
 
+    _clear_attempts(ip)
     session["user_id"] = row["id"]
     session["username"] = username
     session["is_admin"] = bool(row["is_admin"])
@@ -151,120 +171,92 @@ def llm_config_api():
     return jsonify({"success": True})
 
 handlers = {
-    "add_record": add_record,
-    "add_income": add_income,  # ✅ 新增
-    "set_budget": set_budget,
-    "update_budget": update_budget,
-    "analyze_spend": analyze_spend,
-    "add_category": add_category,
-    "delete_category": delete_category,
-    "budget_remain": budget_remain,
-    "suggest_budgets": suggest_budgets,
-    "query_income": query_income,
-    "category_sum": category_sum
+    “add_record”: add_record,
+    “add_income”: add_income,
+    “set_budget”: set_budget,
+    “update_budget”: update_budget,
+    “analyze_spend”: analyze_spend,
+    “add_category”: add_category,
+    “delete_category”: delete_category,
+    “budget_remain”: budget_remain,
+    “suggest_budgets”: suggest_budgets,
+    “query_income”: query_income,
+    “category_sum”: category_sum
 }
 
-# 意图别名映射
-INTENT_ALIAS = {
-    "记录支出": "add_record",
-    "支出记录": "add_record",
-    "add_record": "add_record"
-}
+FINANCE_TOOLS = [
+    {“type”: “function”, “function”: {“name”: “add_record”, “description”: “记录一笔支出”,
+        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
+            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
+                           “备注”: {“type”: “string”}, “时间”: {“type”: “string”, “description”: “YYYY-MM-DD，默认今天”}}}}},
+    {“type”: “function”, “function”: {“name”: “add_income”, “description”: “记录一笔收入”,
+        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
+            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
+                           “备注”: {“type”: “string”}, “时间”: {“type”: “string”, “description”: “YYYY-MM-DD，默认今天”}}}}},
+    {“type”: “function”, “function”: {“name”: “set_budget”, “description”: “设置某分类的月预算”,
+        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
+            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
+                           “月份”: {“type”: “string”, “description”: “YYYY-MM，默认当月”}}}}},
+    {“type”: “function”, “function”: {“name”: “update_budget”, “description”: “更新某分类的月预算”,
+        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
+            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
+                           “月份”: {“type”: “string”}}}}},
+    {“type”: “function”, “function”: {“name”: “analyze_spend”, “description”: “整体消费分析，生成消费排行、收入排行和建议”,
+        “parameters”: {“type”: “object”,
+            “properties”: {“月份”: {“type”: “string”, “description”: “YYYY-MM，默认当月”}}}}},
+    {“type”: “function”, “function”: {“name”: “add_category”, “description”: “新增支出或收入分类”,
+        “parameters”: {“type”: “object”, “required”: [“分类”],
+            “properties”: {“分类”: {“type”: “string”},
+                           “类型”: {“type”: “string”, “enum”: [“支出”, “收入”]}}}}},
+    {“type”: “function”, “function”: {“name”: “delete_category”, “description”: “删除分类及其所有记录”,
+        “parameters”: {“type”: “object”, “required”: [“分类”],
+            “properties”: {“分类”: {“type”: “string”}}}}},
+    {“type”: “function”, “function”: {“name”: “budget_remain”, “description”: “查询预算剩余”,
+        “parameters”: {“type”: “object”,
+            “properties”: {“月份”: {“type”: “string”, “description”: “YYYY-MM，默认当月”},
+                           “分类”: {“type”: “string”, “description”: “留空返回全部分类”}}}}},
+    {“type”: “function”, “function”: {“name”: “suggest_budgets”, “description”: “根据历史消费智能推荐预算”,
+        “parameters”: {“type”: “object”,
+            “properties”: {“总预算”: {“type”: “number”}}}}},
+    {“type”: “function”, “function”: {“name”: “query_income”, “description”: “查询收入记录”,
+        “parameters”: {“type”: “object”,
+            “properties”: {“分类”: {“type”: “string”}, “时间范围”: {“type”: “string”},
+                           “全部”: {“type”: “string”, “enum”: [“是”, “否”]}}}}},
+    {“type”: “function”, “function”: {“name”: “category_sum”, “description”: “统计某分类或时间段的支出总额”,
+        “parameters”: {“type”: “object”,
+            “properties”: {“分类”: {“type”: “string”},
+                           “开始时间”: {“type”: “string”, “description”: “YYYY-MM-DD”},
+                           “结束时间”: {“type”: “string”, “description”: “YYYY-MM-DD”}}}}},
+]
 
-def call_deepseek_intent(message, llm=None):
-    import os, requests
-
+def call_llm_intent(message, llm=None):
     llm = llm or {}
-
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
-    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = (
-        f"今天是 {today_str}。\n"
-        "你是智能财务助手。请严格按照以下要求处理用户输入：\n"
-        "1. 你的唯一任务是：根据用户输入，准确提取结构化意图（intent）和参数（params）。\n"
-        "2. 意图只能为以下之一，禁止自创、扩展或模糊表达：\n"
-        "   - add_record（记录支出）\n"
-        "   - add_income（记录收入）\n"
-        "   - set_budget（设置预算）\n"
-        "   - update_budget（更新预算）\n"
-        "   - analyze_spend（整体消费分析，生成消费排行、收入排行和建议）\n"
-        "   - add_category（新增分类）\n"
-        "   - delete_category（删除分类）\n"
-        "   - budget_remain（查询预算剩余）\n"
-        "   - suggest_budgets（智能推荐预算）\n"
-        "   - query_income（查询收入）\n"
-        "   - category_sum（统计指定分类或时间范围内的消费总额）\n"
-        "   - chat（普通闲聊）\n"
-        "3. 具体参数要求：\n"
-        "   - add_record、add_income：必须提取分类、金额、备注、时间（具体日期，如果没有涉及明确的日期说明，则默认为今天的消费）、月份（如 2025-06），分类不得为空！\n"
-        "   - set_budget、update_budget：必须提取分类、金额、月份\n"
-        "   - suggest_budgets：必须提取“总预算”字段\n"
-        "   - analyze_spend：仅当用户明确表达“整体消费分析”、“消费习惯分析”、“消费排行”、“消费建议”时使用。禁止用于统计具体分类或金额。严禁与 category_sum 混淆。\n"
-        "   - category_sum：仅用于统计“某分类”或“某时间段”的总消费金额。当用户使用“花了多少钱”、“消费总额”、“统计支出”、“总共花了多少”、“总消费”、“一共花了”类似表达时，必须使用 category_sum。即使用户未指定分类，仍使用 category_sum。\n"
-        "   - query_income：可提取来源、时间范围、是否查询全部\n"
-        "   - chat： 无需提取参数\n"
-        "4. 当用户输入包含多个操作时，请为每个操作分别输出一组意图与参数，中间用空行隔开\n"
-        "5. 严格遵循以下输出格式，禁止添加任何额外解释或符号：\n"
-        "意图：add_record\n"
-        "参数：\n"
-        "分类：餐饮\n"
-        "金额：25\n"
-        "备注：麦当劳\n"
-        "时间：2025-06-08\n"
-        "月份：2025-06\n"
-        "6. 请结合模糊时间表达推断出具体日期和月份，例如“今天、昨天、上周、5月1日”等\n"
-        "7. 严禁输出多余内容\n"
-        "8. 【示例】以下用户输入及正确输出：\n"
-        "   - 用户输入：“帮我统计上周花了多少钱”\n"
-        "     正确输出：\n"
-        "     意图：category_sum\n"
-        "     参数：\n"
-        "     分类：\n"
-        "     开始时间：2025-06-17\n"
-        "     结束时间：2025-06-23\n"
-        "   - 用户输入：“分析一下我上个月的消费情况”\n"
-        "     正确输出：\n"
-        "     意图：analyze_spend\n"
-        "     参数：\n"
-        "     月份：2025-05\n"
-    )
-
-
-
+    today_str = datetime.now().strftime(“%Y-%m-%d”)
+    api_key = llm.get(“apikey”) or os.getenv(“DEEPSEEK_API_KEY”)
+    url = llm.get(“url”) or “https://api.siliconflow.cn/v1/chat/completions”
+    headers = {“Authorization”: f”Bearer {api_key}”, “Content-Type”: “application/json”}
     payload = {
-        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
-        "temperature": 0.5,
-        "messages": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": message}
+        “model”: llm.get(“model”) or “Pro/deepseek-ai/DeepSeek-V3”,
+        “temperature”: 0.3,
+        “tools”: FINANCE_TOOLS,
+        “tool_choice”: “auto”,
+        “messages”: [
+            {“role”: “system”, “content”: f”今天是 {today_str}。你是智能财务助手，根据用户输入调用合适的工具完成记账操作。用户有多个操作时可同时调用多个工具。闲聊时不调用工具。”},
+            {“role”: “user”, “content”: message}
         ]
     }
-
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        #print("📥 DeepSeek 返回内容：", data)  # 打印原始返回，方便调试
-
-        if "choices" in data:
-            return data["choices"][0]["message"]["content"]
-        elif "error" in data:
-            print("❌ DeepSeek API 错误：", data["error"])
-            return "意图：unknown\n参数："
-        else:
-            print("❓ 未知格式响应：", data)
-            return "意图：unknown\n参数："
-
+        if “error” in data:
+            print(“❌ LLM API 错误：”, data[“error”])
+            return None
+        return data
     except Exception as e:
-        print("DeepSeek 调用失败:", e)
-        return "意图：unknown\n参数："
+        print(“LLM 调用失败:”, e)
+        return None
 
-def call_deepseek_summary(user_msg, handler_result, llm=None):
+def call_llm_summary(user_msg, handler_result, llm=None):
     import os, requests
 
     llm = llm or {}
@@ -308,7 +300,7 @@ def call_deepseek_summary(user_msg, handler_result, llm=None):
         print("❌ DeepSeek API unexpected response:", result)
         return "❌ 分析失败：LLM 响应格式异常"
 
-def call_deepseek_chat(history, llm=None):
+def call_llm_chat(history, llm=None):
     """当用户没有执行记账相关操作时，与其闲聊。"""
     api_key = (llm or {}).get("apikey") or os.getenv("DEEPSEEK_API_KEY")
     url = (llm or {}).get("url") or "https://api.siliconflow.cn/v1/chat/completions"
@@ -345,28 +337,6 @@ def call_deepseek_chat(history, llm=None):
         print("DeepSeek chat failed:", e)
         return "⚠️ 暂时无法回复"
 
-def parse_response(text):
-    """Parse LLM structured output into a list of (intent, params) tuples."""
-    blocks = [b for b in text.strip().split("\n\n") if b.strip()]
-    results = []
-    for block in blocks:
-        lines = block.strip().split("\n")
-        intent = ""
-        params = {}
-        mode = None
-        for line in lines:
-            if line.startswith("意图："):
-                intent_raw = line.split("：", 1)[1].strip()
-                intent = INTENT_ALIAS.get(intent_raw, intent_raw)
-            elif line.startswith("参数："):
-                mode = "param"
-            elif "：" in line and mode == "param":
-                k, v = line.split("：", 1)
-                params[k.strip()] = v.strip()
-        if intent:
-            results.append((intent, params))
-    return results
-
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def chat():
@@ -378,63 +348,44 @@ def chat():
         (g.user_id,),
     ).fetchone()
     if row:
-        saved_cfg = dict(row)
-        for k, v in saved_cfg.items():
+        for k, v in dict(row).items():
             llm_cfg.setdefault(k, v)
-    user_msg = data.get("message", "")
-    latest_msg = user_msg
-    if isinstance(user_msg, str):
-        latest_msg = user_msg.strip().split("\n")[-1]
 
-    # 记录对话历史到数据库
+    user_msg = data.get("message", "")
+    latest_msg = user_msg.strip().split("\n")[-1] if isinstance(user_msg, str) else user_msg
+
     add_chat_message(g.user_id, "user", user_msg)
     chat_history = get_chat_history(g.user_id)
 
-    #print("最新消息: ",latest_msg)
-    llm_output = call_deepseek_intent(latest_msg, llm_cfg)
-    llm_logger.info(f"LLM：{llm_output}")
+    response = call_llm_intent(latest_msg, llm_cfg)
 
-    intent_results = parse_response(llm_output)
+    reply = None
+    if response and "choices" in response:
+        msg_obj = response["choices"][0].get("message", {})
+        tool_calls = msg_obj.get("tool_calls")
 
-    results = []
-    for intent, params in intent_results:
-        if intent in handlers:
-            if intent == "suggest_budgets":
-                r = handlers[intent](g.user_id, params, llm_cfg)
-            else:
-                r = handlers[intent](g.user_id, params)
-            results.append(r)
-            #print("📦 handler 执行结果：", r)
+        if tool_calls:
+            results = []
+            for tc in tool_calls:
+                func_name = tc["function"]["name"]
+                params = json.loads(tc["function"]["arguments"])
+                if func_name in handlers:
+                    if func_name == "suggest_budgets":
+                        r = handlers[func_name](g.user_id, params, llm_cfg)
+                    else:
+                        r = handlers[func_name](g.user_id, params)
+                    results.append(r)
+            if results:
+                llm_logger.info(f"Tools: {[tc['function']['name'] for tc in tool_calls]}")
+                reply = call_llm_summary(latest_msg, "\n".join(results), llm_cfg)
+        else:
+            reply = msg_obj.get("content")
 
-    if results:
-        result = "\n".join(results)
+    if not reply:
+        reply = call_llm_chat(chat_history, llm_cfg)
 
-        #if any(i[0] == "add_record" for i in intent_results):
-            #from db import get_db
-            #db = get_db()
-            #cursor = db.execute("SELECT * FROM records ORDER BY date DESC")
-            #print("📒 当前记录：")
-            #for row in cursor.fetchall():
-                #print(dict(row))
-
-        #if any(i[0] == "add_income" for i in intent_results):
-            #from db import get_db
-            #db = get_db()
-            #cursor = db.execute("SELECT * FROM income ORDER BY date DESC")
-            #print("📒 当前记录：")
-            #for row in cursor.fetchall():
-                #print(dict(row))
-        # 用 LLM 进行总结生成自然语言
-        reply = call_deepseek_summary(latest_msg, result, llm_cfg)
-    else:
-        # 如果未识别出意图，直接和用户闲聊几句
-        #print("llm输入:",chat_history)
-        reply = call_deepseek_chat(chat_history, llm_cfg)
-
-    # 记录 assistant 回复
     add_chat_message(g.user_id, "assistant", reply)
-
-    return jsonify({"reply": reply}) 
+    return jsonify({"reply": reply})
 
 @app.route('/api/records')
 @login_required
@@ -592,7 +543,6 @@ def get_categories():
     return jsonify(results)
 
 
-month = datetime.now().strftime("%Y-%m")
 @app.route('/api/budgets')
 @login_required
 def get_budgets():

@@ -95,7 +95,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 MCP Server 使用 **SSE 传输**，兼容所有支持 MCP 协议的客户端。
 
 - **SSE 端点**：`http://localhost:5001/mcp/sse`
-- **鉴权方式**：HTTP Header `Authorization: Bearer <MCP_API_KEY>`
+- **鉴权方式**：HTTP Header `Authorization: Bearer <username>:<password>`
 
 ### Claude Code
 

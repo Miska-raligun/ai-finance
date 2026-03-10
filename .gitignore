@@ -4,6 +4,7 @@
 /backend/records.db
 /records.db
 /frontend/node_modules
+/frontend/dist
 *.ico
 *.log
 /backend/reset_admin_passwd.py
