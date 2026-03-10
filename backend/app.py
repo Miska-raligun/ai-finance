@@ -171,89 +171,89 @@ def llm_config_api():
     return jsonify({"success": True})
 
 handlers = {
-    “add_record”: add_record,
-    “add_income”: add_income,
-    “set_budget”: set_budget,
-    “update_budget”: update_budget,
-    “analyze_spend”: analyze_spend,
-    “add_category”: add_category,
-    “delete_category”: delete_category,
-    “budget_remain”: budget_remain,
-    “suggest_budgets”: suggest_budgets,
-    “query_income”: query_income,
-    “category_sum”: category_sum
+    "add_record": add_record,
+    "add_income": add_income,
+    "set_budget": set_budget,
+    "update_budget": update_budget,
+    "analyze_spend": analyze_spend,
+    "add_category": add_category,
+    "delete_category": delete_category,
+    "budget_remain": budget_remain,
+    "suggest_budgets": suggest_budgets,
+    "query_income": query_income,
+    "category_sum": category_sum
 }
 
 FINANCE_TOOLS = [
-    {“type”: “function”, “function”: {“name”: “add_record”, “description”: “记录一笔支出”,
-        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
-            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
-                           “备注”: {“type”: “string”}, “时间”: {“type”: “string”, “description”: “YYYY-MM-DD，默认今天”}}}}},
-    {“type”: “function”, “function”: {“name”: “add_income”, “description”: “记录一笔收入”,
-        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
-            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
-                           “备注”: {“type”: “string”}, “时间”: {“type”: “string”, “description”: “YYYY-MM-DD，默认今天”}}}}},
-    {“type”: “function”, “function”: {“name”: “set_budget”, “description”: “设置某分类的月预算”,
-        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
-            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
-                           “月份”: {“type”: “string”, “description”: “YYYY-MM，默认当月”}}}}},
-    {“type”: “function”, “function”: {“name”: “update_budget”, “description”: “更新某分类的月预算”,
-        “parameters”: {“type”: “object”, “required”: [“分类”, “金额”],
-            “properties”: {“分类”: {“type”: “string”}, “金额”: {“type”: “number”},
-                           “月份”: {“type”: “string”}}}}},
-    {“type”: “function”, “function”: {“name”: “analyze_spend”, “description”: “整体消费分析，生成消费排行、收入排行和建议”,
-        “parameters”: {“type”: “object”,
-            “properties”: {“月份”: {“type”: “string”, “description”: “YYYY-MM，默认当月”}}}}},
-    {“type”: “function”, “function”: {“name”: “add_category”, “description”: “新增支出或收入分类”,
-        “parameters”: {“type”: “object”, “required”: [“分类”],
-            “properties”: {“分类”: {“type”: “string”},
-                           “类型”: {“type”: “string”, “enum”: [“支出”, “收入”]}}}}},
-    {“type”: “function”, “function”: {“name”: “delete_category”, “description”: “删除分类及其所有记录”,
-        “parameters”: {“type”: “object”, “required”: [“分类”],
-            “properties”: {“分类”: {“type”: “string”}}}}},
-    {“type”: “function”, “function”: {“name”: “budget_remain”, “description”: “查询预算剩余”,
-        “parameters”: {“type”: “object”,
-            “properties”: {“月份”: {“type”: “string”, “description”: “YYYY-MM，默认当月”},
-                           “分类”: {“type”: “string”, “description”: “留空返回全部分类”}}}}},
-    {“type”: “function”, “function”: {“name”: “suggest_budgets”, “description”: “根据历史消费智能推荐预算”,
-        “parameters”: {“type”: “object”,
-            “properties”: {“总预算”: {“type”: “number”}}}}},
-    {“type”: “function”, “function”: {“name”: “query_income”, “description”: “查询收入记录”,
-        “parameters”: {“type”: “object”,
-            “properties”: {“分类”: {“type”: “string”}, “时间范围”: {“type”: “string”},
-                           “全部”: {“type”: “string”, “enum”: [“是”, “否”]}}}}},
-    {“type”: “function”, “function”: {“name”: “category_sum”, “description”: “统计某分类或时间段的支出总额”,
-        “parameters”: {“type”: “object”,
-            “properties”: {“分类”: {“type”: “string”},
-                           “开始时间”: {“type”: “string”, “description”: “YYYY-MM-DD”},
-                           “结束时间”: {“type”: “string”, “description”: “YYYY-MM-DD”}}}}},
+    {"type": "function", "function": {"name": "add_record", "description": "记录一笔支出",
+        "parameters": {"type": "object", "required": ["分类", "金额"],
+            "properties": {"分类": {"type": "string"}, "金额": {"type": "number"},
+                           "备注": {"type": "string"}, "时间": {"type": "string", "description": "YYYY-MM-DD，默认今天"}}}}},
+    {"type": "function", "function": {"name": "add_income", "description": "记录一笔收入",
+        "parameters": {"type": "object", "required": ["分类", "金额"],
+            "properties": {"分类": {"type": "string"}, "金额": {"type": "number"},
+                           "备注": {"type": "string"}, "时间": {"type": "string", "description": "YYYY-MM-DD，默认今天"}}}}},
+    {"type": "function", "function": {"name": "set_budget", "description": "设置某分类的月预算",
+        "parameters": {"type": "object", "required": ["分类", "金额"],
+            "properties": {"分类": {"type": "string"}, "金额": {"type": "number"},
+                           "月份": {"type": "string", "description": "YYYY-MM，默认当月"}}}}},
+    {"type": "function", "function": {"name": "update_budget", "description": "更新某分类的月预算",
+        "parameters": {"type": "object", "required": ["分类", "金额"],
+            "properties": {"分类": {"type": "string"}, "金额": {"type": "number"},
+                           "月份": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "analyze_spend", "description": "整体消费分析，生成消费排行、收入排行和建议",
+        "parameters": {"type": "object",
+            "properties": {"月份": {"type": "string", "description": "YYYY-MM，默认当月"}}}}},
+    {"type": "function", "function": {"name": "add_category", "description": "新增支出或收入分类",
+        "parameters": {"type": "object", "required": ["分类"],
+            "properties": {"分类": {"type": "string"},
+                           "类型": {"type": "string", "enum": ["支出", "收入"]}}}}},
+    {"type": "function", "function": {"name": "delete_category", "description": "删除分类及其所有记录",
+        "parameters": {"type": "object", "required": ["分类"],
+            "properties": {"分类": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "budget_remain", "description": "查询预算剩余",
+        "parameters": {"type": "object",
+            "properties": {"月份": {"type": "string", "description": "YYYY-MM，默认当月"},
+                           "分类": {"type": "string", "description": "留空返回全部分类"}}}}},
+    {"type": "function", "function": {"name": "suggest_budgets", "description": "根据历史消费智能推荐预算",
+        "parameters": {"type": "object",
+            "properties": {"总预算": {"type": "number"}}}}},
+    {"type": "function", "function": {"name": "query_income", "description": "查询收入记录",
+        "parameters": {"type": "object",
+            "properties": {"分类": {"type": "string"}, "时间范围": {"type": "string"},
+                           "全部": {"type": "string", "enum": ["是", "否"]}}}}},
+    {"type": "function", "function": {"name": "category_sum", "description": "统计某分类或时间段的支出总额",
+        "parameters": {"type": "object",
+            "properties": {"分类": {"type": "string"},
+                           "开始时间": {"type": "string", "description": "YYYY-MM-DD"},
+                           "结束时间": {"type": "string", "description": "YYYY-MM-DD"}}}}},
 ]
 
 def call_llm_intent(message, llm=None):
     llm = llm or {}
-    today_str = datetime.now().strftime(“%Y-%m-%d”)
-    api_key = llm.get(“apikey”) or os.getenv(“DEEPSEEK_API_KEY”)
-    url = llm.get(“url”) or “https://api.siliconflow.cn/v1/chat/completions”
-    headers = {“Authorization”: f”Bearer {api_key}”, “Content-Type”: “application/json”}
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
-        “model”: llm.get(“model”) or “Pro/deepseek-ai/DeepSeek-V3”,
-        “temperature”: 0.3,
-        “tools”: FINANCE_TOOLS,
-        “tool_choice”: “auto”,
-        “messages”: [
-            {“role”: “system”, “content”: f”今天是 {today_str}。你是智能财务助手，根据用户输入调用合适的工具完成记账操作。用户有多个操作时可同时调用多个工具。闲聊时不调用工具。”},
-            {“role”: “user”, “content”: message}
+        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
+        "temperature": 0.3,
+        "tools": FINANCE_TOOLS,
+        "tool_choice": "auto",
+        "messages": [
+            {"role": "system", "content": f"今天是 {today_str}。你是智能财务助手，根据用户输入调用合适的工具完成记账操作。用户有多个操作时可同时调用多个工具。闲聊时不调用工具。"},
+            {"role": "user", "content": message}
         ]
     }
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
-        if “error” in data:
-            print(“❌ LLM API 错误：”, data[“error”])
+        if "error" in data:
+            print("❌ LLM API 错误：", data["error"])
             return None
         return data
     except Exception as e:
-        print(“LLM 调用失败:”, e)
+        print("LLM 调用失败:", e)
         return None
 
 def call_llm_summary(user_msg, handler_result, llm=None):
