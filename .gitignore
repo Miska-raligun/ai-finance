@@ -2,6 +2,7 @@
 /backend/venv
 /backend/__pycache__
 /backend/records.db
+/records.db
 /frontend/node_modules
 *.ico
 *.log
