@@ -31,7 +31,7 @@
     </el-form>
 
     <el-table
-      :data="paginatedData"
+      :data="records"
       stripe
       border
       style="width: 100%"
@@ -90,7 +90,7 @@
     <el-pagination
       background
       layout="prev, pager, next, total"
-      :total="filtered.length"
+      :total="totalRecords"
       :page-size="pageSize"
       :current-page="currentPage"
       @current-change="handlePageChange"
@@ -100,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import api from '@/api'
 
 const props = defineProps({
@@ -112,7 +112,7 @@ const props = defineProps({
 const emit = defineEmits(['refresh'])
 
 const records = ref([])
-const filtered = ref([])
+const totalRecords = ref(0)
 const categories = ref([])
 const filterCategory = ref('')
 const dateRange = ref([])
@@ -121,19 +121,16 @@ const editingId = ref(null)
 const pageSize = 10
 const currentPage = ref(1)
 
-const paginatedData = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filtered.value.slice(start, start + pageSize)
-})
-
 function handlePageChange(val) {
   currentPage.value = val
+  fetchData()
 }
 
 function resetFilters() {
   filterCategory.value = ''
   dateRange.value = []
-  applyFilter()
+  currentPage.value = 1
+  fetchData()
 }
 
 function handleSelectionChange(val) {
@@ -168,51 +165,32 @@ async function deleteSelected() {
 }
 
 function applyFilter() {
-  filtered.value = records.value.filter(r => {
-    const matchCategory = filterCategory.value ? r.category === filterCategory.value : true
-    const matchDate = dateRange.value.length
-      ? r.date >= dateRange.value[0] && r.date <= dateRange.value[1]
-      : true
-    return matchCategory && matchDate
-  })
   currentPage.value = 1
+  fetchData()
 }
 
 async function fetchData() {
   try {
+    const params = {
+      page: currentPage.value,
+      limit: pageSize,
+    }
+    if (filterCategory.value) params.category = filterCategory.value
+    if (dateRange.value && dateRange.value.length === 2) {
+      params.start_date = dateRange.value[0]
+      params.end_date = dateRange.value[1]
+    }
+
     const [recRes, catRes] = await Promise.all([
-      api.get(props.type === 'expense' ? '/api/records' : '/api/income'),
+      api.get(props.type === 'expense' ? '/api/records' : '/api/income', { params }),
       api.get('/api/categories', {
-        params: {
-          type: props.type === 'expense' ? 'expense' : 'income'
-        }
+        params: { type: props.type === 'expense' ? 'expense' : 'income' }
       })
     ])
 
-    const rec = recRes.data
-    const cats = catRes.data.map(c => c.name)
-    categories.value = cats
-    console.log("📋 收入数据：", rec)
-    console.log("📂 分类数据：", cats)
-    if (props.type === 'expense') {
-      const budgets = (await api.get('/api/budgets')).data
-      const budgetMap = {}
-      for (const b of budgets) {
-        budgetMap[b.category + '_' + b.month] = b.amount
-      }
-
-      for (const r of rec) {
-        r.month = r.date.slice(0, 7)
-        const used = rec
-          .filter(x => x.category === r.category && x.date.slice(0, 7) === r.month && x.date <= r.date)
-          .reduce((sum, x) => sum + x.amount, 0)
-        const key = r.category + '_' + r.month
-        r.left_budget = budgetMap[key] ? (budgetMap[key] - used).toFixed(2) : '—'
-      }
-    }
-
-    records.value = rec
-    applyFilter()
+    records.value = recRes.data.data
+    totalRecords.value = recRes.data.total
+    categories.value = catRes.data.map(c => c.name)
   } catch (err) {
     console.error("❌ 记录加载失败：", err)
   }
@@ -220,7 +198,10 @@ async function fetchData() {
 
 
 onMounted(fetchData)
-watch(() => props.refreshFlag, fetchData)
+watch(() => props.refreshFlag, () => {
+  currentPage.value = 1
+  fetchData()
+})
 </script>
 
 <style scoped>
@@ -238,6 +219,3 @@ watch(() => props.refreshFlag, fetchData)
   }
 }
 </style>
-
-
-

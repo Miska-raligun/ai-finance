@@ -1,6 +1,8 @@
 import sqlite3
+import logging
 
 DB_FILE = 'records.db'
+logger = logging.getLogger(__name__)
 
 def get_db():
     conn = sqlite3.connect(DB_FILE)
@@ -32,9 +34,7 @@ def init_db():
             category TEXT,
             amount REAL,
             note TEXT,
-            date TEXT,
-            month TEXT,  -- 格式如 "2025-06"
-            year TEXT
+            date TEXT
         )
     """)
 
@@ -67,12 +67,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS income (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
-            category TEXT,     -- 收入来源分类名（如“工资”、“奖金”等）
-            amount REAL,       -- 收入金额
-            note TEXT,         -- 备注（可选）
-            date TEXT,         -- 精确日期（如“2025-06-10”）
-            month TEXT,        -- 月份（如“2025-06”）
-            year TEXT          -- 年份（如“2025”）
+            category TEXT,
+            amount REAL,
+            note TEXT,
+            date TEXT
         )
     """)
 
@@ -122,6 +120,21 @@ def init_db():
         if not column_exists(cur, tbl, "user_id"):
             cur.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER")
 
+    # 迁移：移除 records/income 表中冗余的 month/year 列（SQLite 3.35+）
+    for tbl in ("records", "income"):
+        if column_exists(cur, tbl, "month"):
+            cur.execute(f"ALTER TABLE {tbl} DROP COLUMN month")
+        if column_exists(cur, tbl, "year"):
+            cur.execute(f"ALTER TABLE {tbl} DROP COLUMN year")
+
+    # ✅ 索引：加速按用户+日期、用户+分类的常用查询
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_records_user_date ON records(user_id, date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_records_user_cat ON records(user_id, category)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_income_user_date ON income(user_id, date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_income_user_cat ON income(user_id, category)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_budgets_user_month ON budgets(user_id, month)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_budgets_user_month_cat ON budgets(user_id, month, category)")
+
     admin_row = cur.execute(
         "SELECT id FROM users WHERE username = ? AND is_admin = 1", ("admin",)
     ).fetchone()
@@ -134,7 +147,7 @@ def init_db():
         existing_user = cur.fetchone()
 
         if existing_user:
-            print("⚠️ 已存在名为 admin 的用户，无法创建默认管理员。请手动检查权限。")
+            logger.warning("已存在名为 admin 的用户，无法创建默认管理员，请手动检查权限。")
         else:
             cur.execute(
                 "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)",

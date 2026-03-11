@@ -10,6 +10,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from llm_security_middleware import register_llm_security
 import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
 init_db()
 load_dotenv()  # 加载 .env 文件
 app = Flask(__name__)
@@ -249,11 +256,11 @@ def call_llm_intent(message, llm=None):
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
         if "error" in data:
-            print("❌ LLM API 错误：", data["error"])
+            logger.error("LLM API 错误：%s", data["error"])
             return None
         return data
     except Exception as e:
-        print("LLM 调用失败:", e)
+        logger.error("LLM 调用失败: %s", e)
         return None
 
 def call_llm_summary(user_msg, handler_result, llm=None):
@@ -292,10 +299,10 @@ def call_llm_summary(user_msg, handler_result, llm=None):
     if "choices" in result:
         return result["choices"][0]["message"]["content"]
     elif "error" in result:
-        print("❌ DeepSeek API error:", result["error"])
+        logger.error("DeepSeek API error: %s", result["error"])
         return "❌ 分析失败：" + result["error"].get("message", "未知错误")
     else:
-        print("❌ DeepSeek API unexpected response:", result)
+        logger.error("DeepSeek API unexpected response: %s", result)
         return "❌ 分析失败：LLM 响应格式异常"
 
 def call_llm_chat(history, llm=None):
@@ -327,13 +334,13 @@ def call_llm_chat(history, llm=None):
         if "choices" in result:
             return result["choices"][0]["message"]["content"]
         elif "error" in result:
-            print("❌ DeepSeek chat error:", result["error"])
+            logger.error("DeepSeek chat error: %s", result["error"])
             return "⚠️ 暂时无法回复"
         else:
-            print("❌ DeepSeek chat unexpected response:", result)
+            logger.error("DeepSeek chat unexpected response: %s", result)
             return "⚠️ 暂时无法回复"
     except Exception as e:
-        print("DeepSeek chat failed:", e)
+        logger.error("DeepSeek chat failed: %s", e)
         return "⚠️ 暂时无法回复"
 
 @app.route("/api/chat", methods=["POST"])
@@ -390,29 +397,76 @@ def chat():
 @login_required
 def get_records():
     db = get_db()
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        page, limit = 1, 50
+    offset = (page - 1) * limit
+
+    category = request.args.get("category")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
     month = request.args.get("month")
-    if month:
-        cursor = db.execute(
-            """
-            SELECT *, strftime('%Y-%m', date) as month
-            FROM records
-            WHERE strftime('%Y-%m', date) = ? AND user_id = ?
-            ORDER BY date DESC, id DESC
+    if month and not start_date and not end_date:
+        import calendar as _cal
+        y, m = map(int, month.split('-'))
+        start_date = f"{month}-01"
+        end_date = f"{month}-{_cal.monthrange(y, m)[1]:02d}"
+
+    conditions = ["r.user_id = ?"]
+    params = [g.user_id]
+    if category:
+        conditions.append("r.category = ?")
+        params.append(category)
+    if start_date:
+        conditions.append("r.date >= ?")
+        params.append(start_date)
+    if end_date:
+        conditions.append("r.date <= ?")
+        params.append(end_date)
+    where = " AND ".join(conditions)
+
+    total = db.execute(f"SELECT COUNT(*) FROM records r WHERE {where}", params).fetchone()[0]
+
+    rows = db.execute(
+        f"""
+        SELECT r.id, r.category, r.amount, r.note, r.date,
+               strftime('%Y-%m', r.date) as month,
+               COALESCE((
+                   SELECT SUM(r2.amount) FROM records r2
+                   WHERE r2.user_id = r.user_id
+                     AND r2.category = r.category
+                     AND strftime('%Y-%m', r2.date) = strftime('%Y-%m', r.date)
+                     AND r2.date <= r.date
+               ), 0) as cumulative_spend
+        FROM records r WHERE {where}
+        ORDER BY r.date DESC, r.id DESC LIMIT ? OFFSET ?
         """,
-            (month, g.user_id)
-        )
-    else:
-        cursor = db.execute(
-            """
-            SELECT *, strftime('%Y-%m', date) as month
-            FROM records
-            WHERE user_id = ?
-            ORDER BY date DESC, id DESC
-        """,
-            (g.user_id,)
-        )
-    results = [dict(row) for row in cursor.fetchall()]
-    return jsonify(results)
+        params + [limit, offset]
+    ).fetchall()
+
+    category_months = {(row['category'], row['month']) for row in rows}
+    budget_map = {}
+    for cat, mon in category_months:
+        b = db.execute(
+            "SELECT amount FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
+            (g.user_id, cat, mon)
+        ).fetchone()
+        if b:
+            budget_map[f"{cat}_{mon}"] = float(b['amount'])
+
+    results = []
+    for row in rows:
+        r = dict(row)
+        key = f"{r['category']}_{r['month']}"
+        budget = budget_map.get(key)
+        r['left_budget'] = f"{budget - r['cumulative_spend']:.2f}" if budget is not None else '—'
+        del r['cumulative_spend']
+        results.append(r)
+
+    return jsonify({"data": results, "total": total, "page": page, "limit": limit})
 
 @app.route('/api/records/<int:record_id>', methods=['DELETE'])
 @login_required
@@ -433,15 +487,10 @@ def update_record(record_id):
     amount = float(data.get('amount', 0))
     note = data.get('note', '').strip()
     date = data.get('date')
-    month = date[:7] if date else ''
-    year = date[:4] if date else ''
     db = get_db()
     db.execute(
-        """
-        UPDATE records SET category = ?, amount = ?, note = ?, date = ?, month = ?, year = ?
-        WHERE id = ? AND user_id = ?
-        """,
-        (category, amount, note, date, month, year, record_id, g.user_id),
+        "UPDATE records SET category = ?, amount = ?, note = ?, date = ? WHERE id = ? AND user_id = ?",
+        (category, amount, note, date, record_id, g.user_id),
     )
     db.commit()
     return jsonify({"success": True})
@@ -450,37 +499,53 @@ def update_record(record_id):
 @login_required
 def get_income():
     db = get_db()
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        page, limit = 1, 50
+    offset = (page - 1) * limit
+
+    category = request.args.get("category")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
     month = request.args.get("month")
+    if month and not start_date and not end_date:
+        import calendar as _cal
+        y, m = map(int, month.split('-'))
+        start_date = f"{month}-01"
+        end_date = f"{month}-{_cal.monthrange(y, m)[1]:02d}"
 
-    if month:
-        cursor = db.execute(
-            """
-            SELECT id, category, amount, note, date, month, year
-            FROM income
-            WHERE month = ? AND user_id = ?
-            ORDER BY date DESC, id DESC
-        """,
-            (month, g.user_id)
-        )
-    else:
-        cursor = db.execute(
-            """
-            SELECT id, category, amount, note, date, month, year
-            FROM income
-            WHERE user_id = ?
-            ORDER BY date DESC, id DESC
-        """,
-            (g.user_id,)
-        )
+    conditions = ["user_id = ?"]
+    params = [g.user_id]
+    if category:
+        conditions.append("category = ?")
+        params.append(category)
+    if start_date:
+        conditions.append("date >= ?")
+        params.append(start_date)
+    if end_date:
+        conditions.append("date <= ?")
+        params.append(end_date)
+    where = " AND ".join(conditions)
 
-    results = [dict(row) for row in cursor.fetchall()]
+    total = db.execute(f"SELECT COUNT(*) FROM income WHERE {where}", params).fetchone()[0]
 
-    # ✅ 防御式检查每条记录都有 date 字段
-    for r in results:
-        if "date" not in r or not r["date"]:
-            r["date"] = r.get("month", "") + "-01"
+    rows = db.execute(
+        f"SELECT id, category, amount, note, date, strftime('%Y-%m', date) as month "
+        f"FROM income WHERE {where} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?",
+        params + [limit, offset]
+    ).fetchall()
 
-    return jsonify(results)
+    results = []
+    for row in rows:
+        r = dict(row)
+        if not r.get("date"):
+            r["date"] = (r.get("month") or "") + "-01"
+        results.append(r)
+
+    return jsonify({"data": results, "total": total, "page": page, "limit": limit})
 
 @app.route('/api/income/<int:income_id>', methods=['DELETE'])
 @login_required
@@ -501,15 +566,10 @@ def update_income(income_id):
     amount = float(data.get('amount', 0))
     note = data.get('note', '').strip()
     date = data.get('date')
-    month = date[:7] if date else ''
-    year = date[:4] if date else ''
     db = get_db()
     db.execute(
-        """
-        UPDATE income SET category = ?, amount = ?, note = ?, date = ?, month = ?, year = ?
-        WHERE id = ? AND user_id = ?
-        """,
-        (category, amount, note, date, month, year, income_id, g.user_id),
+        "UPDATE income SET category = ?, amount = ?, note = ?, date = ? WHERE id = ? AND user_id = ?",
+        (category, amount, note, date, income_id, g.user_id),
     )
     db.commit()
     return jsonify({"success": True})
@@ -720,15 +780,15 @@ def monthly_stats():
         spend_cursor = db.execute(
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
-            FROM records WHERE year = ? AND user_id = ?
+            FROM records WHERE strftime('%Y', date) = ? AND user_id = ?
             GROUP BY month
             """,
             (year, g.user_id),
         )
         income_cursor = db.execute(
             """
-            SELECT month, SUM(amount) AS total
-            FROM income WHERE year = ? AND user_id = ?
+            SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
+            FROM income WHERE strftime('%Y', date) = ? AND user_id = ?
             GROUP BY month
             """,
             (year, g.user_id),
@@ -746,7 +806,7 @@ def monthly_stats():
         )
         income_cursor = db.execute(
             """
-            SELECT month, SUM(amount) AS total
+            SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
             FROM income
             WHERE user_id = ?
             GROUP BY month
@@ -781,20 +841,20 @@ def category_stats():
 
     if month:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE month = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
             (month, g.user_id),
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE month = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
             (month, g.user_id),
         )
     elif year:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE year = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM records WHERE strftime('%Y', date) = ? AND user_id = ? GROUP BY category",
             (year, g.user_id),
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE year = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM income WHERE strftime('%Y', date) = ? AND user_id = ? GROUP BY category",
             (year, g.user_id),
         )
     else:
@@ -828,7 +888,7 @@ def summary_stats():
         """
         SELECT SUM(amount) AS total
         FROM records
-        WHERE month = ? AND user_id = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
     """,
         (month, g.user_id)
     )
@@ -839,7 +899,7 @@ def summary_stats():
         """
         SELECT SUM(amount) AS total
         FROM income
-        WHERE month = ? AND user_id = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
     """,
         (month, g.user_id)
     )

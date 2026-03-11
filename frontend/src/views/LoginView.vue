@@ -15,6 +15,7 @@
 <script setup>
 import { ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const username = ref('')
@@ -45,7 +46,7 @@ async function onLogin() {
     }
     router.push('/chat')
   } else {
-    alert(data.error || '登录失败')
+    ElMessage.error(data.error || '登录失败')
   }
 }
 
@@ -60,7 +61,7 @@ async function onRegister() {
   if (data.success) {
     await onLogin()
   } else {
-    alert(data.error || '注册失败')
+    ElMessage.error(data.error || '注册失败')
   }
 }
 </script>

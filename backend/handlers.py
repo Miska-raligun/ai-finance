@@ -2,6 +2,7 @@ from db import get_db
 from datetime import datetime
 import logging
 
+logger = logging.getLogger(__name__)
 llm_logger = logging.getLogger("llm_budget_suggest")
 llm_logger.setLevel(logging.INFO)
 if not llm_logger.handlers:
@@ -21,13 +22,10 @@ def add_record(user_id, params):
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
 
-    month = date[:7]
-    year = date[:4]
-
     if not category or not amount:
         return "⚠️ 分类和金额不能为空"
 
-    # ✅ 查询分类类型是否为“收入”，不允许误用
+    # ✅ 查询分类类型是否为"收入"，不允许误用
     row = db.execute(
         "SELECT type FROM categories WHERE name = ? AND user_id = ?",
         (category, user_id)
@@ -36,13 +34,13 @@ def add_record(user_id, params):
         if row['type'] == '收入':
             return f"⚠️ 分类「{category}」已被设为收入来源，不能作为支出使用，请更换分类名。"
     else:
-        # ✅ 新增分类并标记为“支出”
+        # ✅ 新增分类并标记为"支出"
         db.execute("INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)", (user_id, category, '支出'))
 
     # ✅ 插入支出记录
     db.execute(
-        "INSERT INTO records (user_id, category, amount, note, date, month, year) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, category, amount, note, date, month, year)
+        "INSERT INTO records (user_id, category, amount, note, date) VALUES (?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date)
     )
     db.commit()
 
@@ -58,13 +56,10 @@ def add_income(user_id, params):
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
 
-    month = date[:7]
-    year = date[:4]
-
     if not category or not amount:
         return "⚠️ 收入的来源和金额不能为空"
 
-    # ✅ 检查该收入来源是否已存在为“支出”分类
+    # ✅ 检查该收入来源是否已存在为"支出"分类
     row = db.execute(
         "SELECT type FROM categories WHERE name = ? AND user_id = ?",
         (category, user_id)
@@ -81,15 +76,15 @@ def add_income(user_id, params):
 
     # ✅ 插入收入记录
     db.execute(
-        "INSERT INTO income (user_id, category, amount, note, date, month, year) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, category, amount, note, date, month, year)
+        "INSERT INTO income (user_id, category, amount, note, date) VALUES (?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date)
     )
     db.commit()
 
     return f"✅ 成功记录一笔收入：你从「{category}」获得了 ¥{amount}，备注为「{note}」，日期为 {date}。"
 
 def set_budget(user_id, params):
-    print("🧠 LLM 预算参数:", params)
+    logger.debug("LLM 预算参数: %s", params)
 
     category = params.get("分类")
     amount = params.get("金额") or params.get("预算")
@@ -169,7 +164,7 @@ def analyze_spend(user_id, params):
         """
         SELECT category, SUM(amount) as total
         FROM records
-        WHERE month = ? AND user_id = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
         GROUP BY category
         ORDER BY total DESC
         LIMIT 5
@@ -197,7 +192,7 @@ def analyze_spend(user_id, params):
         """
         SELECT category, SUM(amount) as total
         FROM income
-        WHERE month = ? AND user_id = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
         GROUP BY category
         ORDER BY total DESC
         LIMIT 5
@@ -258,7 +253,7 @@ def analyze_spend(user_id, params):
 def add_category(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
-    category_type = params.get("类型", "支出").strip()  # 默认为“支出”
+    category_type = params.get("类型", "支出").strip()  # 默认为"支出"
 
     if not category:
         return "⚠️ 分类名不能为空"
@@ -316,7 +311,7 @@ def budget_remain(user_id, params):
 
     db = get_db()
 
-    # ✅ 查询该月份的所有“支出”类预算信息
+    # ✅ 查询该月份的所有"支出"类预算信息
     cursor = db.execute(
         """
         SELECT b.category, b.amount
@@ -328,12 +323,12 @@ def budget_remain(user_id, params):
     )
     budget_map = {row['category']: float(row['amount']) for row in cursor.fetchall()}
 
-    # ✅ 查询该月份的所有“支出”记录
+    # ✅ 查询该月份的所有"支出"记录
     cursor = db.execute(
         """
         SELECT category, SUM(amount) as total
         FROM records
-        WHERE month = ? AND user_id = ?
+        WHERE strftime('%Y-%m', date) = ? AND user_id = ?
         GROUP BY category
     """,
         (month, user_id)
@@ -360,7 +355,7 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
 
     llm = llm or {}
 
-    print("开始分配预算")
+    logger.info("开始分配预算")
     api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
     url = llm.get("url") or "https://api.siliconflow.cn/v1/chat/completions"
     headers = {
@@ -373,7 +368,7 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
     # ✅ 获取所有支出记录（历史所有月份）
     db = get_db()
     cursor = db.execute("""
-        SELECT category, amount, month
+        SELECT category, amount, strftime('%Y-%m', date) as month
         FROM records
         WHERE user_id = ? AND category IN (
             SELECT name FROM categories WHERE type = '支出' AND user_id = ?
@@ -404,10 +399,10 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
 
     history_json = json.dumps(summary_data, ensure_ascii=False)
 
-    print("📊 分类历史消费汇总：", summary_data)
-    print("🎯 设定总预算：", total_budget)
-    print("🎯 用于预算分析的分类：", [item['category'] for item in summary_data])
-    print("🎯 传给 LLM 的分类数量：", len(summary_data))
+    logger.debug("分类历史消费汇总：%s", summary_data)
+    logger.debug("设定总预算：%s", total_budget)
+    logger.debug("用于预算分析的分类：%s", [item['category'] for item in summary_data])
+    logger.debug("传给 LLM 的分类数量：%d", len(summary_data))
 
     if total_budget:
         budget_instruction = (
@@ -447,8 +442,9 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
         "temperature": 0.5
     })
 
-    print("📥 DeepSeek-r1 返回内容：", response.json())
-    return response.json()["choices"][0]["message"]["content"]
+    resp_json = response.json()
+    logger.debug("LLM 预算返回内容：%s", resp_json)
+    return resp_json["choices"][0]["message"]["content"]
 
 
 
@@ -464,7 +460,7 @@ def suggest_budgets(user_id, params=None, llm=None):
 
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
     llm_reply = call_deepseek_budget_advice(user_id, total, llm)
-    print("🧠 LLM 预算建议回复：\n", llm_reply)
+    logger.debug("LLM 预算建议回复：%s", llm_reply)
     llm_logger.info(f"LLM：{llm_reply}")
 
     # ✅ 解析 LLM 输出格式
@@ -532,10 +528,10 @@ def query_income(user_id, params):
 
     if time_range:
         if len(time_range) == 7:  # 2025-06（按月）
-            query += " AND month = ?"
+            query += " AND strftime('%Y-%m', date) = ?"
             args.append(time_range)
         elif len(time_range) == 4:  # 2025（按年）
-            query += " AND year = ?"
+            query += " AND strftime('%Y', date) = ?"
             args.append(time_range)
 
     if category:
@@ -583,7 +579,7 @@ def category_sum(user_id, params):
 
     scope = f"{start_date} 至 {end_date}" if start_date and end_date else "所选范围内"
     if category:
-        return f"📊 你在 {scope} 的“{category}”支出为 ¥{total:.2f}"
+        return f"📊 你在 {scope} 的「{category}」支出为 ¥{total:.2f}"
     else:
         return f"📊 你在 {scope} 的总支出为 ¥{total:.2f}"
 
