@@ -500,6 +500,68 @@ def suggest_budgets(user_id, params=None, llm=None):
     db.commit()
     return "✅ 已根据智能分析更新预算设置：\n" + llm_reply
 
+def search_records(user_id, params):
+    """列出支出明细（含ID），供 LLM 先查看再决定删除哪条"""
+    db = get_db()
+    category = params.get("分类", "").strip()
+    time_range = params.get("时间范围", "").strip()
+    limit = min(20, int(params.get("条数", 10)))
+
+    q = "SELECT id, date, category, amount, note FROM records WHERE user_id=?"
+    args = [user_id]
+    if category:
+        q += " AND category=?"; args.append(category)
+    if len(time_range) == 10:    # YYYY-MM-DD
+        q += " AND date=?"; args.append(time_range)
+    elif len(time_range) == 7:   # YYYY-MM
+        q += " AND strftime('%Y-%m', date)=?"; args.append(time_range)
+    elif len(time_range) == 4:   # YYYY
+        q += " AND strftime('%Y', date)=?"; args.append(time_range)
+    q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+
+    rows = db.execute(q, args).fetchall()
+    if not rows:
+        return "暂无符合条件的支出记录。"
+    return "\n".join(
+        f"ID:{r['id']} | {r['date']} | {r['category']} | ¥{r['amount']} | {r['note']}"
+        for r in rows
+    )
+
+
+def delete_record(user_id, params):
+    """按记录ID删除一条支出记录"""
+    db = get_db()
+    record_id = params.get("记录ID")
+    if not record_id:
+        return "⚠️ 请提供「记录ID」。可先调用 search_records 查询获取ID。"
+    row = db.execute(
+        "SELECT id, category, amount, date, note FROM records WHERE id=? AND user_id=?",
+        (int(record_id), user_id)
+    ).fetchone()
+    if not row:
+        return f"❌ 未找到 ID:{record_id} 的支出记录（或不属于当前用户）。"
+    db.execute("DELETE FROM records WHERE id=? AND user_id=?", (int(record_id), user_id))
+    db.commit()
+    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+
+
+def delete_income(user_id, params):
+    """按记录ID删除一条收入记录"""
+    db = get_db()
+    income_id = params.get("收入ID")
+    if not income_id:
+        return "⚠️ 请提供「收入ID」。可先调用 query_income（全部=是）查询获取ID。"
+    row = db.execute(
+        "SELECT id, category, amount, date, note FROM income WHERE id=? AND user_id=?",
+        (int(income_id), user_id)
+    ).fetchone()
+    if not row:
+        return f"❌ 未找到 ID:{income_id} 的收入记录（或不属于当前用户）。"
+    db.execute("DELETE FROM income WHERE id=? AND user_id=?", (int(income_id), user_id))
+    db.commit()
+    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+
+
 def query_income(user_id, params):
     db = get_db()
     category = params.get("分类", "").strip()
@@ -519,7 +581,7 @@ def query_income(user_id, params):
         total = sum(float(r["amount"]) for r in results)
         reply = f"📊 当前共记录 {len(results)} 笔收入，总计 ¥{total:.2f}\n"
         for r in results[:10]:  # 最多展示前10条
-            reply += f"📌 {r['date']} - 来源「{r['category']}」收入 ¥{r['amount']}（备注：{r['note']}）\n"
+            reply += f"📌 ID:{r['id']} {r['date']} - 来源「{r['category']}」收入 ¥{r['amount']}（备注：{r['note']}）\n"
         return reply + ("...（仅展示前10条）" if len(results) > 10 else "")
 
     # ✅ 聚合查询（可选时间范围 + 来源）

@@ -62,7 +62,7 @@ def category_sum(category: str = "", month: str = "", start_date: str = "", end_
 def query_records(category: str = "", month: str = "", start_date: str = "", end_date: str = "", limit: int = 20) -> str:
     """查询支出明细。可按分类、月份、日期范围筛选，limit默认20条。"""
     db = get_db()
-    q, args = "SELECT date,category,amount,note FROM records WHERE user_id=?", [uid()]
+    q, args = "SELECT id, date, category, amount, note FROM records WHERE user_id=?", [uid()]
     if category: q += " AND category=?"; args.append(category)
     if month: q += " AND strftime('%Y-%m', date)=?"; args.append(month)
     if start_date: q += " AND date>=?"; args.append(start_date)
@@ -70,16 +70,16 @@ def query_records(category: str = "", month: str = "", start_date: str = "", end
     q += " ORDER BY date DESC LIMIT ?"; args.append(limit)
     rows = db.execute(q, args).fetchall()
     if not rows: return "暂无符合条件的支出记录。"
-    return "\n".join(f"{r['date']} | {r['category']} | ¥{r['amount']} | {r['note']}" for r in rows)
+    return "\n".join(f"ID:{r['id']} | {r['date']} | {r['category']} | ¥{r['amount']} | {r['note']}" for r in rows)
 
 @mcp.tool()
 def query_income(source: str = "", month: str = "", show_all: bool = False) -> str:
     """查询收入。source:来源筛选, month:月份, show_all:True返回明细列表。"""
     db = get_db()
     if show_all:
-        rows = db.execute("SELECT date,category,amount,note FROM income WHERE user_id=? ORDER BY date DESC LIMIT 20", (uid(),)).fetchall()
+        rows = db.execute("SELECT id, date, category, amount, note FROM income WHERE user_id=? ORDER BY date DESC LIMIT 20", (uid(),)).fetchall()
         total = db.execute("SELECT SUM(amount) FROM income WHERE user_id=?", (uid(),)).fetchone()[0] or 0
-        return f"共{len(rows)}条收入，总计¥{total:.2f}：\n" + "\n".join(f"{r['date']}|{r['category']}|¥{r['amount']}|{r['note']}" for r in rows)
+        return f"共{len(rows)}条收入，总计¥{total:.2f}：\n" + "\n".join(f"ID:{r['id']}|{r['date']}|{r['category']}|¥{r['amount']}|{r['note']}" for r in rows)
     q, args = "SELECT SUM(amount) FROM income WHERE user_id=?", [uid()]
     if source: q += " AND category=?"; args.append(source)
     if month: q += " AND strftime('%Y-%m', date)=?"; args.append(month)
@@ -125,6 +125,34 @@ def list_categories() -> str:
     spend = [r["name"] for r in rows if r["type"] == "支出"]
     inc = [r["name"] for r in rows if r["type"] == "收入"]
     return ("💸 支出分类：" + "、".join(spend) + "\n" if spend else "") + ("💰 收入分类：" + "、".join(inc) if inc else "")
+
+@mcp.tool()
+def delete_record(record_id: int) -> str:
+    """删除一条支出记录。请先用 query_records 查询获取 ID，再传入删除。"""
+    db = get_db()
+    row = db.execute(
+        "SELECT id, category, amount, date, note FROM records WHERE id=? AND user_id=?",
+        (record_id, uid())
+    ).fetchone()
+    if not row:
+        return f"❌ 未找到 ID:{record_id} 的支出记录。"
+    db.execute("DELETE FROM records WHERE id=? AND user_id=?", (record_id, uid()))
+    db.commit()
+    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+
+@mcp.tool()
+def delete_income(income_id: int) -> str:
+    """删除一条收入记录。请先用 query_income(show_all=True) 查询获取 ID，再传入删除。"""
+    db = get_db()
+    row = db.execute(
+        "SELECT id, category, amount, date, note FROM income WHERE id=? AND user_id=?",
+        (income_id, uid())
+    ).fetchone()
+    if not row:
+        return f"❌ 未找到 ID:{income_id} 的收入记录。"
+    db.execute("DELETE FROM income WHERE id=? AND user_id=?", (income_id, uid()))
+    db.commit()
+    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
 def set_budget(category: str, amount: float, month: str = "") -> str:

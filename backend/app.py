@@ -188,7 +188,10 @@ handlers = {
     "budget_remain": budget_remain,
     "suggest_budgets": suggest_budgets,
     "query_income": query_income,
-    "category_sum": category_sum
+    "category_sum": category_sum,
+    "search_records": search_records,
+    "delete_record": delete_record,
+    "delete_income": delete_income,
 }
 
 FINANCE_TOOLS = [
@@ -234,6 +237,17 @@ FINANCE_TOOLS = [
             "properties": {"分类": {"type": "string"},
                            "开始时间": {"type": "string", "description": "YYYY-MM-DD"},
                            "结束时间": {"type": "string", "description": "YYYY-MM-DD"}}}}},
+    {"type": "function", "function": {"name": "search_records", "description": "查询支出明细列表（含记录ID），可按分类、时间筛选。删除前先调用此接口查看实际记录",
+        "parameters": {"type": "object",
+            "properties": {"分类": {"type": "string", "description": "支出分类，留空返回全部"},
+                           "时间范围": {"type": "string", "description": "YYYY-MM-DD（某天）、YYYY-MM（某月）或YYYY（某年），留空返回最近记录"},
+                           "条数": {"type": "integer", "description": "返回条数，默认10，最多20"}}}}},
+    {"type": "function", "function": {"name": "delete_record", "description": "按记录ID删除一条支出记录。请先用 search_records 查询获取ID再调用此接口",
+        "parameters": {"type": "object", "required": ["记录ID"],
+            "properties": {"记录ID": {"type": "integer", "description": "支出记录的唯一ID"}}}}},
+    {"type": "function", "function": {"name": "delete_income", "description": "按记录ID删除一条收入记录。请先用 query_income（全部=是）查询获取ID再调用",
+        "parameters": {"type": "object", "required": ["收入ID"],
+            "properties": {"收入ID": {"type": "integer", "description": "收入记录的唯一ID"}}}}},
 ]
 
 def call_llm_intent(message, llm=None):
