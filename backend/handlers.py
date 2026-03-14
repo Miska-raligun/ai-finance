@@ -517,6 +517,9 @@ def search_records(user_id, params):
         q += " AND strftime('%Y-%m', date)=?"; args.append(time_range)
     elif len(time_range) == 4:   # YYYY
         q += " AND strftime('%Y', date)=?"; args.append(time_range)
+    keyword = params.get("关键词", "").strip()
+    if keyword:
+        q += " AND note LIKE ?"; args.append(f"%{keyword}%")
     q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
 
     rows = db.execute(q, args).fetchall()

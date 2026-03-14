@@ -50,9 +50,11 @@ The server exposes MCP tools over SSE. Your MCP client is already connected — 
 
 **`list_categories`** — List all categories. No parameters.
 
-**`search_records`** — Search expense records by description (use before deleting to get record IDs).
-- `category` (str, optional): filter by category
-- `time_range` (str, optional): natural language range, e.g. "本月", "上周"
+**`search_records`** — Search expense records (use before deleting to get record IDs).
+- `分类` (str, optional): filter by category
+- `时间范围` (str, optional): YYYY-MM-DD / YYYY-MM / YYYY
+- `关键词` (str, optional): keyword to match against the note field, e.g. "麦当劳", "滴滴"
+- `条数` (int, optional): max results, default 10
 
 **`delete_record`** — Delete an expense record by ID.
 - `记录ID` (int, required): ID from `search_records`
