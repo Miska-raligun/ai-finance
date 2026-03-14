@@ -39,6 +39,7 @@
       style="width: 100%"
       :default-sort="{ prop: 'date', order: 'descending' }"
       @selection-change="handleSelectionChange"
+      class="record-table"
     >
       <el-table-column type="selection" width="55" />
       <el-table-column prop="category" label="类型">
@@ -219,14 +220,43 @@ watch(() => props.refreshFlag, () => {
   display: flex;
   gap: 8px;
 }
-@media (max-width: 600px) {
+/* 表格横向可滚动，确保操作列可见 */
+.record-table :deep(.el-table__body-wrapper) {
+  overflow-x: auto;
+}
+@media (max-width: 768px) {
   .filter-form {
     flex-direction: column;
     align-items: stretch;
   }
+  /* 让 Element Plus 表单项撑满宽度 */
+  .filter-form :deep(.el-form-item) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    margin-right: 0;
+    margin-bottom: 8px;
+    width: 100%;
+  }
+  .filter-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+  /* 让下拉和日期选择器撑满宽度 */
+  .filter-form :deep(.el-select),
+  .filter-form :deep(.el-date-editor) {
+    width: 100% !important;
+    max-width: 100%;
+  }
+  /* 日期范围选择器专门处理 */
+  .filter-form :deep(.el-date-editor--daterange) {
+    width: 100% !important;
+    min-width: unset !important;
+  }
   .filter-actions {
     display: flex;
     gap: 8px;
+    width: 100%;
   }
   .filter-actions .el-button {
     flex: 1;
