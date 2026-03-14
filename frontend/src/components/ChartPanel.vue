@@ -20,10 +20,10 @@
     </div>
 
     <div class="chart-row">
-      <VChart :option="incomePieOption" style="height: 300px; flex: 1" />
-      <VChart :option="spendPieOption" style="height: 300px; flex: 1" />
+      <div class="pie-wrap"><VChart :option="incomePieOption" style="height: 300px; width: 100%" /></div>
+      <div class="pie-wrap"><VChart :option="spendPieOption" style="height: 300px; width: 100%" /></div>
     </div>
-    <VChart :option="lineOption" style="height: 300px" />
+    <VChart :option="lineOption" style="height: 300px; width: 100%" />
   </el-card>
 </template>
 
@@ -83,9 +83,19 @@ const fetchChartData = async () => {
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')
   const spendCats = cats.data.filter(x => x['类型'] === '支出')
 
+  const fmtCeil = v => (Math.ceil(v * 100) / 100).toFixed(2)
+  const pieTooltip = {
+    trigger: 'item',
+    formatter: p => `${p.name}: ¥${fmtCeil(p.value)} (${p.percent}%)`
+  }
+  const lineTooltip = {
+    trigger: 'axis',
+    formatter: params => params.map(p => `${p.seriesName}: ¥${fmtCeil(p.value)}`).join('<br/>')
+  }
+
   incomePieOption.value = {
     title: { text: '收入分布', left: 'center' },
-    tooltip: { trigger: 'item' },
+    tooltip: pieTooltip,
     legend: { bottom: 0, left: 'center' },
     series: [
       {
@@ -98,7 +108,7 @@ const fetchChartData = async () => {
   }
   spendPieOption.value = {
     title: { text: '支出分布', left: 'center' },
-    tooltip: { trigger: 'item' },
+    tooltip: pieTooltip,
     legend: { bottom: 0, left: 'center' },
     series: [
       {
@@ -113,7 +123,7 @@ const fetchChartData = async () => {
   if (mode.value === 'month') {
     lineOption.value = {
       title: { text: '本月每日收支情况' },
-      tooltip: { trigger: 'axis' },
+      tooltip: lineTooltip,
       legend: { data: ['收入', '支出', '结余'] },
       xAxis: { type: 'category', data: trend.data.map(d => d.date) },
       yAxis: { type: 'value' },
@@ -126,7 +136,7 @@ const fetchChartData = async () => {
   } else {
     lineOption.value = {
       title: { text: '年度收支趋势' },
-      tooltip: { trigger: 'axis' },
+      tooltip: lineTooltip,
       legend: { data: ['收入', '支出', '结余'] },
       xAxis: { type: 'category', data: trend.data.map(m => m.month) },
       yAxis: { type: 'value' },
@@ -171,11 +181,18 @@ watch(mode, () => {
   display: flex;
   gap: 20px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+}
+.pie-wrap {
+  flex: 1;
+  min-width: 0;
 }
 @media (max-width: 600px) {
   .chart-row {
     flex-direction: column;
+  }
+  .pie-wrap {
+    width: 100%;
+    flex: none;
   }
 }
 </style>
