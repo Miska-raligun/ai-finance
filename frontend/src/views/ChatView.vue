@@ -58,7 +58,7 @@ async function sendMessage() {
     const data = await res.json()
     messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })
     if (data.reply?.startsWith('✅')) {
-      localStorage.setItem('record_added', Date.now())
+      window.dispatchEvent(new CustomEvent('record_changed'))
     }
   } catch {
     messages.value.push({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })

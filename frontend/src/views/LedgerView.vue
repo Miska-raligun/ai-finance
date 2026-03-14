@@ -57,10 +57,8 @@ onActivated(() => {
   refreshFlag.value++
 })
 
-function onStorage(e) {
-  if (e.key === 'record_added') {
-    refreshFlag.value++
-  }
+function onRecordChanged() {
+  refreshFlag.value++
 }
 
 onMounted(() => {
@@ -68,9 +66,9 @@ onMounted(() => {
   if (!name) {
     router.push('/login')
   }
-  window.addEventListener('storage', onStorage)
+  window.addEventListener('record_changed', onRecordChanged)
 })
-onBeforeUnmount(() => window.removeEventListener('storage', onStorage))
+onBeforeUnmount(() => window.removeEventListener('record_changed', onRecordChanged))
 </script>
 
 <style scoped>
