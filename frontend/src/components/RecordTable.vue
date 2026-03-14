@@ -25,9 +25,11 @@
         />
       </el-form-item>
 
-      <el-button type="primary" size="small" @click="applyFilter">筛选</el-button>
-      <el-button plain size="small" @click="resetFilters">显示全部</el-button>
-      <el-button type="danger" size="small" @click="deleteSelected" :disabled="!selectedRows.length">删除所选</el-button>
+      <div class="filter-actions">
+        <el-button type="primary" size="small" @click="applyFilter">筛选</el-button>
+        <el-button plain size="small" @click="resetFilters">显示全部</el-button>
+        <el-button type="danger" size="small" @click="deleteSelected" :disabled="!selectedRows.length">删除所选</el-button>
+      </div>
     </el-form>
 
     <el-table
@@ -213,10 +215,21 @@ watch(() => props.refreshFlag, () => {
   gap: 10px;
   flex-wrap: wrap;
 }
+.filter-actions {
+  display: flex;
+  gap: 8px;
+}
 @media (max-width: 600px) {
   .filter-form {
     flex-direction: column;
     align-items: stretch;
+  }
+  .filter-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .filter-actions .el-button {
+    flex: 1;
   }
 }
 </style>
