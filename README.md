@@ -90,56 +90,44 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ---
 
-## MCP 接入
+## 远程 MCP 接入
 
-MCP Server 使用 **SSE 传输**，兼容所有支持 MCP 协议的客户端。
+MCP Server 使用 **SSE 传输**，供运行在**其他设备**上的 AI Agent 远程调用记账功能。Agent 无需关心服务器内部实现，只需知道三样东西：**服务器 IP**、**用户名**、**密码**。
 
-- **SSE 端点**：`http://localhost:5001/mcp/sse`
-- **鉴权方式**：HTTP Header `Authorization: Bearer <username>:<password>`
+- **SSE 端点**：`http://<服务器IP>:5001/mcp/sse`
+- **鉴权方式**：HTTP Header `Authorization: Bearer <用户名>:<密码>`（即 Web 前端的注册账号）
 
-### Claude Code
+> 确保服务器防火墙已放行 **5001** 端口。
 
-在 `~/.claude.json` 的 `mcpServers` 中添加：
+### Claude Code（远程 Agent）
+
+在**你自己电脑**的 `~/.claude.json` 中添加 MCP Server 配置：
 
 ```json
 {
   "mcpServers": {
     "ai-finance": {
       "type": "sse",
-      "url": "http://localhost:5001/mcp/sse",
+      "url": "http://<服务器IP>:5001/mcp/sse",
       "headers": {
-        "Authorization": "Bearer your_username:your_password"
+        "Authorization": "Bearer 你的用户名:你的密码"
       }
     }
   }
 }
 ```
 
-将 `your_username:your_password` 替换为你在 Web 前端注册的账号和密码，重启 Claude Code 后即可使用。每个用户填入自己的凭据，数据天然隔离。
+重启 Claude Code 后即可直接调用记账工具。每个用户填入自己的凭据，数据天然隔离。
 
 ### 其他 MCP 客户端
 
-任何支持 SSE 传输的 MCP 客户端均可按相同方式配置，`Authorization` Header 格式固定为 `Bearer username:password`。
+任何支持 SSE 传输的 MCP 客户端均可按相同方式配置，`Authorization` Header 格式固定为 `Bearer 用户名:密码`。
 
-### Agent Skill
+### Agent Skill（Claude Code）
 
-`skills/` 目录包含两个文件，覆盖不同类型的 Agent 接入场景：
+将 `skills/ai-finance.md` 复制到你自己电脑的 `~/.claude/skills/ai-finance.md`，在对话中执行 `/ai-finance` 即可让 Agent 了解所有可用工具及调用规范。
 
-| 文件 | 用途 |
-|---|---|
-| `ai-finance.md` | Skill 描述文件，供 Agent 理解可用工具及调用规范 |
-| `finance_client.py` | MCP 客户端脚本，供不支持 MCP 协议的 Agent 通过命令行或 Python import 调用 |
-
-**Claude Code 用法**：将 `ai-finance.md` 复制到 `~/.claude/skills/ai-finance.md`，在对话中执行 `/ai-finance` 即可激活。
-
-**非 MCP Agent**：激活 `backend/venv`，设置 `FINANCE_USERNAME` 和 `FINANCE_PASSWORD` 环境变量后，直接调用 `finance_client.py`：
-```bash
-python finance_client.py add_record --category 餐饮 --amount 25.0
-python finance_client.py query_records --month 2026-03
-```
-或在 Python 代码中 `from finance_client import add_record, query_records` 直接调用。
-
-详细参数说明与示例见 `skills/ai-finance.md`。
+详细工具参数说明见 `skills/ai-finance.md`。
 
 ---
 

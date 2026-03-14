@@ -1,14 +1,10 @@
 You are helping the user manage their personal finances using the AI Finance MCP server.
 
-Choose one of the two integration methods below based on your environment.
+The server exposes MCP tools over SSE. Your MCP client is already connected — just call the tools directly.
 
 ---
 
-## Method A: MCP-native clients (Claude Code, etc.)
-
-If your agent runtime supports the MCP protocol natively (e.g. Claude Code with `mcpServers` configured), call the tools directly.
-
-### Available tools
+## Available tools
 
 **`add_record`** — Record an expense.
 - `category` (str, required): expense category
@@ -54,97 +50,15 @@ If your agent runtime supports the MCP protocol natively (e.g. Claude Code with 
 
 **`list_categories`** — List all categories. No parameters.
 
----
+**`search_records`** — Search expense records by description (use before deleting to get record IDs).
+- `category` (str, optional): filter by category
+- `time_range` (str, optional): natural language range, e.g. "本月", "上周"
 
-## Method B: Non-MCP agents (subprocess or Python import)
+**`delete_record`** — Delete an expense record by ID.
+- `记录ID` (int, required): ID from `search_records`
 
-Use `skills/finance_client.py` from the repository. It requires the same Python environment as the backend (`backend/venv`).
-
-### Prerequisites
-
-```bash
-# activate the backend venv
-source /path/to/ai-finance/backend/venv/bin/activate
-
-# set env vars — use the same username/password as the web frontend
-export FINANCE_MCP_URL=http://localhost:5001/mcp/sse
-export FINANCE_USERNAME=your_username
-export FINANCE_PASSWORD=your_password
-```
-
-### CLI usage (subprocess)
-
-```bash
-# Record an expense
-python finance_client.py add_record --category 餐饮 --amount 25.0 --note 麦当劳 --date 2026-03-10
-
-# Record income
-python finance_client.py add_income --category 工资 --amount 8000.0 --date 2026-03-10
-
-# Query recent expense records
-python finance_client.py query_records --month 2026-03 --limit 10
-
-# Query expense records by date range
-python finance_client.py query_records --start_date 2026-03-01 --end_date 2026-03-10
-
-# Query income records
-python finance_client.py query_income --month 2026-03
-python finance_client.py query_income --show_all
-
-# Sum expenses
-python finance_client.py category_sum --month 2026-03
-python finance_client.py category_sum --category 餐饮 --start_date 2026-03-01 --end_date 2026-03-31
-
-# Check budget remaining (all categories this month)
-python finance_client.py budget_remain
-python finance_client.py budget_remain --category 餐饮 --month 2026-03
-
-# Set a budget
-python finance_client.py set_budget --category 餐饮 --amount 1000.0 --month 2026-03
-
-# Monthly analysis report
-python finance_client.py analyze_spend --month 2026-03
-
-# List all categories
-python finance_client.py list_categories
-```
-
-### Python import usage
-
-```python
-from finance_client import (
-    add_record, add_income,
-    query_records, query_income,
-    category_sum, budget_remain,
-    set_budget, analyze_spend,
-    list_categories,
-    call_tool,   # generic: call_tool("tool_name", {"param": "value"})
-)
-
-# Record an expense
-print(add_record("餐饮", 25.0, note="麦当劳"))
-
-# Record income
-print(add_income("工资", 8000.0, date="2026-03-10"))
-
-# Query records
-print(query_records(month="2026-03", limit=10))
-
-# Sum expenses for a date range
-print(category_sum(start_date="2026-03-01", end_date="2026-03-10"))
-
-# Check budget
-print(budget_remain())
-
-# Set budget
-print(set_budget("餐饮", 1000.0))
-
-# Monthly analysis
-print(analyze_spend("2026-03"))
-
-# List categories
-print(list_categories())
-```
+**`delete_income`** — Delete an income record by ID.
+- `收入ID` (int, required): ID from `query_income`
 
 ---
 
@@ -153,4 +67,4 @@ print(list_categories())
 - All monetary values are in CNY (¥).
 - Resolve relative dates ("yesterday", "last week") to concrete YYYY-MM-DD values before calling tools.
 - When recording multiple items, call the tool once per item.
-- The frontend dashboard at `http://localhost:5173` shows all data visually.
+- To delete a record, first call `search_records` to get the ID, then call `delete_record`.
