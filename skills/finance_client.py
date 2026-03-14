@@ -122,6 +122,26 @@ def list_categories() -> str:
     return call_tool("list_categories", {})
 
 
+def search_records(category: str = "", time_range: str = "",
+                   keyword: str = "", limit: int = 10) -> str:
+    """查询支出明细（含记录ID），删除前先调用此函数获取ID。
+    keyword 为备注关键词模糊匹配，如'麦当劳'、'滴滴'。"""
+    return call_tool("search_records", {k: v for k, v in {
+        "分类": category, "时间范围": time_range,
+        "关键词": keyword, "条数": limit
+    }.items() if v not in ("", 0)})
+
+
+def delete_record(record_id: int) -> str:
+    """按记录ID删除一条支出记录。请先用 search_records 获取ID。"""
+    return call_tool("delete_record", {"记录ID": record_id})
+
+
+def delete_income(income_id: int) -> str:
+    """按记录ID删除一条收入记录。请先用 query_income(show_all=True) 获取ID。"""
+    return call_tool("delete_income", {"收入ID": income_id})
+
+
 # ---------------------------------------------------------------------------
 # CLI 层（供 Agent 子进程调用）
 # ---------------------------------------------------------------------------
@@ -186,6 +206,21 @@ def build_parser() -> argparse.ArgumentParser:
     # list_categories
     sub.add_parser("list_categories", help="列出所有分类")
 
+    # search_records
+    p = sub.add_parser("search_records", help="查询支出明细（含ID），删除前使用")
+    p.add_argument("--category",   default="", help="按分类筛选")
+    p.add_argument("--time_range", default="", help="时间范围 YYYY-MM-DD / YYYY-MM / YYYY")
+    p.add_argument("--keyword",    default="", help="备注关键词，如'麦当劳'")
+    p.add_argument("--limit",      type=int, default=10, help="最多返回条数（默认10）")
+
+    # delete_record
+    p = sub.add_parser("delete_record", help="按ID删除一条支出记录")
+    p.add_argument("--id", required=True, type=int, help="支出记录ID")
+
+    # delete_income
+    p = sub.add_parser("delete_income", help="按ID删除一条收入记录")
+    p.add_argument("--id", required=True, type=int, help="收入记录ID")
+
     return parser
 
 
@@ -204,6 +239,9 @@ def main():
         "set_budget":      lambda: set_budget(args.category, args.amount, args.month),
         "analyze_spend":   lambda: analyze_spend(args.month),
         "list_categories": lambda: list_categories(),
+        "search_records":  lambda: search_records(args.category, args.time_range, args.keyword, args.limit),
+        "delete_record":   lambda: delete_record(args.id),
+        "delete_income":   lambda: delete_income(args.id),
     }
 
     try:
