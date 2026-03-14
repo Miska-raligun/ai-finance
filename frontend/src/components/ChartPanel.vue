@@ -120,13 +120,20 @@ const fetchChartData = async () => {
     ]
   }
 
+  const lineCommon = {
+    title: { left: 'center' },
+    legend: { data: ['收入', '支出', '结余'], bottom: 0, left: 'center' },
+    grid: { bottom: 40 },
+    tooltip: lineTooltip,
+    xAxis: { type: 'category' },
+    yAxis: { type: 'value' },
+  }
+
   if (mode.value === 'month') {
     lineOption.value = {
-      title: { text: '本月每日收支情况' },
-      tooltip: lineTooltip,
-      legend: { data: ['收入', '支出', '结余'] },
-      xAxis: { type: 'category', data: trend.data.map(d => d.date) },
-      yAxis: { type: 'value' },
+      ...lineCommon,
+      title: { ...lineCommon.title, text: '本月每日收支情况' },
+      xAxis: { ...lineCommon.xAxis, data: trend.data.map(d => d.date) },
       series: [
         { name: '收入', type: 'line', data: trend.data.map(d => d['收入']) },
         { name: '支出', type: 'line', data: trend.data.map(d => d['支出']) },
@@ -135,11 +142,9 @@ const fetchChartData = async () => {
     }
   } else {
     lineOption.value = {
-      title: { text: '年度收支趋势' },
-      tooltip: lineTooltip,
-      legend: { data: ['收入', '支出', '结余'] },
-      xAxis: { type: 'category', data: trend.data.map(m => m.month) },
-      yAxis: { type: 'value' },
+      ...lineCommon,
+      title: { ...lineCommon.title, text: '年度收支趋势' },
+      xAxis: { ...lineCommon.xAxis, data: trend.data.map(m => m.month) },
       series: [
         { name: '收入', type: 'line', data: trend.data.map(m => m['收入']) },
         { name: '支出', type: 'line', data: trend.data.map(m => m['支出']) },
