@@ -183,13 +183,14 @@ watch(mode, () => {
 <style scoped>
 .stat-strip {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 16px;
 }
 .stat-item {
   flex: 1;
+  min-width: 0;
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 10px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -202,10 +203,13 @@ watch(mode, () => {
 .stat-label {
   font-size: 12px;
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 .stat-value {
-  font-size: 18px;
+  font-size: clamp(13px, 3.2vw, 18px);
   font-weight: 700;
+  word-break: break-all;
+  line-height: 1.2;
 }
 .income  .stat-value { color: #16A34A; }
 .expense .stat-value { color: #DC2626; }

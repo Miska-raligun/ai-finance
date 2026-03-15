@@ -24,8 +24,8 @@
           <div class="user-name">{{ username }}</div>
         </div>
         <div class="side-actions">
-          <button class="side-btn" @click="openConfigPanel">⚙ 模型配置</button>
-          <button class="side-btn danger" @click="logout">退出登录</button>
+          <button class="side-btn" @click="openConfigPanel">⚙️ 模型配置</button>
+          <button class="side-btn danger" @click="logout">🚪 退出登录</button>
         </div>
       </div>
     </el-aside>
@@ -61,8 +61,8 @@
             <div class="user-name">{{ username }}</div>
           </div>
           <div class="side-actions">
-            <button class="side-btn" @click="openConfigPanel(); showDrawer=false">⚙ 模型配置</button>
-            <button class="side-btn danger" @click="logout">退出登录</button>
+            <button class="side-btn" @click="openConfigPanel(); showDrawer=false">⚙️ 模型配置</button>
+            <button class="side-btn danger" @click="logout">🚪 退出登录</button>
           </div>
         </div>
       </div>
@@ -280,16 +280,19 @@ body {
 
 .side-nav {
   flex: 1;
-  padding: 12px 10px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
   border-radius: 10px;
   border: 1.5px solid var(--color-primary);
   color: var(--color-primary);
@@ -314,7 +317,7 @@ body {
 .nav-icon { font-size: 15px; }
 
 .side-footer {
-  padding: 14px 14px 16px;
+  padding: 14px 10px 16px;
   margin-top: 4px;
 }
 .user-info {
@@ -347,11 +350,13 @@ body {
 .side-actions {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  padding: 0 4px;
 }
 .side-btn {
   width: 100%;
-  padding: 9px 14px;
+  padding: 9px 12px;
   border-radius: 10px;
   border: 1.5px solid var(--color-primary);
   background: #fff;
@@ -360,10 +365,10 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  text-align: left;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
 }
 .side-btn:hover {
   background: #EEF2FF;
