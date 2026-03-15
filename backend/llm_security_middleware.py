@@ -76,7 +76,8 @@ WHITELIST_PREFIXES = (
     "/api/me", "/api/login", "/api/logout", "/api/chat", "/api/register",
     "/api/captcha",
     "/api/categories", "/api/income", "/api/records",
-    "/api/stats", "/api/budgets", "/api/llm_config", "/api/heartbeat"
+    "/api/stats", "/api/budgets", "/api/llm_config", "/api/heartbeat",
+    "/api/users"
 )
 
 def is_whitelisted(path):
