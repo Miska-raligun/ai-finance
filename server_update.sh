@@ -5,7 +5,7 @@
 set -e
 
 # ===== 配置：按实际 systemd 服务名修改 =====
-FLASK_SERVICE="ai-finance"      # Flask 后端服务（端口 5000）
+FLASK_SERVICE="jzflask"
 MCP_SERVICE="ai-finance-mcp"    # MCP server 服务（端口 5001）
 DEPLOY_BRANCH="claude/switch-deployment-branch-3B5ed"
 # ==========================================
@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # 1. 备份数据库
-DB_FILE="records.db"
+DB_FILE="/backend/records.db"
 if [ -f "$DB_FILE" ]; then
     BACKUP="${DB_FILE}.backup_$(date +%Y%m%d_%H%M%S)"
     cp "$DB_FILE" "$BACKUP"
