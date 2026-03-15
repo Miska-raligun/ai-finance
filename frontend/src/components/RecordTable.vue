@@ -188,6 +188,8 @@ function applyFilter() {
 
 async function fetchData() {
   try {
+    records.value = []
+    totalRecords.value = 0
     const params = { page: currentPage.value, limit: pageSize }
     if (filterCategory.value) params.category = filterCategory.value
     if (dateRange.value && dateRange.value.length === 2) {

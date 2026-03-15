@@ -23,7 +23,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import api from '@/api'
 import { ElMessageBox, ElMessage } from 'element-plus'
 
@@ -60,6 +60,7 @@ async function deleteSelected() {
 }
 
 onMounted(fetchUsers)
+onActivated(fetchUsers)
 </script>
 
 <style scoped>

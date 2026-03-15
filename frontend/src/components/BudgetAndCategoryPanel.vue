@@ -70,6 +70,7 @@ const activeTab = ref('支出')
 const budgetForm = ref({ category: '', amount: 0 })
 
 async function fetchBudgets() {
+  budgets.value = []
   const month = selectedMonth.value
   const [bRes, cRes] = await Promise.all([
     api.get('/api/budgets', { params: { month } }),

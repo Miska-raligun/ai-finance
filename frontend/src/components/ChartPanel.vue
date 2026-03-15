@@ -87,6 +87,8 @@ function showAll() {
 
 const fetchChartData = async () => {
   if (!selectedTime.value && mode.value === 'month') return
+  totalIncome.value = 0
+  totalExpense.value = 0
   const time = selectedTime.value
   const catParams = {}
   if (mode.value === 'month' && time) catParams.month = time
