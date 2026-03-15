@@ -252,12 +252,12 @@ body {
 
 /* ===== 侧边栏（蓝色调浅色） ===== */
 .app-aside {
-  background: #EFF6FF;
+  background: #DBEAFE;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--color-border) !important;
   overflow: hidden;
   flex-shrink: 0;
+  box-shadow: 2px 0 8px rgba(37,99,235,0.08);
 }
 .drawer-inner {
   height: 100%;
@@ -268,7 +268,7 @@ body {
   align-items: center;
   gap: 10px;
   padding: 22px 20px 18px;
-  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
 }
 .brand-icon { font-size: 22px; }
 .brand-name {
@@ -310,7 +310,7 @@ body {
 
 .side-footer {
   padding: 14px 14px 16px;
-  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
 }
 .user-info {
   display: flex;
@@ -378,13 +378,12 @@ body {
   left: 0;
   right: 0;
   height: var(--topbar-height);
-  background: #FFFFFF;
-  border-bottom: 1px solid var(--color-border);
+  background: #EFF6FF;
   display: flex;
   align-items: center;
   padding: 0 12px;
   z-index: 1000;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  box-shadow: 0 2px 8px rgba(37,99,235,0.10);
 }
 .topbar-menu-btn {
   background: none;

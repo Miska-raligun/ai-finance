@@ -131,7 +131,7 @@ onActivated(() => {
   font-size: 12px;
   color: var(--color-text-muted);
   padding: 4px 12px;
-  background: rgba(79,70,229,0.06);
+  background: rgba(37,99,235,0.08);
   border-radius: 20px;
   align-self: center;
   margin-bottom: 4px;
@@ -213,10 +213,11 @@ onActivated(() => {
 .chat-input {
   display: flex;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 10px 12px 12px;
+  margin: 0 12px 12px;
   background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
 .chat-text-input { flex: 1; }
 .send-btn {
