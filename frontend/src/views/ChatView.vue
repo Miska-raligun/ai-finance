@@ -1,22 +1,43 @@
 <template>
   <div class="chat-page">
-    <!-- 聊天记录区域 -->
     <div class="chat-container" ref="chatRef">
+      <!-- 欢迎头部 -->
+      <div class="chat-header-hint">
+        <span>💬 智能记账助手</span>
+      </div>
+
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
+        <div v-if="msg.sender === 'assistant'" class="avatar ai-avatar">AI</div>
         <div class="bubble">{{ msg.content }}</div>
+        <div v-if="msg.sender === 'user'" class="avatar user-avatar">
+          {{ currentUser.slice(0, 1).toUpperCase() }}
+        </div>
+      </div>
+
+      <div v-if="loading" class="msg assistant">
+        <div class="avatar ai-avatar">AI</div>
+        <div class="bubble typing">
+          <span></span><span></span><span></span>
+        </div>
       </div>
     </div>
 
-    <!-- 输入区域，固定底部 -->
     <div class="chat-input">
       <el-input
         v-model="userInput"
-        placeholder="请输入消费记录，如 吃饭花了20"
+        placeholder="告诉我你的消费，如：吃饭花了20元"
         @keyup.enter="sendMessage"
         size="large"
+        class="chat-text-input"
       />
-      <el-button type="primary" @click="sendMessage" :disabled="loading" size="large">
-        {{ loading ? '发送中...' : '发送' }}
+      <el-button
+        type="primary"
+        @click="sendMessage"
+        :disabled="loading"
+        size="large"
+        class="send-btn"
+      >
+        发送
       </el-button>
     </div>
   </div>
@@ -27,7 +48,7 @@ import { ref, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 
 const userInput = ref('')
-const messages = ref([{ sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }])
+const messages = ref([{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，我会帮你自动记录。' }])
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
@@ -49,9 +70,7 @@ async function sendMessage() {
     }
     const res = await fetch('/api/chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ message: msg, llm })
     })
@@ -76,81 +95,139 @@ function scrollToBottom() {
 
 onMounted(() => {
   const name = localStorage.getItem('username')
-  if (!name) {
-    router.push('/login')
-  } else {
-    scrollToBottom()
-  }
+  if (!name) router.push('/login')
+  else scrollToBottom()
 })
 
 onActivated(() => {
   const name = localStorage.getItem('username') || ''
   if (name !== currentUser.value) {
     currentUser.value = name
-    messages.value = [
-      { sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }
-    ]
+    messages.value = [{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，我会帮你自动记录。' }]
   }
 })
 </script>
 
 <style scoped>
 .chat-page {
-  position: relative;
-  height: 100vh;
-  height: 100dvh;
   display: flex;
   flex-direction: column;
+  height: calc(100vh - 40px);
+  height: calc(100dvh - 40px);
+  background: var(--color-bg);
 }
 
 .chat-container {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
-  padding-bottom: 70px;
-  background-color: #f9f9f9;
+  padding: 16px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-header-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 4px 12px;
+  background: rgba(79,70,229,0.06);
+  border-radius: 20px;
+  align-self: center;
+  margin-bottom: 4px;
 }
 
 .msg {
   display: flex;
-  margin: 6px 0;
+  align-items: flex-end;
+  gap: 8px;
 }
-.msg.user {
-  justify-content: flex-end;
+.msg.user { justify-content: flex-end; }
+.msg.assistant { justify-content: flex-start; }
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.msg.assistant {
-  justify-content: flex-start;
+.ai-avatar {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
+.user-avatar {
+  background: var(--color-primary);
+  color: #fff;
+}
+
 .bubble {
-  padding: 8px 12px;
-  border-radius: 6px;
-  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  max-width: 72%;
   word-break: break-word;
+  font-size: 14px;
+  line-height: 1.6;
 }
 .user .bubble {
-  background-color: #c6e2ff;
+  background: var(--color-primary);
+  color: #fff;
+  border-bottom-right-radius: 4px;
 }
 .assistant .bubble {
-  background-color: #eef1f6;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
 
+/* 打字动画气泡 */
+.typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px;
+}
+.typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  animation: blink 1.2s infinite;
+}
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* 输入区 */
 .chat-input {
   display: flex;
-  padding: 10px;
-  border-top: 1px solid #ddd;
-  background: #fff;
-  position: stricky;
-  z-index: 100;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
 }
-.chat-input .el-input {
-  flex: 1;
+.chat-text-input { flex: 1; }
+.send-btn {
+  flex-shrink: 0;
+  min-width: 72px;
+  font-weight: 600;
 }
-.chat-input .el-button {
-  margin-left: 10px;
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .chat-page {
+    height: calc(100dvh - var(--topbar-height) - 0px);
+  }
+  .bubble { max-width: 82%; }
 }
 </style>
-
-
-
-
-
