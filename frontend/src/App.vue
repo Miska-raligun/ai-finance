@@ -346,28 +346,30 @@ body {
 }
 .side-btn {
   width: 100%;
-  padding: 7px 12px;
-  border-radius: 7px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .side-btn:hover {
   background: var(--color-primary-light);
   color: var(--color-primary);
-  border-color: rgba(79,70,229,0.3);
 }
 .side-btn.danger {
-  border-color: #fecaca;
-  background: #fff5f5;
   color: #ef4444;
 }
 .side-btn.danger:hover {
   background: #fee2e2;
+  color: #dc2626;
   border-color: #fca5a5;
 }
 

@@ -19,6 +19,22 @@
       <el-button size="small" @click="showAll">查看全部</el-button>
     </div>
 
+    <!-- 汇总数字 -->
+    <div class="stat-strip">
+      <div class="stat-item income">
+        <span class="stat-label">收入</span>
+        <span class="stat-value">¥{{ fmtNum(totalIncome) }}</span>
+      </div>
+      <div class="stat-item expense">
+        <span class="stat-label">支出</span>
+        <span class="stat-value">¥{{ fmtNum(totalExpense) }}</span>
+      </div>
+      <div class="stat-item" :class="totalBalance >= 0 ? 'balance-pos' : 'balance-neg'">
+        <span class="stat-label">结余</span>
+        <span class="stat-value">{{ totalBalance >= 0 ? '+' : '' }}¥{{ fmtNum(totalBalance) }}</span>
+      </div>
+    </div>
+
     <div class="chart-row">
       <div class="pie-wrap">
         <VChart :option="incomePieOption" style="height: 280px; width: 100%" autoresize />
@@ -33,7 +49,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api'
 import { use } from 'echarts/core'
 import VChart from 'vue-echarts'
@@ -54,6 +70,10 @@ const selectedTime = ref()
 const incomePieOption = ref({})
 const spendPieOption = ref({})
 const lineOption = ref({})
+const totalIncome = ref(0)
+const totalExpense = ref(0)
+const totalBalance = computed(() => totalIncome.value - totalExpense.value)
+const fmtNum = v => Math.abs(v).toFixed(2)
 
 const PRIMARY = '#4F46E5'
 // 高对比度调色板：色相均匀分布，相邻色差足够大
@@ -81,6 +101,8 @@ const fetchChartData = async () => {
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')
   const spendCats = cats.data.filter(x => x['类型'] === '支出')
+  totalIncome.value = incomeCats.reduce((s, x) => s + x['金额'], 0)
+  totalExpense.value = spendCats.reduce((s, x) => s + x['金额'], 0)
   const fmtCeil = v => (Math.ceil(v * 100) / 100).toFixed(2)
 
   const pieTooltip = {
@@ -159,6 +181,37 @@ watch(mode, () => {
 </script>
 
 <style scoped>
+.stat-strip {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-item {
+  flex: 1;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #EFF6FF;
+}
+.stat-item.income  { background: #F0FDF4; }
+.stat-item.expense { background: #FFF1F2; }
+.stat-item.balance-pos { background: #EFF6FF; }
+.stat-item.balance-neg { background: #FFF7ED; }
+.stat-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+.income  .stat-value { color: #16A34A; }
+.expense .stat-value { color: #DC2626; }
+.balance-pos .stat-value { color: #2563EB; }
+.balance-neg .stat-value { color: #EA580C; }
+
 .toolbar {
   display: flex;
   align-items: center;
