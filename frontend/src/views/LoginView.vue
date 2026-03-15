@@ -106,10 +106,9 @@ onActivated(reset)
 
 async function refreshCaptcha() {
   const res = await fetch('/api/captcha')
-  captchaToken.value = res.headers.get('X-Captcha-Token') || ''
-  const blob = await res.blob()
-  if (captchaUrl.value) URL.revokeObjectURL(captchaUrl.value)
-  captchaUrl.value = URL.createObjectURL(blob)
+  const data = await res.json()
+  captchaToken.value = data.token || ''
+  captchaUrl.value = data.image || ''
   captchaInput.value = ''
 }
 

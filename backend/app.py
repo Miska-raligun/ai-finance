@@ -92,6 +92,7 @@ def admin_required(f):
 
 @app.route("/api/captcha")
 def get_captcha():
+    import base64
     _clean_expired_captchas()
     token = str(uuid.uuid4())
     chars = ''.join(random.choices(_CAPTCHA_CHARS, k=4))
@@ -99,12 +100,8 @@ def get_captcha():
     image = ImageCaptcha(width=160, height=60)
     buf = BytesIO()
     image.generate_image(chars).save(buf, format='PNG')
-    buf.seek(0)
-    resp = make_response(buf.read())
-    resp.headers['Content-Type'] = 'image/png'
-    resp.headers['X-Captcha-Token'] = token
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+    return jsonify({'token': token, 'image': 'data:image/png;base64,' + img_b64})
 
 
 @app.route("/api/register", methods=["POST"])
