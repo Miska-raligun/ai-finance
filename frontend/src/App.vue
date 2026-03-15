@@ -186,15 +186,15 @@ function openConfigPanel() {
 <style>
 /* ===== 全局 CSS 变量 ===== */
 :root {
-  --color-primary: #4F46E5;
-  --color-primary-dark: #3730a3;
-  --color-primary-light: #EEF2FF;
-  --color-bg: #F1F5F9;
+  --color-primary: #2563EB;
+  --color-primary-dark: #1D4ED8;
+  --color-primary-light: #DBEAFE;
+  --color-bg: #EFF6FF;
   --color-surface: #FFFFFF;
-  --color-text: #1e293b;
-  --color-text-muted: #64748b;
-  --color-border: #e2e8f0;
-  --shadow-card: 0 1px 3px rgba(0,0,0,0.07), 0 4px 16px rgba(79,70,229,0.07);
+  --color-text: #1e3a5f;
+  --color-text-muted: #4a7aad;
+  --color-border: #BFDBFE;
+  --shadow-card: 0 1px 3px rgba(37,99,235,0.08), 0 4px 16px rgba(37,99,235,0.08);
   --radius-card: 12px;
   --topbar-height: 56px;
 }
@@ -250,9 +250,9 @@ body {
   padding-top: calc(var(--topbar-height) + 12px);
 }
 
-/* ===== 侧边栏（浅色） ===== */
+/* ===== 侧边栏（蓝色调浅色） ===== */
 .app-aside {
-  background: #FFFFFF;
+  background: #EFF6FF;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--color-border) !important;

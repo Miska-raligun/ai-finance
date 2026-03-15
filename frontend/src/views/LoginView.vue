@@ -92,7 +92,7 @@ async function onRegister() {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(145deg, #EEF2FF 0%, #F1F5F9 50%, #E0F2FE 100%);
+  background: linear-gradient(145deg, #DBEAFE 0%, #EFF6FF 50%, #BFDBFE 100%);
   padding: 20px;
 }
 

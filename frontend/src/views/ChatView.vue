@@ -114,7 +114,7 @@ onActivated(() => {
   flex-direction: column;
   height: calc(100vh - 40px);
   height: calc(100dvh - 40px);
-  background: var(--color-bg);
+  background: #EFF6FF;
 }
 
 .chat-container {
