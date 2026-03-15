@@ -283,28 +283,33 @@ body {
   padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-radius: 8px;
-  color: var(--color-text-muted);
+  border-radius: 10px;
+  border: 1.5px solid var(--color-primary);
+  color: var(--color-primary);
+  background: #fff;
   text-decoration: none;
   font-size: 14px;
-  font-weight: 500;
-  transition: background 0.15s, color 0.15s;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  box-shadow: none;
 }
 .nav-item:hover {
-  background: var(--color-primary-light);
+  background: #EEF2FF;
   color: var(--color-primary);
 }
 .nav-item.active {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-  font-weight: 600;
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(37,99,235,0.25);
+  font-weight: 700;
 }
 .nav-icon { font-size: 15px; }
 
@@ -347,12 +352,12 @@ body {
 .side-btn {
   width: 100%;
   padding: 9px 14px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
+  border-radius: 10px;
+  border: 1.5px solid var(--color-primary);
+  background: #fff;
+  color: var(--color-primary);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   text-align: left;
@@ -361,16 +366,18 @@ body {
   gap: 8px;
 }
 .side-btn:hover {
-  background: var(--color-primary-light);
+  background: #EEF2FF;
   color: var(--color-primary);
 }
 .side-btn.danger {
+  border-color: #ef4444;
   color: #ef4444;
+  background: #fff;
 }
 .side-btn.danger:hover {
   background: #fee2e2;
   color: #dc2626;
-  border-color: #fca5a5;
+  border-color: #dc2626;
 }
 
 /* ===== 移动端顶栏（浅色） ===== */
