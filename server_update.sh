@@ -30,12 +30,18 @@ git checkout "$DEPLOY_BRANCH"
 git pull origin "$DEPLOY_BRANCH"
 echo "[git] 代码已更新"
 
-# 3. 重启 Flask 服务
+# 3. 安装/更新 Python 依赖
+echo "[pip] 检查并安装 requirements.txt 中的依赖..."
+"$SCRIPT_DIR/backend/venv/bin/pip" install -r "$SCRIPT_DIR/backend/requirements.txt" \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple --timeout 100 -q
+echo "[pip] 依赖已更新"
+
+# 4. 重启 Flask 服务
 echo "[systemd] 重启 $FLASK_SERVICE ..."
 systemctl restart "$FLASK_SERVICE"
 echo "[systemd] $FLASK_SERVICE 已重启（数据库迁移将在启动时自动执行）"
 
-# 4. 重启 MCP server 服务
+# 5. 重启 MCP server 服务
 echo "[systemd] 重启 $MCP_SERVICE ..."
 systemctl restart "$MCP_SERVICE"
 echo "[systemd] $MCP_SERVICE 已重启"
