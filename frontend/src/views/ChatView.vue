@@ -3,11 +3,11 @@
     <div class="chat-container" ref="chatRef">
       <!-- 欢迎头部 -->
       <div class="chat-header-hint">
-        <span>💬 智能记账助手</span>
+        <span>💬 智能记账助手Anon</span>
       </div>
 
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
-        <div v-if="msg.sender === 'assistant'" class="avatar ai-avatar">AI</div>
+        <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="bubble">{{ msg.content }}</div>
         <div v-if="msg.sender === 'user'" class="avatar user-avatar">
           {{ currentUser.slice(0, 1).toUpperCase() }}
@@ -15,7 +15,7 @@
       </div>
 
       <div v-if="loading" class="msg assistant">
-        <div class="avatar ai-avatar">AI</div>
+        <img src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="bubble typing">
           <span></span><span></span><span></span>
         </div>
@@ -157,8 +157,10 @@ onActivated(() => {
   flex-shrink: 0;
 }
 .ai-avatar {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  object-fit: cover;
+  background: transparent;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
 }
 .user-avatar {
   background: var(--color-primary);

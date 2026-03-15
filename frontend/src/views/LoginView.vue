@@ -1,8 +1,8 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <div class="login-logo">💰</div>
-      <h1 class="login-title">智能记账助手</h1>
+      <img src="/favicon.ico" class="login-logo" alt="Anon" />
+      <h1 class="login-title">智能记账助手Anon</h1>
       <p class="login-sub">管理你的每一笔收支</p>
 
       <div class="login-form">
@@ -108,9 +108,12 @@ async function onRegister() {
 }
 
 .login-logo {
-  font-size: 48px;
-  margin-bottom: 12px;
-  line-height: 1;
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  object-fit: cover;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 10px rgba(79,70,229,0.15);
 }
 
 .login-title {
