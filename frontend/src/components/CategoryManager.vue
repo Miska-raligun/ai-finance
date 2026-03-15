@@ -23,6 +23,7 @@
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 const emit = defineEmits(['refresh'])
 import api from '@/api'
 const props = defineProps({
@@ -50,9 +51,14 @@ async function addCategory() {
 }
 
 async function deleteCategory(name) {
-  await api.delete(`/api/categories/${encodeURIComponent(name)}`)
-  await fetchCategories()
-  emit('refresh')
+  try {
+    await api.delete(`/api/categories/${encodeURIComponent(name)}`)
+    await fetchCategories()
+    emit('refresh')
+  } catch (e) {
+    const msg = e.response?.data?.error || '删除失败，请稍后重试'
+    ElMessage.error(msg)
+  }
 }
 
 onMounted(fetchCategories)

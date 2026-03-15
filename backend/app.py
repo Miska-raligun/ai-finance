@@ -784,7 +784,7 @@ def delete_category_manual(name):
         db.execute("DELETE FROM records WHERE category = ? AND user_id = ?", (name, g.user_id))
         db.execute("DELETE FROM budgets WHERE category = ? AND user_id = ?", (name, g.user_id))
     elif category_type == "收入":
-        db.execute("DELETE FROM income WHERE source = ? AND user_id = ?", (name, g.user_id))
+        db.execute("DELETE FROM income WHERE category = ? AND user_id = ?", (name, g.user_id))
 
     # ✅ 删除分类本身
     db.execute("DELETE FROM categories WHERE name = ? AND user_id = ?", (name, g.user_id))
