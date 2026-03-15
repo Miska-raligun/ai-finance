@@ -125,20 +125,24 @@ function switchToLogin() {
 }
 
 async function onLogin() {
-  const res = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ username: username.value, password: password.value })
-  })
-  const data = await res.json()
-  if (data.success) {
-    localStorage.setItem('username', username.value)
-    if (data.is_admin) localStorage.setItem('is_admin', '1')
-    else localStorage.removeItem('is_admin')
-    router.push('/chat')
-  } else {
-    ElMessage.error(data.error || '登录失败')
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username: username.value, password: password.value })
+    })
+    const data = await res.json()
+    if (data.success) {
+      localStorage.setItem('username', username.value)
+      if (data.is_admin) localStorage.setItem('is_admin', '1')
+      else localStorage.removeItem('is_admin')
+      router.push('/chat')
+    } else {
+      ElMessage.error(data.error || '登录失败')
+    }
+  } catch {
+    ElMessage.error('无法连接到服务器，请检查后端是否启动')
   }
 }
 

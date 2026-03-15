@@ -9,7 +9,11 @@ from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from llm_security_middleware import register_llm_security
-from captcha.image import ImageCaptcha
+try:
+    from captcha.image import ImageCaptcha
+    _CAPTCHA_AVAILABLE = True
+except ImportError:
+    _CAPTCHA_AVAILABLE = False
 import logging
 
 logging.basicConfig(
@@ -92,6 +96,8 @@ def admin_required(f):
 
 @app.route("/api/captcha")
 def get_captcha():
+    if not _CAPTCHA_AVAILABLE:
+        return jsonify({'error': 'captcha library not installed, run: pip install captcha'}), 501
     import base64
     _clean_expired_captchas()
     token = str(uuid.uuid4())

@@ -73,7 +73,8 @@ Content-Length: {request_info['content_length']}
 # ✅ 路径前缀白名单（匹配 /api/ 和前端路径）
 WHITELIST_PREFIXES = (
     "/login", "/chat", "/ledger", "/admin",
-    "/api/me", "/api/login", "/api/logout","/api/chat","/api/register",
+    "/api/me", "/api/login", "/api/logout", "/api/chat", "/api/register",
+    "/api/captcha",
     "/api/categories", "/api/income", "/api/records",
     "/api/stats", "/api/budgets", "/api/llm_config", "/api/heartbeat"
 )
