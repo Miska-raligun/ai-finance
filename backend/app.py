@@ -1,13 +1,15 @@
-from flask import Flask, request, jsonify, g, session
+from flask import Flask, request, jsonify, g, session, make_response
 from db import init_db, get_db, add_chat_message, get_chat_history
 from handlers import *
 from dotenv import load_dotenv
-import os, requests, secrets, json, time
+import os, requests, secrets, json, time, uuid, random
 from collections import defaultdict
+from io import BytesIO
 from flask_cors import CORS
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from llm_security_middleware import register_llm_security
+from captcha.image import ImageCaptcha
 import logging
 
 logging.basicConfig(
@@ -32,6 +34,17 @@ if not llm_logger.handlers:
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     llm_logger.addHandler(handler)
+
+# ===== 验证码存储 =====
+_captcha_store: dict = {}
+_CAPTCHA_TTL = 300  # 5 分钟有效期
+_CAPTCHA_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'  # 去掉易混淆字符
+
+def _clean_expired_captchas():
+    now = time.time()
+    expired = [k for k, v in list(_captcha_store.items()) if v['expires_at'] < now]
+    for k in expired:
+        del _captcha_store[k]
 
 # ===== 登录频率限制 =====
 _login_attempts: dict = defaultdict(list)
@@ -77,6 +90,23 @@ def admin_required(f):
     return wrapper
 
 
+@app.route("/api/captcha")
+def get_captcha():
+    _clean_expired_captchas()
+    token = str(uuid.uuid4())
+    chars = ''.join(random.choices(_CAPTCHA_CHARS, k=4))
+    _captcha_store[token] = {'answer': chars, 'expires_at': time.time() + _CAPTCHA_TTL}
+    image = ImageCaptcha(width=160, height=60)
+    buf = BytesIO()
+    image.generate_image(chars).save(buf, format='PNG')
+    buf.seek(0)
+    resp = make_response(buf.read())
+    resp.headers['Content-Type'] = 'image/png'
+    resp.headers['X-Captcha-Token'] = token
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
@@ -84,6 +114,17 @@ def register():
     password = data.get("password", "")
     if not username or not password:
         return jsonify({"error": "用户名和密码不能为空"}), 400
+
+    # 验证码校验
+    captcha_token = data.get("captcha_token", "").strip()
+    captcha_input = data.get("captcha_input", "").strip().upper()
+    entry = _captcha_store.get(captcha_token)
+    if not entry or entry['expires_at'] < time.time():
+        return jsonify({"error": "验证码已过期，请刷新"}), 400
+    if captcha_input != entry['answer']:
+        del _captcha_store[captcha_token]
+        return jsonify({"error": "验证码错误"}), 400
+    del _captcha_store[captcha_token]
 
     db = get_db()
     cursor = db.execute("SELECT id FROM users WHERE username = ?", (username,))

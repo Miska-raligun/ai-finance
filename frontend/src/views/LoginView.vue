@@ -12,7 +12,7 @@
             v-model="username"
             placeholder="请输入用户名"
             size="large"
-            @keyup.enter="onLogin"
+            @keyup.enter="isRegister ? onRegister() : onLogin()"
           />
         </div>
         <div class="field">
@@ -23,12 +23,57 @@
             type="password"
             size="large"
             show-password
-            @keyup.enter="onLogin"
+            @keyup.enter="isRegister ? onRegister() : onLogin()"
           />
         </div>
+
+        <!-- 注册模式：验证码 -->
+        <div v-if="isRegister" class="field">
+          <label class="field-label">验证码</label>
+          <div class="captcha-row">
+            <img
+              :src="captchaUrl"
+              class="captcha-img"
+              @click="refreshCaptcha"
+              title="点击刷新验证码"
+              alt="验证码"
+            />
+            <el-input
+              v-model="captchaInput"
+              placeholder="输入图中字符"
+              size="large"
+              maxlength="4"
+              style="flex: 1"
+              @keyup.enter="onRegister"
+            />
+          </div>
+          <span class="captcha-hint">不区分大小写，点击图片刷新</span>
+        </div>
+
         <div class="btn-row">
-          <el-button type="primary" size="large" class="action-btn" @click="onLogin">登录</el-button>
-          <el-button size="large" class="action-btn register-btn" @click="onRegister">注册</el-button>
+          <el-button
+            v-if="!isRegister"
+            type="primary"
+            size="large"
+            class="action-btn"
+            @click="onLogin"
+          >登录</el-button>
+          <el-button
+            v-else
+            type="primary"
+            size="large"
+            class="action-btn"
+            @click="onRegister"
+          >注册</el-button>
+        </div>
+
+        <div class="switch-row">
+          <template v-if="!isRegister">
+            没有账号？<el-link type="primary" @click="switchToRegister">立即注册</el-link>
+          </template>
+          <template v-else>
+            已有账号？<el-link type="primary" @click="switchToLogin">返回登录</el-link>
+          </template>
         </div>
       </div>
     </div>
@@ -43,13 +88,42 @@ import { ElMessage } from 'element-plus'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
+const isRegister = ref(false)
+const captchaToken = ref('')
+const captchaInput = ref('')
+const captchaUrl = ref('')
 
 function reset() {
   username.value = ''
   password.value = ''
+  isRegister.value = false
+  captchaInput.value = ''
+  captchaToken.value = ''
+  captchaUrl.value = ''
 }
 onMounted(reset)
 onActivated(reset)
+
+async function refreshCaptcha() {
+  const res = await fetch('/api/captcha')
+  captchaToken.value = res.headers.get('X-Captcha-Token') || ''
+  const blob = await res.blob()
+  if (captchaUrl.value) URL.revokeObjectURL(captchaUrl.value)
+  captchaUrl.value = URL.createObjectURL(blob)
+  captchaInput.value = ''
+}
+
+function switchToRegister() {
+  isRegister.value = true
+  refreshCaptcha()
+}
+
+function switchToLogin() {
+  isRegister.value = false
+  captchaInput.value = ''
+  captchaToken.value = ''
+  captchaUrl.value = ''
+}
 
 async function onLogin() {
   const res = await fetch('/api/login', {
@@ -74,13 +148,20 @@ async function onRegister() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ username: username.value, password: password.value })
+    body: JSON.stringify({
+      username: username.value,
+      password: password.value,
+      captcha_token: captchaToken.value,
+      captcha_input: captchaInput.value
+    })
   })
   const data = await res.json()
   if (data.success) {
+    ElMessage.success('注册成功，正在登录…')
     await onLogin()
   } else {
     ElMessage.error(data.error || '注册失败')
+    refreshCaptcha()
   }
 }
 </script>
@@ -148,6 +229,29 @@ async function onRegister() {
   color: #374151;
 }
 
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.captcha-img {
+  height: 44px;
+  width: 120px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  flex-shrink: 0;
+  object-fit: cover;
+  transition: opacity 0.15s;
+}
+.captcha-img:hover { opacity: 0.85; }
+
+.captcha-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .btn-row {
   display: flex;
   gap: 10px;
@@ -162,11 +266,9 @@ async function onRegister() {
   height: 44px !important;
 }
 
-.register-btn {
-  color: #4F46E5 !important;
-  border-color: #4F46E5 !important;
-}
-.register-btn:hover {
-  background: #EEF2FF !important;
+.switch-row {
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
 }
 </style>

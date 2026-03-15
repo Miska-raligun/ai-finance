@@ -16,3 +16,4 @@ waitress==2.1.2
 
 fastmcp>=3.0.0
 httpx[socks]
+captcha
