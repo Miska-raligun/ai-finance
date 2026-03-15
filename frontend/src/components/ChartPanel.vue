@@ -56,7 +56,8 @@ const spendPieOption = ref({})
 const lineOption = ref({})
 
 const PRIMARY = '#4F46E5'
-const PALETTE = ['#4F46E5','#7C3AED','#0EA5E9','#22C55E','#F59E0B','#EF4444','#EC4899','#14B8A6']
+// 高对比度调色板：色相均匀分布，相邻色差足够大
+const PALETTE = ['#4F46E5','#F59E0B','#EF4444','#22C55E','#0EA5E9','#EC4899','#F97316','#14B8A6','#8B5CF6','#84CC16']
 
 function showAll() {
   mode.value = 'year'

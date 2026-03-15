@@ -250,12 +250,12 @@ body {
   padding-top: calc(var(--topbar-height) + 12px);
 }
 
-/* ===== 侧边栏 ===== */
+/* ===== 侧边栏（浅色） ===== */
 .app-aside {
-  background: linear-gradient(180deg, #1e1b4b 0%, #312e81 100%);
+  background: #FFFFFF;
   display: flex;
   flex-direction: column;
-  border-right: none !important;
+  border-right: 1px solid var(--color-border) !important;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -267,14 +267,14 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 24px 20px 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid var(--color-border);
 }
 .brand-icon { font-size: 22px; }
 .brand-name {
   font-size: 16px;
   font-weight: 700;
-  color: #fff;
+  color: var(--color-primary);
   letter-spacing: 0.5px;
 }
 
@@ -291,26 +291,26 @@ body {
   gap: 10px;
   padding: 10px 14px;
   border-radius: 8px;
-  color: rgba(255,255,255,0.72);
+  color: var(--color-text-muted);
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
   transition: background 0.15s, color 0.15s;
 }
 .nav-item:hover {
-  background: rgba(255,255,255,0.12);
-  color: #fff;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 .nav-item.active {
-  background: rgba(255,255,255,0.18);
-  color: #fff;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
   font-weight: 600;
 }
 .nav-icon { font-size: 15px; }
 
 .side-footer {
   padding: 14px 14px 16px;
-  border-top: 1px solid rgba(255,255,255,0.1);
+  border-top: 1px solid var(--color-border);
 }
 .user-info {
   display: flex;
@@ -322,8 +322,8 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.2);
-  color: #fff;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
   font-size: 13px;
   font-weight: 700;
   display: flex;
@@ -333,7 +333,7 @@ body {
 }
 .user-name {
   font-size: 13px;
-  color: rgba(255,255,255,0.82);
+  color: var(--color-text);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -348,56 +348,61 @@ body {
   width: 100%;
   padding: 7px 12px;
   border-radius: 7px;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(255,255,255,0.07);
-  color: rgba(255,255,255,0.82);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
   font-size: 13px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   text-align: left;
 }
 .side-btn:hover {
-  background: rgba(255,255,255,0.16);
-  color: #fff;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-color: rgba(79,70,229,0.3);
 }
 .side-btn.danger {
-  border-color: rgba(239,68,68,0.35);
-  background: rgba(239,68,68,0.08);
-  color: rgba(255,180,180,0.88);
+  border-color: #fecaca;
+  background: #fff5f5;
+  color: #ef4444;
 }
 .side-btn.danger:hover {
-  background: rgba(239,68,68,0.2);
-  color: #fca5a5;
+  background: #fee2e2;
+  border-color: #fca5a5;
 }
 
-/* ===== 移动端顶栏 ===== */
+/* ===== 移动端顶栏（浅色） ===== */
 .mobile-topbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   height: var(--topbar-height);
-  background: linear-gradient(90deg, #1e1b4b 0%, #312e81 100%);
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   padding: 0 12px;
   z-index: 1000;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
 }
 .topbar-menu-btn {
   background: none;
   border: none;
-  color: rgba(255,255,255,0.9);
+  color: var(--color-text-muted);
   font-size: 20px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
   line-height: 1;
 }
-.topbar-menu-btn:hover { background: rgba(255,255,255,0.15); }
+.topbar-menu-btn:hover {
+  background: var(--color-bg);
+  color: var(--color-primary);
+}
 .topbar-title {
   flex: 1;
-  color: #fff;
+  color: var(--color-text);
   font-size: 16px;
   font-weight: 600;
   text-align: center;
@@ -406,8 +411,8 @@ body {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.2);
-  color: #fff;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
   font-size: 13px;
   font-weight: 700;
   display: flex;

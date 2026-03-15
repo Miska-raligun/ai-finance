@@ -26,12 +26,10 @@
             @keyup.enter="onLogin"
           />
         </div>
-        <el-button type="primary" size="large" class="login-btn" @click="onLogin">
-          登 录
-        </el-button>
-        <el-button size="large" class="register-btn" @click="onRegister">
-          注 册
-        </el-button>
+        <div class="btn-row">
+          <el-button type="primary" size="large" class="action-btn" @click="onLogin">登录</el-button>
+          <el-button size="large" class="action-btn register-btn" @click="onRegister">注册</el-button>
+        </div>
       </div>
     </div>
   </div>
@@ -94,7 +92,7 @@ async function onRegister() {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 60%, #2563EB 100%);
+  background: linear-gradient(145deg, #EEF2FF 0%, #F1F5F9 50%, #E0F2FE 100%);
   padding: 20px;
 }
 
@@ -104,7 +102,8 @@ async function onRegister() {
   padding: 40px 36px;
   width: 100%;
   max-width: 380px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(79,70,229,0.2);
+  box-shadow: 0 8px 40px rgba(79,70,229,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  border: 1px solid rgba(79,70,229,0.1);
   text-align: center;
 }
 
@@ -146,27 +145,24 @@ async function onRegister() {
   color: #374151;
 }
 
-.login-btn {
-  width: 100%;
+.btn-row {
+  display: flex;
+  gap: 10px;
   margin-top: 4px;
+}
+
+.action-btn {
+  flex: 1;
   font-size: 15px;
   font-weight: 600;
-  letter-spacing: 2px;
   border-radius: 10px !important;
   height: 44px !important;
 }
 
 .register-btn {
-  width: 100%;
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: 2px;
-  border-radius: 10px !important;
-  height: 44px !important;
   color: #4F46E5 !important;
   border-color: #4F46E5 !important;
 }
-
 .register-btn:hover {
   background: #EEF2FF !important;
 }
