@@ -498,7 +498,7 @@ def get_records():
                    WHERE r2.user_id = r.user_id
                      AND r2.category = r.category
                      AND strftime('%Y-%m', r2.date) = strftime('%Y-%m', r.date)
-                     AND r2.date <= r.date
+                     AND (r2.date < r.date OR (r2.date = r.date AND r2.id <= r.id))
                ), 0) as cumulative_spend
         FROM records r WHERE {where}
         ORDER BY r.date DESC, r.id DESC LIMIT ? OFFSET ?
