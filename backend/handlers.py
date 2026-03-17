@@ -436,14 +436,20 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
         history_json
     )
 
-    response = requests.post(url, headers=headers, json={
-        "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5
-    })
+    try:
+        response = requests.post(url, headers=headers, json={
+            "model": llm.get("model") or "Pro/deepseek-ai/DeepSeek-V3",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.5
+        }, timeout=60)
+        resp_json = response.json()
+    except Exception as e:
+        logger.error("call_deepseek_budget_advice failed: %s", e)
+        raise RuntimeError(f"预算推荐 API 调用失败：{e}") from e
 
-    resp_json = response.json()
     logger.debug("LLM 预算返回内容：%s", resp_json)
+    if "choices" not in resp_json:
+        raise RuntimeError(f"预算推荐 API 响应异常：{resp_json.get('error', resp_json)}")
     return resp_json["choices"][0]["message"]["content"]
 
 
@@ -459,7 +465,10 @@ def suggest_budgets(user_id, params=None, llm=None):
         return "📊 暂无支出记录，无法生成预算建议。"
 
     total = float(params.get("总预算", 0)) if params and "总预算" in params else None
-    llm_reply = call_deepseek_budget_advice(user_id, total, llm)
+    try:
+        llm_reply = call_deepseek_budget_advice(user_id, total, llm)
+    except RuntimeError as e:
+        return f"⚠️ 智能预算推荐暂时不可用，请稍后再试。（{e}）"
     logger.debug("LLM 预算建议回复：%s", llm_reply)
     llm_logger.info(f"LLM：{llm_reply}")
 

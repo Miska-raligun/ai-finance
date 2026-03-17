@@ -361,8 +361,12 @@ def call_llm_summary(user_msg, handler_result, llm=None):
         ]
     }
 
-    response = requests.post(url, headers=headers, json=data)
-    result = response.json()
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        result = response.json()
+    except Exception as e:
+        logger.error("call_llm_summary failed: %s", e)
+        return "⚠️ 暂时无法获取 AI 总结，请稍后重试"
 
     if "choices" in result:
         return result["choices"][0]["message"]["content"]
