@@ -221,6 +221,15 @@ def llm_config_api():
     #)
     return jsonify({"success": True})
 
+
+@app.route("/api/llm_config", methods=["DELETE"])
+@login_required
+def llm_config_reset():
+    db = get_db()
+    db.execute("DELETE FROM llm_config WHERE user_id = ?", (g.user_id,))
+    db.commit()
+    return jsonify({"success": True})
+
 handlers = {
     "add_record": add_record,
     "add_income": add_income,

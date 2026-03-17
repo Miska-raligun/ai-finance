@@ -87,15 +87,18 @@
 
         <!-- LLM 配置弹窗 -->
         <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="420px">
-          <el-form label-width="90px">
+          <el-form label-width="90px" autocomplete="off">
             <el-form-item label="API URL">
-              <el-input v-model="llmUrl" placeholder="https://api.example.com" />
+              <el-input v-model="llmUrl" placeholder="https://api.example.com" autocomplete="off" />
             </el-form-item>
             <el-form-item label="API Key">
-              <el-input v-model="llmKey" type="password" show-password />
+              <el-input v-model="llmKey" type="password" show-password autocomplete="new-password" />
             </el-form-item>
             <el-form-item label="模型名称">
-              <el-input v-model="llmModel" placeholder="Pro/deepseek-ai/DeepSeek-V3" />
+              <el-input v-model="llmModel" placeholder="Pro/deepseek-ai/DeepSeek-V3" autocomplete="off" />
+            </el-form-item>
+            <el-form-item label="角色人设">
+              <el-input v-model="llmPersona" type="textarea" :rows="2" placeholder="一个有点傲娇的财务顾问" autocomplete="off" />
             </el-form-item>
           </el-form>
           <template #footer>
@@ -120,6 +123,7 @@ const showConfig = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
+const llmPersona = ref('')
 const username = ref('')
 const isAdmin = ref(false)
 const isMobile = ref(window.innerWidth < 768)
@@ -164,11 +168,18 @@ function checkConfig() {
 onMounted(checkConfig)
 watch(() => route.path, checkConfig)
 
-function saveConfig() {
-  localStorage.setItem('llmConfig', JSON.stringify({ url: llmUrl.value, apikey: llmKey.value, model: llmModel.value }))
+async function saveConfig() {
+  await fetch('/api/llm_config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ url: llmUrl.value, apikey: llmKey.value, model: llmModel.value, persona: llmPersona.value })
+  })
+  localStorage.setItem('llmConfig', JSON.stringify({ url: llmUrl.value, apikey: llmKey.value, model: llmModel.value, persona: llmPersona.value }))
   showConfig.value = false
 }
-function useDefault() {
+async function useDefault() {
+  await fetch('/api/llm_config', { method: 'DELETE', credentials: 'include' })
   localStorage.setItem('llmConfig', 'default')
   showConfig.value = false
 }
