@@ -38,7 +38,6 @@
       :data="records"
       stripe
       style="width: 100%"
-      :default-sort="{ prop: 'date', order: 'descending' }"
       @selection-change="handleSelectionChange"
       class="record-table"
     >
