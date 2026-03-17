@@ -14,7 +14,9 @@
     />
 
     <!-- 预算表 -->
-    <el-table :data="budgets" size="small" class="budget-table" style="width: 100%">
+    <el-table :data="budgets" size="small" class="budget-table" style="width: 100%"
+      @selection-change="selectedBudgets = $event">
+      <el-table-column type="selection" width="36" />
       <el-table-column prop="category" label="分类" />
       <el-table-column prop="amount" label="预算额">
         <template #default="scope">
@@ -37,6 +39,12 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 批量操作栏 -->
+    <div v-if="selectedBudgets.length" class="bulk-action-bar">
+      <span class="selected-hint">已选 {{ selectedBudgets.length }} 项</span>
+      <el-button type="danger" size="small" @click="deleteBulk">批量删除</el-button>
+    </div>
 
     <!-- 添加/更新预算 -->
     <div class="budget-form">
@@ -78,6 +86,7 @@ const budgets = ref([])
 const expenseCategories = ref([])
 const activeTab = ref('支出')
 const budgetForm = ref({ category: '', amount: 0 })
+const selectedBudgets = ref([])
 
 async function fetchBudgets() {
   budgets.value = []
@@ -96,6 +105,27 @@ async function submitBudget() {
     amount: budgetForm.value.amount,
     month: selectedMonth.value
   })
+  await fetchBudgets()
+  emit('refresh')
+}
+
+async function deleteBulk() {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${selectedBudgets.value.length} 条预算吗？`,
+      '批量删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  const month = selectedMonth.value
+  await Promise.all(
+    selectedBudgets.value.map(row =>
+      api.delete('/api/budgets', { data: { category: row.category, month } })
+    )
+  )
+  selectedBudgets.value = []
   await fetchBudgets()
   emit('refresh')
 }
@@ -142,6 +172,17 @@ watch(() => props.refreshFlag, fetchBudgets)
 .amount-text { font-weight: 500; color: var(--color-text); }
 .amount-expense { color: #ef4444; font-weight: 600; }
 .amount-income  { color: #22c55e; font-weight: 600; }
+
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.selected-hint {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
 
 .budget-inputs {
   display: flex;
