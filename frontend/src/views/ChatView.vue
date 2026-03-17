@@ -61,7 +61,6 @@ const quickActions = [
   { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
   { label: '💡 智能推荐预算', text: '根据我的消费习惯帮我推荐合适的预算' },
   { label: '💰 查看预算余额', text: '查询本月各分类预算余额' },
-  { label: '📈 本月收支概览', text: '统计本月总收入和总支出' },
 ]
 function sendQuick(text) {
   userInput.value = text

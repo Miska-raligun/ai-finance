@@ -363,61 +363,55 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
         "Content-Type": "application/json"
     }
 
-    from collections import defaultdict
-
-    # ✅ 获取所有支出记录（历史所有月份）
+    # ✅ 计算上个自然月
     db = get_db()
+    today = datetime.now()
+    if today.month == 1:
+        last_month = f"{today.year - 1}-12"
+    else:
+        last_month = f"{today.year}-{today.month - 1:02d}"
+
+    # ✅ 查询上月消费最多的 Top 5 支出分类
     cursor = db.execute("""
-        SELECT category, amount, strftime('%Y-%m', date) as month
+        SELECT category, SUM(amount) as total
         FROM records
-        WHERE user_id = ? AND category IN (
-            SELECT name FROM categories WHERE type = '支出' AND user_id = ?
-        )
-    """, (user_id, user_id))
+        WHERE user_id = ? AND strftime('%Y-%m', date) = ?
+          AND category IN (
+              SELECT name FROM categories WHERE type = '支出' AND user_id = ?
+          )
+        GROUP BY category
+        ORDER BY total DESC
+        LIMIT 5
+    """, (user_id, last_month, user_id))
 
-    category_totals = defaultdict(float)
-    category_months = defaultdict(set)
+    summary_data = [
+        {"category": row["category"], "total": round(float(row["total"]), 2),
+         "average": round(float(row["total"]), 2)}
+        for row in cursor.fetchall()
+    ]
 
-    for row in cursor.fetchall():
-        category = row['category']
-        amount = float(row['amount'])
-        month = row['month']
-        category_totals[category] += amount
-        category_months[category].add(month)
-
-    # ✅ 构造历史数据摘要
-    summary_data = []
-    for category in category_totals:
-        total = round(category_totals[category], 2)
-        months = len(category_months[category])
-        average = round(total / months, 2) if months else 0
-        summary_data.append({
-            "category": category,
-            "total": total,
-            "average": average
-        })
+    if not summary_data:
+        raise RuntimeError(f"上月（{last_month}）暂无消费记录，无法生成预算推荐")
 
     history_json = json.dumps(summary_data, ensure_ascii=False)
 
-    logger.debug("分类历史消费汇总：%s", summary_data)
+    logger.debug("上月（%s）Top 5 消费分类：%s", last_month, summary_data)
     logger.debug("设定总预算：%s", total_budget)
-    logger.debug("用于预算分析的分类：%s", [item['category'] for item in summary_data])
-    logger.debug("传给 LLM 的分类数量：%d", len(summary_data))
 
     if total_budget:
         budget_instruction = (
             f"你是一个智能财务顾问，用户设定了本月总预算为 {total_budget} 元。\n"
-            "请根据用户历史消费记录中每个分类的支出情况，为所有出现过的分类分配一个合理的月预算。\n"
+            f"以下是用户上月（{last_month}）消费最多的 5 个分类，请为这些分类分配合理的月预算。\n"
             "⚠️ 要求如下：\n"
             f"1. 所有分类预算总和必须严格等于 {total_budget} 元；\n"
-            "2. 不得遗漏任何分类，至少涵盖所有出现在历史记录中的分类；\n"
+            "2. 不得遗漏任何分类；\n"
             "3. 输出前请进行总额加和验证，确保不多不少刚好为总预算；\n"
             "4. 每个类别的预算值必须为整数！\n"
             "5. 输出结构化格式，不添加任何自然语言描述。\n"
         )
     else:
         budget_instruction = (
-            "你是一个智能财务顾问，请根据用户历史消费记录中每个分类的支出情况，为每个分类生成一个合理的月预算建议。\n"
+            "你是一个智能财务顾问，请根据用户上月消费情况，为以下分类生成合理的月预算建议。\n"
             "不限制预算总额，但应体现实际消费趋势。\n"
             "输出结构化格式，不添加自然语言描述。\n"
         )
@@ -432,7 +426,7 @@ def call_deepseek_budget_advice(user_id, total_budget=None, llm=None):
     prompt = (
         budget_instruction +
         format_instruction +
-        "\n用户各分类的历史消费情况如下（JSON 列表，每项包含 category、total 和 average）：\n"+
+        f"\n用户上月（{last_month}）Top 5 消费分类如下（JSON 列表，每项包含 category 和 total）：\n" +
         history_json
     )
 
