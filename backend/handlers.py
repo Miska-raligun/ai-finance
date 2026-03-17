@@ -153,6 +153,21 @@ def update_budget(user_id, params):
 
     return f"✅ 已更新「{category}」的预算为 ¥{amount}/{cycle}。别忘了定期检查哦！"
 
+def delete_budget(user_id, params):
+    category = params.get("分类")
+    month = params.get("月份") or datetime.now().strftime('%Y-%m')
+    if not category:
+        return "⚠️ 删除预算失败，缺少分类名称"
+    db = get_db()
+    result = db.execute(
+        "DELETE FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
+        (user_id, category, month)
+    )
+    db.commit()
+    if result.rowcount == 0:
+        return f"⚠️ 未找到「{category}」{month} 的预算记录"
+    return f"✅ 已删除「{category}」{month} 的预算。"
+
 def analyze_spend(user_id, params):
     db = get_db()
     month = params.get("月份") or datetime.now().strftime('%Y-%m')

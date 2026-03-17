@@ -239,6 +239,7 @@ handlers = {
     "add_category": add_category,
     "delete_category": delete_category,
     "budget_remain": budget_remain,
+    "delete_budget": delete_budget,
     "suggest_budgets": suggest_budgets,
     "query_income": query_income,
     "category_sum": category_sum,
@@ -264,6 +265,10 @@ FINANCE_TOOLS = [
         "parameters": {"type": "object", "required": ["分类", "金额"],
             "properties": {"分类": {"type": "string"}, "金额": {"type": "number"},
                            "月份": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "delete_budget", "description": "删除某分类某月份的预算",
+        "parameters": {"type": "object", "required": ["分类"],
+            "properties": {"分类": {"type": "string", "description": "要删除预算的支出分类名"},
+                           "月份": {"type": "string", "description": "YYYY-MM，不填则为本月"}}}}},
     {"type": "function", "function": {"name": "analyze_spend", "description": "整体消费分析，生成消费排行、收入排行和建议",
         "parameters": {"type": "object",
             "properties": {"月份": {"type": "string", "description": "YYYY-MM，默认当月"}}}}},
@@ -688,7 +693,7 @@ def get_budgets():
             SELECT b.category, b.amount
             FROM budgets b
             JOIN categories c ON b.category = c.name AND c.user_id = b.user_id
-            WHERE b.month = ? AND b.user_id = ? AND c.type = '支出'
+            WHERE b.month = ? AND b.user_id = ? AND c.type = '支出' AND b.amount > 0
         """,
             (month, g.user_id)
         )
@@ -722,7 +727,7 @@ def get_budgets():
             SELECT b.category, b.amount, b.month
             FROM budgets b
             JOIN categories c ON b.category = c.name AND c.user_id = b.user_id
-            WHERE b.user_id = ? AND c.type = '支出'
+            WHERE b.user_id = ? AND c.type = '支出' AND b.amount > 0
         """,
             (g.user_id,)
         )
@@ -840,6 +845,22 @@ def set_budget_manual():
     db.commit()
     return jsonify({"success": True})
 
+
+@app.route("/api/budgets", methods=["DELETE"])
+@login_required
+def delete_budget_manual():
+    data = request.get_json()
+    category = (data.get("category") or "").strip()
+    month = data.get("month") or datetime.now().strftime('%Y-%m')
+    if not category:
+        return jsonify({"error": "缺少分类名称"}), 400
+    db = get_db()
+    db.execute(
+        "DELETE FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
+        (g.user_id, category, month)
+    )
+    db.commit()
+    return jsonify({"success": True})
 
 
 @app.route("/api/stats/monthly", methods=["GET"])

@@ -28,6 +28,14 @@
           </span>
         </template>
       </el-table-column>
+      <el-table-column label="" width="48" align="center">
+        <template #default="scope">
+          <el-button
+            type="danger" size="small" :icon="Delete" circle
+            @click="deleteBudget(scope.row.category)"
+          />
+        </template>
+      </el-table-column>
     </el-table>
 
     <!-- 添加/更新预算 -->
@@ -58,6 +66,8 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 const emit = defineEmits(['refresh'])
 const props = defineProps({ refreshFlag: Number })
 import api from '@/api'
@@ -86,6 +96,19 @@ async function submitBudget() {
     amount: budgetForm.value.amount,
     month: selectedMonth.value
   })
+  await fetchBudgets()
+  emit('refresh')
+}
+
+async function deleteBudget(category) {
+  try {
+    await ElMessageBox.confirm(`确定删除「${category}」的预算吗？`, '删除确认', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await api.delete('/api/budgets', { data: { category, month: selectedMonth.value } })
   await fetchBudgets()
   emit('refresh')
 }
