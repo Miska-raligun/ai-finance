@@ -208,9 +208,13 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
+let debounceTimer = null
 watch(() => props.refreshFlag, () => {
-  currentPage.value = 1
-  fetchData()
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    currentPage.value = 1
+    fetchData()
+  }, 100)
 })
 </script>
 

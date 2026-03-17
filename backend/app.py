@@ -500,17 +500,17 @@ def get_records():
 
     rows = db.execute(
         f"""
-        SELECT r.id, r.category, r.amount, r.note, r.date,
-               strftime('%Y-%m', r.date) as month,
-               COALESCE((
-                   SELECT SUM(r2.amount) FROM records r2
-                   WHERE r2.user_id = r.user_id
-                     AND r2.category = r.category
-                     AND strftime('%Y-%m', r2.date) = strftime('%Y-%m', r.date)
-                     AND (r2.date < r.date OR (r2.date = r.date AND r2.id <= r.id))
-               ), 0) as cumulative_spend
-        FROM records r WHERE {where}
-        ORDER BY r.date DESC, r.id DESC LIMIT ? OFFSET ?
+        WITH base AS (
+            SELECT r.id, r.category, r.amount, r.note, r.date,
+                   strftime('%Y-%m', r.date) as month,
+                   SUM(r.amount) OVER (
+                       PARTITION BY r.user_id, r.category, strftime('%Y-%m', r.date)
+                       ORDER BY r.date, r.id
+                       ROWS UNBOUNDED PRECEDING
+                   ) as cumulative_spend
+            FROM records r WHERE {where}
+        )
+        SELECT * FROM base ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
         """,
         params + [limit, offset]
     ).fetchall()

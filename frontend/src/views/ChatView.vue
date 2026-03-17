@@ -22,6 +22,16 @@
       </div>
     </div>
 
+    <div class="quick-actions">
+      <button
+        v-for="q in quickActions"
+        :key="q.label"
+        class="quick-btn"
+        :disabled="loading"
+        @click="sendQuick(q.text)"
+      >{{ q.label }}</button>
+    </div>
+
     <div class="chat-input">
       <el-input
         v-model="userInput"
@@ -46,6 +56,17 @@
 <script setup>
 import { ref, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+
+const quickActions = [
+  { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
+  { label: '💡 智能推荐预算', text: '根据我的消费习惯帮我推荐合适的预算' },
+  { label: '💰 查看预算余额', text: '查询本月各分类预算余额' },
+  { label: '📈 本月收支概览', text: '统计本月总收入和总支出' },
+]
+function sendQuick(text) {
+  userInput.value = text
+  sendMessage()
+}
 
 const userInput = ref('')
 const messages = ref([{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，我会帮你自动记录。' }])
@@ -208,6 +229,34 @@ onActivated(() => {
   0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
   40% { opacity: 1; transform: scale(1); }
 }
+
+/* 快捷操作 */
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.quick-actions::-webkit-scrollbar { display: none; }
+.quick-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.quick-btn:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.quick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* 输入区 */
 .chat-input {

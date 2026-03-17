@@ -16,7 +16,7 @@
             @refresh="refreshFlag++"
           />
         </el-tab-pane>
-        <el-tab-pane label="收入记录" name="income">
+        <el-tab-pane label="收入记录" name="income" lazy>
           <RecordTable
             :type="'income'"
             :refresh-flag="refreshFlag"
