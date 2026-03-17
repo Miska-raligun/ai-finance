@@ -31,7 +31,7 @@
       </div>
       <div class="stat-item" :class="totalBalance >= 0 ? 'balance-pos' : 'balance-neg'">
         <span class="stat-label">结余</span>
-        <span class="stat-value">{{ totalBalance >= 0 ? '+' : '' }}¥{{ fmtNum(totalBalance) }}</span>
+        <span class="stat-value">{{ totalBalance >= 0 ? '+' : '-' }}¥{{ fmtNum(totalBalance) }}</span>
       </div>
     </div>
 
