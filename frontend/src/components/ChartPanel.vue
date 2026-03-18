@@ -98,7 +98,9 @@ const fetchChartData = async () => {
     api.get('/api/stats/by-category', { params: catParams }),
     mode.value === 'month'
       ? api.get('/api/stats/daily', { params: { month: time } })
-      : api.get('/api/stats/monthly', { params: time ? { year: time } : {} })
+      : (time
+          ? api.get('/api/stats/monthly', { params: { year: time } })
+          : api.get('/api/stats/yearly'))
   ])
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')
@@ -157,6 +159,17 @@ const fetchChartData = async () => {
         { name: '收入', type: 'line', smooth: true, data: trend.data.map(d => d['收入']), areaStyle: { opacity: 0.08 } },
         { name: '支出', type: 'line', smooth: true, data: trend.data.map(d => d['支出']), areaStyle: { opacity: 0.08 } },
         { name: '结余', type: 'line', smooth: true, data: trend.data.map(d => d['结余']), areaStyle: { opacity: 0.08 } }
+      ]
+    }
+  } else if (!selectedTime.value) {
+    lineOption.value = {
+      ...lineCommon,
+      title: { text: '历年收支趋势', left: 'center', top: 4, textStyle: { fontSize: 13, fontWeight: 600, color: '#1e293b' } },
+      xAxis: { ...lineCommon.xAxis, data: trend.data.map(m => m.year) },
+      series: [
+        { name: '收入', type: 'line', smooth: true, data: trend.data.map(m => m['收入']), areaStyle: { opacity: 0.08 } },
+        { name: '支出', type: 'line', smooth: true, data: trend.data.map(m => m['支出']), areaStyle: { opacity: 0.08 } },
+        { name: '结余', type: 'line', smooth: true, data: trend.data.map(m => m['收入'] - m['支出']), areaStyle: { opacity: 0.08 } }
       ]
     }
   } else {

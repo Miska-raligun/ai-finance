@@ -923,7 +923,7 @@ def monthly_stats():
     if year:
         months = [f"{year}-{i:02d}" for i in range(1, 13)]
     else:
-        months = sorted(set(spend_data.keys()) | set(income_data.keys()), reverse=True)
+        months = sorted(set(spend_data.keys()) | set(income_data.keys()))
 
     result = []
     for m in months:
@@ -934,6 +934,28 @@ def monthly_stats():
         })
 
     return jsonify(result)
+
+@app.route("/api/stats/yearly", methods=["GET"])
+@login_required
+def yearly_stats():
+    db = get_db()
+    spend_cursor = db.execute(
+        "SELECT strftime('%Y', date) AS year, SUM(amount) AS total "
+        "FROM records WHERE user_id = ? GROUP BY year",
+        (g.user_id,)
+    )
+    income_cursor = db.execute(
+        "SELECT strftime('%Y', date) AS year, SUM(amount) AS total "
+        "FROM income WHERE user_id = ? GROUP BY year",
+        (g.user_id,)
+    )
+    spend_data = {row['year']: float(row['total']) for row in spend_cursor.fetchall()}
+    income_data = {row['year']: float(row['total']) for row in income_cursor.fetchall()}
+    years = sorted(set(spend_data.keys()) | set(income_data.keys()))
+    return jsonify([
+        {"year": y, "收入": income_data.get(y, 0.0), "支出": spend_data.get(y, 0.0)}
+        for y in years
+    ])
 
 @app.route("/api/stats/by-category", methods=["GET"])
 @login_required
