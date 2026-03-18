@@ -492,20 +492,27 @@ def get_records():
         start_date = f"{month}-01"
         end_date = f"{month}-{_cal.monthrange(y, m)[1]:02d}"
 
-    conditions = ["r.user_id = ?"]
-    params = [g.user_id]
+    # 外层筛选（日期、分类）与内层窗口函数分离，确保月内累计支出完整
+    outer_conditions = []
+    outer_params = []
     if category:
-        conditions.append("r.category = ?")
-        params.append(category)
+        outer_conditions.append("category = ?")
+        outer_params.append(category)
     if start_date:
-        conditions.append("r.date >= ?")
-        params.append(start_date)
+        outer_conditions.append("date >= ?")
+        outer_params.append(start_date)
     if end_date:
-        conditions.append("r.date <= ?")
-        params.append(end_date)
-    where = " AND ".join(conditions)
+        outer_conditions.append("date <= ?")
+        outer_params.append(end_date)
+    outer_where = ("WHERE " + " AND ".join(outer_conditions)) if outer_conditions else ""
 
-    total = db.execute(f"SELECT COUNT(*) FROM records r WHERE {where}", params).fetchone()[0]
+    total = db.execute(
+        f"""
+        WITH base AS (SELECT id, category, date FROM records WHERE user_id = ?)
+        SELECT COUNT(*) FROM base {outer_where}
+        """,
+        [g.user_id] + outer_params
+    ).fetchone()[0]
 
     rows = db.execute(
         f"""
@@ -517,11 +524,12 @@ def get_records():
                        ORDER BY r.date, r.id
                        ROWS UNBOUNDED PRECEDING
                    ) as cumulative_spend
-            FROM records r WHERE {where}
+            FROM records r WHERE r.user_id = ?
         )
-        SELECT * FROM base ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
+        SELECT * FROM base {outer_where}
+        ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
         """,
-        params + [limit, offset]
+        [g.user_id] + outer_params + [limit, offset]
     ).fetchall()
 
     category_months = {(row['category'], row['month']) for row in rows}
