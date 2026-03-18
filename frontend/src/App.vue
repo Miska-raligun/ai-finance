@@ -183,8 +183,10 @@ async function useDefault() {
   localStorage.setItem('llmConfig', 'default')
   showConfig.value = false
 }
-function logout() {
-  fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
+async function logout() {
+  try {
+    await fetch('/api/logout', { method: 'POST', credentials: 'include' })
+  } catch { /* 网络错误也正常退出 */ }
   localStorage.removeItem('username')
   localStorage.removeItem('is_admin')
   router.push('/login')
