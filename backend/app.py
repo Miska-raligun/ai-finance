@@ -451,15 +451,33 @@ def chat():
 
         if tool_calls:
             results = []
+            pending_records = []
             for tc in tool_calls:
                 func_name = tc["function"]["name"]
                 params = json.loads(tc["function"]["arguments"])
                 if func_name in handlers:
-                    if func_name == "suggest_budgets":
+                    if func_name in ("add_record", "add_income"):
+                        # 不写 DB，收集 pending 数据等待用户确认
+                        rec_date = (params.get("时间") or "").strip() or datetime.now().strftime("%Y-%m-%d")
+                        rec = {
+                            "type": "expense" if func_name == "add_record" else "income",
+                            "category": params.get("分类", ""),
+                            "amount": float(params.get("金额", 0)),
+                            "date": rec_date,
+                            "note": params.get("备注", ""),
+                        }
+                        pending_records.append(rec)
+                        rec_type = "支出" if func_name == "add_record" else "收入"
+                        results.append(
+                            f"已识别到{rec_type}：分类「{rec['category']}」金额 ¥{rec['amount']}，"
+                            f"备注「{rec['note']}」，日期 {rec['date']}，等待用户确认。"
+                        )
+                    elif func_name == "suggest_budgets":
                         r = handlers[func_name](g.user_id, params, llm_cfg)
+                        results.append(r)
                     else:
                         r = handlers[func_name](g.user_id, params)
-                    results.append(r)
+                        results.append(r)
             if results:
                 llm_logger.info(f"Tools: {[tc['function']['name'] for tc in tool_calls]}")
                 reply = call_llm_summary(latest_msg, "\n".join(results), llm_cfg)
@@ -470,7 +488,7 @@ def chat():
         reply = call_llm_chat(chat_history, llm_cfg)
 
     add_chat_message(g.user_id, "assistant", reply)
-    return jsonify({"reply": reply})
+    return jsonify({"reply": reply, "pending_records": pending_records if tool_calls else []})
 
 @app.route('/api/records')
 @login_required
@@ -660,6 +678,28 @@ def update_income(income_id):
     )
     db.commit()
     return jsonify({"success": True})
+
+@app.route("/api/commit_record", methods=["POST"])
+@login_required
+def commit_record():
+    data = request.get_json()
+    rec_type = data.get("type")
+    params = {
+        "分类": data.get("category", "").strip(),
+        "金额": float(data.get("amount", 0)),
+        "备注": data.get("note", "").strip(),
+        "时间": data.get("date", "").strip(),
+    }
+    if not params["分类"] or not params["金额"]:
+        return jsonify({"success": False, "message": "分类和金额不能为空"}), 400
+    if rec_type == "expense":
+        result = handlers["add_record"](g.user_id, params)
+    elif rec_type == "income":
+        result = handlers["add_income"](g.user_id, params)
+    else:
+        return jsonify({"success": False, "message": "未知类型"}), 400
+    success = result.startswith("✅")
+    return jsonify({"success": success, "message": result})
 
 @app.route("/api/categories", methods=["GET"])
 @login_required

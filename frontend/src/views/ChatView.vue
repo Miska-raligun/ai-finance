@@ -8,7 +8,78 @@
 
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
         <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
-        <div class="bubble">{{ msg.content }}</div>
+        <div class="msg-body">
+          <div class="bubble">{{ msg.content }}</div>
+
+          <!-- 可编辑确认卡片 -->
+          <template v-if="msg.pending_records && msg.pending_records.length">
+            <div
+              v-for="(rec, ri) in msg.pending_records"
+              :key="ri"
+              v-show="rec._state !== 'cancelled'"
+              :class="['pending-card', rec.type === 'expense' ? 'card-expense' : 'card-income', rec._state === 'confirmed' ? 'card-confirmed' : '']"
+            >
+              <!-- 已确认：只读展示 -->
+              <template v-if="rec._state === 'confirmed'">
+                <div class="card-confirmed-header">
+                  <span :class="rec.type === 'expense' ? 'amount-expense' : 'amount-income'">
+                    {{ rec.type === 'expense' ? '-' : '+' }}¥{{ rec._edit.amount }}
+                  </span>
+                  <span class="card-category-text">{{ rec._edit.category }}</span>
+                  <span class="card-confirmed-badge">✓ 已记录</span>
+                </div>
+                <div class="card-rows">
+                  <div class="card-row">
+                    <span class="card-label">日期</span>
+                    <span class="card-value">{{ rec._edit.date }}</span>
+                  </div>
+                  <div class="card-row">
+                    <span class="card-label">备注</span>
+                    <span class="card-value">{{ rec._edit.note || '—' }}</span>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 待确认：可编辑 -->
+              <template v-else>
+                <div class="card-fields">
+                  <div class="card-field">
+                    <label class="field-label">分类</label>
+                    <el-input v-model="rec._edit.category" size="small" placeholder="分类" />
+                  </div>
+                  <div class="card-field">
+                    <label class="field-label">金额</label>
+                    <el-input-number
+                      v-model="rec._edit.amount"
+                      :min="0"
+                      size="small"
+                      style="width:100%"
+                      controls-position="right"
+                    />
+                  </div>
+                  <div class="card-field">
+                    <label class="field-label">日期</label>
+                    <el-date-picker
+                      v-model="rec._edit.date"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      size="small"
+                      style="width:100%"
+                    />
+                  </div>
+                  <div class="card-field">
+                    <label class="field-label">备注</label>
+                    <el-input v-model="rec._edit.note" size="small" placeholder="备注（可选）" />
+                  </div>
+                </div>
+                <div class="card-actions">
+                  <el-button size="small" plain @click="rec._state = 'cancelled'">取消</el-button>
+                  <el-button size="small" type="primary" @click="confirmRecord(rec)">✓ 确认记录</el-button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
         <div v-if="msg.sender === 'user'" class="avatar user-avatar">
           {{ currentUser.slice(0, 1).toUpperCase() }}
         </div>
@@ -56,6 +127,7 @@
 <script setup>
 import { ref, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 const quickActions = [
   { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
@@ -95,15 +167,46 @@ async function sendMessage() {
       body: JSON.stringify({ message: msg, llm })
     })
     const data = await res.json()
-    messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })
-    if (data.reply?.startsWith('✅')) {
-      window.dispatchEvent(new CustomEvent('record_changed'))
+    const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
+    if (data.pending_records && data.pending_records.length > 0) {
+      assistantMsg.pending_records = data.pending_records.map(rec => ({
+        ...rec,
+        _state: 'pending',
+        _edit: { ...rec }
+      }))
     }
+    messages.value.push(assistantMsg)
   } catch {
     messages.value.push({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
   } finally {
     loading.value = false
     await scrollToBottom()
+  }
+}
+
+async function confirmRecord(rec) {
+  try {
+    const res = await fetch('/api/commit_record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        type: rec.type,
+        category: rec._edit.category,
+        amount: rec._edit.amount,
+        date: rec._edit.date,
+        note: rec._edit.note,
+      })
+    })
+    const data = await res.json()
+    if (data.success) {
+      rec._state = 'confirmed'
+      window.dispatchEvent(new CustomEvent('record_changed'))
+    } else {
+      ElMessage.error(data.message || '记录失败')
+    }
+  } catch {
+    ElMessage.error('网络异常')
   }
 }
 
@@ -165,6 +268,16 @@ onActivated(() => {
 .msg.user { justify-content: flex-end; }
 .msg.assistant { justify-content: flex-start; }
 
+/* msg-body: 纵向堆叠 bubble + 卡片 */
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 72%;
+  gap: 6px;
+}
+.msg.user .msg-body { align-items: flex-end; }
+
 .avatar {
   width: 32px;
   height: 32px;
@@ -190,7 +303,8 @@ onActivated(() => {
 .bubble {
   padding: 10px 14px;
   border-radius: 16px;
-  max-width: 72%;
+  width: fit-content;
+  max-width: 100%;
   word-break: break-word;
   font-size: 14px;
   line-height: 1.6;
@@ -228,6 +342,62 @@ onActivated(() => {
   0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
   40% { opacity: 1; transform: scale(1); }
 }
+
+/* 确认卡片 */
+.pending-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.card-expense { border-left: 3px solid #ef4444; }
+.card-income  { border-left: 3px solid #22c55e; }
+.card-confirmed { background: var(--color-bg); opacity: 0.85; }
+
+/* 已确认只读头部 */
+.card-confirmed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.card-category-text { font-weight: 600; color: var(--color-text); flex: 1; }
+.card-confirmed-badge { font-size: 11px; color: #22c55e; font-weight: 600; flex-shrink: 0; }
+.amount-expense { color: #ef4444; font-weight: 700; font-size: 15px; }
+.amount-income  { color: #22c55e; font-weight: 700; font-size: 15px; }
+
+/* 编辑字段区：PC 2列 */
+.card-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.card-field { display: flex; flex-direction: column; gap: 3px; }
+.field-label { font-size: 11px; color: var(--color-text-muted); font-weight: 500; }
+
+/* 操作按钮 */
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 已确认只读字段行 */
+.card-rows { display: flex; flex-direction: column; }
+.card-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.card-label { color: var(--color-text-muted); }
+.card-value { color: var(--color-text); text-align: right; }
 
 /* 快捷操作 */
 .quick-actions {
@@ -279,6 +449,9 @@ onActivated(() => {
   .chat-page {
     height: calc(100dvh - var(--topbar-height) - 0px);
   }
-  .bubble { max-width: 82%; }
+  .msg-body { max-width: 85%; }
+  .card-fields { grid-template-columns: 1fr; }
+  .card-actions { gap: 6px; }
+  .card-actions .el-button { flex: 1; }
 }
 </style>
