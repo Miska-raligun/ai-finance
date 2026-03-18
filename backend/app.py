@@ -6,7 +6,7 @@ import os, requests, secrets, json, time, uuid, random
 from collections import defaultdict
 from io import BytesIO
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from llm_security_middleware import register_llm_security
 try:
@@ -28,6 +28,7 @@ load_dotenv()  # 加载 .env 文件
 app = Flask(__name__)
 register_llm_security(app)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 CORS(app, supports_credentials=True)
 
 # 初始化日志记录器
@@ -159,6 +160,7 @@ def login():
         return jsonify({"error": "用户名或密码错误"}), 400
 
     _clear_attempts(ip)
+    session.permanent = bool(data.get("remember", False))
     session["user_id"] = row["id"]
     session["username"] = username
     session["is_admin"] = bool(row["is_admin"])

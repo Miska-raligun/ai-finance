@@ -50,6 +50,10 @@
           <span class="captcha-hint">不区分大小写，点击图片刷新</span>
         </div>
 
+        <div v-if="!isRegister" class="remember-row">
+          <el-checkbox v-model="rememberMe">记住我（30天）</el-checkbox>
+        </div>
+
         <div class="btn-row">
           <el-button
             v-if="!isRegister"
@@ -89,6 +93,7 @@ const router = useRouter()
 const username = ref('')
 const password = ref('')
 const isRegister = ref(false)
+const rememberMe = ref(false)
 const captchaToken = ref('')
 const captchaInput = ref('')
 const captchaUrl = ref('')
@@ -130,7 +135,7 @@ async function onLogin() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ username: username.value, password: password.value })
+      body: JSON.stringify({ username: username.value, password: password.value, remember: rememberMe.value })
     })
     const data = await res.json()
     if (data.success) {
@@ -253,6 +258,12 @@ async function onRegister() {
 .captcha-hint {
   font-size: 12px;
   color: #94a3b8;
+}
+
+.remember-row {
+  display: flex;
+  align-items: center;
+  margin-top: -4px;
 }
 
 .btn-row {
