@@ -78,7 +78,7 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column prop="note" label="备注" min-width="90">
+      <el-table-column v-if="!isMobile" prop="note" label="备注" min-width="90">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-input v-model="scope.row.note" size="small" />
@@ -106,7 +106,7 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column v-if="showBudget" prop="left_budget" label="剩余预算" sortable min-width="90">
+      <el-table-column v-if="showBudget && !isMobile" prop="left_budget" label="剩余预算" sortable min-width="90">
         <template #default="scope">
           <span v-if="scope.row.left_budget === '—'" style="color: var(--color-text-muted)">—</span>
           <span v-else :class="scope.row.left_budget < 0 ? 'amount-expense' : 'amount-income'">
@@ -114,7 +114,7 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="130" :fixed="isMobile ? false : 'right'">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-button size="small" type="primary" @click="saveEdit(scope.row)">保存</el-button>

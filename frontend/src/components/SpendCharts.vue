@@ -104,7 +104,7 @@ form {
   gap: 10px;
   flex-wrap: wrap;
 }
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   form {
     flex-direction: column;
     align-items: stretch;
