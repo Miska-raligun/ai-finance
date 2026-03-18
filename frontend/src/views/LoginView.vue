@@ -5,7 +5,7 @@
       <h1 class="login-title">智能记账助手Anon</h1>
       <p class="login-sub">管理你的每一笔收支</p>
 
-      <div class="login-form">
+      <div v-if="!checking" class="login-form">
         <div class="field">
           <label class="field-label">用户名</label>
           <el-input
@@ -94,6 +94,7 @@ const username = ref('')
 const password = ref('')
 const isRegister = ref(false)
 const rememberMe = ref(false)
+const checking = ref(true)
 const captchaToken = ref('')
 const captchaInput = ref('')
 const captchaUrl = ref('')
@@ -106,8 +107,19 @@ function reset() {
   captchaToken.value = ''
   captchaUrl.value = ''
 }
-onMounted(reset)
-onActivated(reset)
+async function checkSession() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'include' })
+    if (res.ok) {
+      router.push('/chat')
+      return
+    }
+  } catch { /* 网络错误，降级显示表单 */ }
+  reset()
+  checking.value = false
+}
+onMounted(checkSession)
+onActivated(checkSession)
 
 async function refreshCaptcha() {
   const res = await fetch('/api/captcha')
