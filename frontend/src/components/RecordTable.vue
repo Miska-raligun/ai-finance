@@ -15,7 +15,7 @@
         </el-form-item>
 
         <!-- 日期筛选：桌面端用 daterange，移动端用两个独立 date picker -->
-        <template v-if="!isMobile">
+        <template v-if="!isNarrow">
           <el-form-item label="时间范围">
             <el-date-picker
               v-model="dateRange"
@@ -63,6 +63,8 @@
       stripe
       style="width: 100%"
       @selection-change="handleSelectionChange"
+      @row-click="handleRowClick"
+      :row-class-name="isTouch ? 'touch-tappable-row' : ''"
       class="record-table"
     >
       <el-table-column type="selection" width="46" />
@@ -78,7 +80,7 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isMobile" prop="note" label="备注" min-width="90">
+      <el-table-column v-if="!isNarrow" prop="note" label="备注" min-width="90">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-input v-model="scope.row.note" size="small" />
@@ -86,7 +88,7 @@
           <template v-else>{{ scope.row.note }}</template>
         </template>
       </el-table-column>
-      <el-table-column prop="date" label="日期" sortable min-width="100">
+      <el-table-column v-if="showDateColumn" prop="date" label="日期" sortable min-width="100">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-date-picker v-model="scope.row.date" type="date" value-format="YYYY-MM-DD" style="width:130px" />
@@ -106,7 +108,7 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column v-if="showBudget && !isMobile" prop="left_budget" label="剩余预算" sortable min-width="90">
+      <el-table-column v-if="showBudget && !isNarrow" prop="left_budget" label="剩余预算" sortable min-width="90">
         <template #default="scope">
           <span v-if="scope.row.left_budget === '—'" style="color: var(--color-text-muted)">—</span>
           <span v-else :class="scope.row.left_budget < 0 ? 'amount-expense' : 'amount-income'">
@@ -114,7 +116,7 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="130" :fixed="isMobile ? false : 'right'">
+      <el-table-column label="操作" width="130" :fixed="isNarrow ? false : 'right'">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-button size="small" type="primary" @click="saveEdit(scope.row)">保存</el-button>
@@ -129,7 +131,7 @@
 
     <!-- 桌面端：完整分页 -->
     <el-pagination
-      v-if="!isMobile"
+      v-if="!isNarrow"
       background
       layout="prev, pager, next, total"
       :total="totalRecords"
@@ -169,6 +171,42 @@
         @click="handlePageChange(currentPage + 1)"
       >下一页 ›</el-button>
     </div>
+
+    <!-- 触摸行详情抽屉（手机+平板） -->
+    <el-drawer
+      v-model="showPopover"
+      direction="btt"
+      :with-header="false"
+      :size="showBudget ? '160px' : '124px'"
+      class="row-detail-drawer"
+    >
+      <div class="drawer-handle-bar"></div>
+      <div v-if="popoverRow" class="drawer-detail-body">
+        <div class="drawer-detail-row">
+          <span class="drawer-detail-label">备注</span>
+          <span class="drawer-detail-value text-normal">{{ popoverRow.note || '—' }}</span>
+        </div>
+        <div v-if="showBudget" class="drawer-detail-row">
+          <span class="drawer-detail-label">剩余预算</span>
+          <span
+            class="drawer-detail-value"
+            :class="
+              popoverRow.left_budget === '—' ? 'text-muted'
+              : popoverRow.left_budget < 0   ? 'amount-expense'
+              : 'amount-income'
+            "
+          >
+            {{
+              popoverRow.left_budget === '—'
+                ? '—'
+                : popoverRow.left_budget < 0
+                  ? `-¥${Math.abs(popoverRow.left_budget)}`
+                  : `¥${popoverRow.left_budget}`
+            }}
+          </span>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -201,13 +239,41 @@ const editingId = ref(null)
 const pageSize = 10
 const currentPage = ref(1)
 
-// 移动端检测
-const isMobile = ref(window.innerWidth < 768)
-function onResize() {
-  isMobile.value = window.innerWidth < 768
+// 触控能力检测（手机 + 平板）：决定是否支持触摸行弹出详情
+const touchQuery = window.matchMedia('(hover: none) and (pointer: coarse)')
+const isTouch = ref(touchQuery.matches)
+function onTouchChange(e) { isTouch.value = e.matches }
+
+// 窄屏检测（仅手机）：决定是否隐藏列、紧凑分页、独立日期选择器
+const isNarrow = ref(window.innerWidth < 768)
+function onResize() { isNarrow.value = window.innerWidth < 768 }
+
+onMounted(() => {
+  touchQuery.addEventListener('change', onTouchChange)
+  window.addEventListener('resize', onResize)
+})
+onUnmounted(() => {
+  touchQuery.removeEventListener('change', onTouchChange)
+  window.removeEventListener('resize', onResize)
+})
+
+// 日期列：桌面始终显示；手机仅在用户选了多天范围时显示
+const showDateColumn = computed(() => {
+  if (!isNarrow.value) return true
+  return !!(startDate.value && endDate.value && startDate.value !== endDate.value)
+})
+
+// 触摸行详情
+const popoverRow = ref(null)
+const showPopover = ref(false)
+
+function handleRowClick(row, column, event) {
+  if (!isTouch.value) return
+  if (editingId.value !== null) return
+  if (event.target.closest('.el-button, button, input, .el-select, .el-input, .el-date-editor')) return
+  popoverRow.value = row
+  showPopover.value = true
 }
-onMounted(() => window.addEventListener('resize', onResize))
-onUnmounted(() => window.removeEventListener('resize', onResize))
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize)))
 
@@ -268,9 +334,9 @@ async function fetchData() {
     const params = { page: currentPage.value, limit: pageSize }
     if (filterCategory.value) params.category = filterCategory.value
 
-    // 统一处理日期范围：桌面用 dateRange，移动用独立字段
-    const sd = isMobile.value ? startDate.value : (dateRange.value && dateRange.value[0])
-    const ed = isMobile.value ? endDate.value   : (dateRange.value && dateRange.value[1])
+    // 统一处理日期范围：窄屏用独立字段，桌面用 dateRange
+    const sd = isNarrow.value ? startDate.value : (dateRange.value && dateRange.value[0])
+    const ed = isNarrow.value ? endDate.value   : (dateRange.value && dateRange.value[1])
     if (sd) params.start_date = sd
     if (ed) params.end_date = ed
 
@@ -351,6 +417,13 @@ watch(() => props.refreshFlag, () => {
   letter-spacing: 0.3px;
 }
 
+/* 可触摸行点击反馈 */
+.record-table :deep(.touch-tappable-row) { cursor: pointer; }
+.record-table :deep(.touch-tappable-row:active td) {
+  background: var(--color-primary-light) !important;
+  transition: background 0.12s;
+}
+
 /* 桌面端分页 */
 .table-pagination {
   justify-content: flex-end;
@@ -406,4 +479,51 @@ watch(() => props.refreshFlag, () => {
     flex: 1;
   }
 }
+
+/* 触摸详情抽屉 */
+:deep(.row-detail-drawer) {
+  border-radius: 16px 16px 0 0 !important;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12) !important;
+}
+:deep(.row-detail-drawer .el-drawer__body) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.drawer-handle-bar {
+  width: 36px;
+  height: 4px;
+  background: #d1d5db;
+  border-radius: 2px;
+  margin: 10px auto 0;
+}
+
+.drawer-detail-body {
+  padding: 16px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.drawer-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.drawer-detail-row:last-child { border-bottom: none; }
+.drawer-detail-label {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.drawer-detail-value {
+  font-size: 15px;
+  font-weight: 600;
+  max-width: 65%;
+  text-align: right;
+  word-break: break-all;
+}
+.drawer-detail-value.text-normal { font-weight: 400; color: var(--color-text); }
+.drawer-detail-value.text-muted  { font-weight: 400; color: var(--color-text-muted); }
 </style>
