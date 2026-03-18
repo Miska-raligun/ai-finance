@@ -177,11 +177,25 @@
       v-model="showPopover"
       direction="btt"
       :with-header="false"
-      :size="showBudget ? '160px' : '124px'"
+      :size="showBudget ? '300px' : '252px'"
       class="row-detail-drawer"
     >
       <div class="drawer-handle-bar"></div>
       <div v-if="popoverRow" class="drawer-detail-body">
+        <div class="drawer-detail-row">
+          <span class="drawer-detail-label">分类</span>
+          <el-tag size="small" type="info" class="cat-tag">{{ popoverRow.category }}</el-tag>
+        </div>
+        <div class="drawer-detail-row">
+          <span class="drawer-detail-label">金额</span>
+          <span :class="showBudget ? 'drawer-detail-value amount-expense' : 'drawer-detail-value amount-income'">
+            ¥{{ popoverRow.amount }}
+          </span>
+        </div>
+        <div class="drawer-detail-row">
+          <span class="drawer-detail-label">日期</span>
+          <span class="drawer-detail-value text-normal">{{ popoverRow.date }}</span>
+        </div>
         <div class="drawer-detail-row">
           <span class="drawer-detail-label">备注</span>
           <span class="drawer-detail-value text-normal">{{ popoverRow.note || '—' }}</span>
@@ -257,10 +271,13 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize)
 })
 
-// 日期列：桌面始终显示；手机仅在用户选了多天范围时显示
+// 日期列：桌面始终显示；手机在无筛选（全部）或多天范围时显示
 const showDateColumn = computed(() => {
   if (!isNarrow.value) return true
-  return !!(startDate.value && endDate.value && startDate.value !== endDate.value)
+  const sd = startDate.value
+  const ed = endDate.value
+  if (!sd && !ed) return true  // 全部（无日期筛选）
+  return !!(sd && ed && sd !== ed)  // 跨多天范围
 })
 
 // 触摸行详情
