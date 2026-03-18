@@ -113,7 +113,11 @@ const fetchChartData = async () => {
   }
   const lineTooltip = {
     trigger: 'axis',
-    formatter: params => params.map(p => `${p.seriesName}: ¥${fmtCeil(p.value)}`).join('<br/>')
+    formatter: params => params.map(p => {
+      const sign = p.value < 0 ? '-' : ''
+      const absStr = (Math.ceil(Math.abs(p.value) * 100) / 100).toFixed(2)
+      return `${p.seriesName}: ${sign}¥${absStr}`
+    }).join('<br/>')
   }
 
   const makePie = (title, data, seriesName) => ({
