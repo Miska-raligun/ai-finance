@@ -78,14 +78,7 @@ async function drawChart() {
       },
       plugins: {
         legend: {
-          position: 'bottom',
-          labels: {
-            boxWidth: 10,
-            padding: 10,
-            font: {
-              size: 12
-            }
-          }
+          display: false
         }
       }
     }
