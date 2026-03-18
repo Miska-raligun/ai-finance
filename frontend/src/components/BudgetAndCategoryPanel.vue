@@ -26,7 +26,7 @@
       <el-table-column prop="remaining" label="剩余预算">
         <template #default="scope">
           <span :class="scope.row.remaining < 0 ? 'amount-expense' : 'amount-income'">
-            ¥{{ scope.row.remaining }}
+            {{ scope.row.remaining < 0 ? `-¥${Math.abs(scope.row.remaining)}` : `¥${scope.row.remaining}` }}
           </span>
         </template>
       </el-table-column>
