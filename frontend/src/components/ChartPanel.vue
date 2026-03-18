@@ -126,12 +126,12 @@ const fetchChartData = async () => {
     color: PALETTE,
     title: { text: title, left: 'center', top: 6, textStyle: { fontSize: 13, fontWeight: 600, color: '#1e293b' } },
     tooltip: pieTooltip,
-    legend: { bottom: 0, left: 'center', itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },
+    legend: { show: false },
     series: [{
       name: seriesName,
       type: 'pie',
       radius: ['35%', '60%'],
-      center: ['50%', '48%'],
+      center: ['50%', '50%'],
       data,
       label: { show: false },
       emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } }

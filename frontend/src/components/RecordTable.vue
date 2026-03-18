@@ -285,7 +285,6 @@ const popoverRow = ref(null)
 const showPopover = ref(false)
 
 function handleRowClick(row, column, event) {
-  if (!isTouch.value) return
   if (editingId.value !== null) return
   if (event.target.closest('.el-button, button, input, .el-select, .el-input, .el-date-editor')) return
   popoverRow.value = row
@@ -330,12 +329,17 @@ function cancelEdit() {
 }
 
 async function deleteSelected() {
-  for (const r of selectedRows.value) {
-    const url = props.type === 'expense' ? `/api/records/${r.id}` : `/api/income/${r.id}`
-    await api.delete(url)
-  }
+  const toDelete = [...selectedRows.value]
+  const deletedIds = new Set(toDelete.map(r => r.id))
+  await Promise.all(
+    toDelete.map(r => {
+      const url = props.type === 'expense' ? `/api/records/${r.id}` : `/api/income/${r.id}`
+      return api.delete(url)
+    })
+  )
+  records.value = records.value.filter(r => !deletedIds.has(r.id))
+  totalRecords.value = Math.max(0, totalRecords.value - toDelete.length)
   selectedRows.value = []
-  await fetchData()
   emit('refresh')
 }
 
@@ -346,8 +350,6 @@ function applyFilter() {
 
 async function fetchData() {
   try {
-    records.value = []
-    totalRecords.value = 0
     const params = { page: currentPage.value, limit: pageSize }
     if (filterCategory.value) params.category = filterCategory.value
 
