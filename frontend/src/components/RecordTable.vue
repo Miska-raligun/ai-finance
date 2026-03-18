@@ -108,7 +108,8 @@
       </el-table-column>
       <el-table-column v-if="showBudget" prop="left_budget" label="剩余预算" sortable min-width="90">
         <template #default="scope">
-          <span :class="scope.row.left_budget < 0 ? 'amount-expense' : 'amount-income'">
+          <span v-if="scope.row.left_budget === '—'" style="color: var(--color-text-muted)">—</span>
+          <span v-else :class="scope.row.left_budget < 0 ? 'amount-expense' : 'amount-income'">
             ¥{{ scope.row.left_budget }}
           </span>
         </template>
