@@ -110,7 +110,7 @@
         <template #default="scope">
           <span v-if="scope.row.left_budget === '—'" style="color: var(--color-text-muted)">—</span>
           <span v-else :class="scope.row.left_budget < 0 ? 'amount-expense' : 'amount-income'">
-            ¥{{ scope.row.left_budget }}
+            {{ scope.row.left_budget < 0 ? `-¥${Math.abs(scope.row.left_budget)}` : `¥${scope.row.left_budget}` }}
           </span>
         </template>
       </el-table-column>
