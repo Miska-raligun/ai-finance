@@ -116,7 +116,8 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="130" :fixed="isNarrow ? false : 'right'">
+      <!-- 操作列：仅桌面端显示（移动端通过抽屉编辑） -->
+      <el-table-column v-if="!isNarrow" label="操作" width="130" fixed="right">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-button size="small" type="primary" @click="saveEdit(scope.row)">保存</el-button>
@@ -172,60 +173,113 @@
       >下一页 ›</el-button>
     </div>
 
-    <!-- 触摸行详情抽屉（手机+平板） -->
+    <!-- 行详情抽屉（支持查看 / 编辑两种模式） -->
     <el-drawer
       v-model="showPopover"
       direction="btt"
       :with-header="false"
-      :size="showBudget ? '300px' : '252px'"
+      :size="drawerMode === 'edit' ? '420px' : (showBudget ? '360px' : '320px')"
       class="row-detail-drawer"
+      @close="onDrawerClose"
     >
       <div class="drawer-handle-bar"></div>
-      <div v-if="popoverRow" class="drawer-detail-body">
-        <div class="drawer-detail-row">
-          <span class="drawer-detail-label">分类</span>
-          <el-tag size="small" type="info" class="cat-tag">{{ popoverRow.category }}</el-tag>
+
+      <!-- VIEW 模式：只读展示 + 操作按钮 -->
+      <template v-if="drawerMode === 'view' && popoverRow">
+        <div class="drawer-detail-body">
+          <div class="drawer-detail-row">
+            <span class="drawer-detail-label">分类</span>
+            <el-tag size="small" type="info" class="cat-tag">{{ popoverRow.category }}</el-tag>
+          </div>
+          <div class="drawer-detail-row">
+            <span class="drawer-detail-label">金额</span>
+            <span :class="showBudget ? 'drawer-detail-value amount-expense' : 'drawer-detail-value amount-income'">
+              ¥{{ popoverRow.amount }}
+            </span>
+          </div>
+          <div class="drawer-detail-row">
+            <span class="drawer-detail-label">日期</span>
+            <span class="drawer-detail-value text-normal">{{ popoverRow.date }}</span>
+          </div>
+          <div class="drawer-detail-row">
+            <span class="drawer-detail-label">备注</span>
+            <span class="drawer-detail-value text-normal">{{ popoverRow.note || '—' }}</span>
+          </div>
+          <div v-if="showBudget" class="drawer-detail-row">
+            <span class="drawer-detail-label">剩余预算</span>
+            <span
+              class="drawer-detail-value"
+              :class="
+                popoverRow.left_budget === '—' ? 'text-muted'
+                : popoverRow.left_budget < 0   ? 'amount-expense'
+                : 'amount-income'
+              "
+            >
+              {{
+                popoverRow.left_budget === '—'
+                  ? '—'
+                  : popoverRow.left_budget < 0
+                    ? `-¥${Math.abs(popoverRow.left_budget)}`
+                    : `¥${popoverRow.left_budget}`
+              }}
+            </span>
+          </div>
         </div>
-        <div class="drawer-detail-row">
-          <span class="drawer-detail-label">金额</span>
-          <span :class="showBudget ? 'drawer-detail-value amount-expense' : 'drawer-detail-value amount-income'">
-            ¥{{ popoverRow.amount }}
-          </span>
+        <div class="drawer-footer">
+          <el-button class="drawer-action-btn" plain type="danger" @click="deleteFromDrawer">
+            🗑️ 删除
+          </el-button>
+          <el-button class="drawer-action-btn" type="primary" @click="startDrawerEdit">
+            ✏️ 编辑
+          </el-button>
         </div>
-        <div class="drawer-detail-row">
-          <span class="drawer-detail-label">日期</span>
-          <span class="drawer-detail-value text-normal">{{ popoverRow.date }}</span>
+      </template>
+
+      <!-- EDIT 模式：全字段表单 -->
+      <template v-if="drawerMode === 'edit' && editingRow">
+        <div class="drawer-edit-title">编辑记录</div>
+        <div class="drawer-edit-form">
+          <div class="drawer-edit-field">
+            <label class="drawer-edit-label">分类</label>
+            <el-select v-model="editingRow.category" style="width: 100%">
+              <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+            </el-select>
+          </div>
+          <div class="drawer-edit-field">
+            <label class="drawer-edit-label">金额</label>
+            <el-input-number
+              v-model="editingRow.amount"
+              :min="0"
+              controls-position="right"
+              style="width: 100%"
+            />
+          </div>
+          <div class="drawer-edit-field">
+            <label class="drawer-edit-label">日期</label>
+            <el-date-picker
+              v-model="editingRow.date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </div>
+          <div class="drawer-edit-field">
+            <label class="drawer-edit-label">备注</label>
+            <el-input v-model="editingRow.note" placeholder="可选" />
+          </div>
         </div>
-        <div class="drawer-detail-row">
-          <span class="drawer-detail-label">备注</span>
-          <span class="drawer-detail-value text-normal">{{ popoverRow.note || '—' }}</span>
+        <div class="drawer-footer">
+          <el-button class="drawer-action-btn" plain @click="drawerMode = 'view'">取消</el-button>
+          <el-button class="drawer-action-btn" type="primary" @click="saveDrawerEdit">保存</el-button>
         </div>
-        <div v-if="showBudget" class="drawer-detail-row">
-          <span class="drawer-detail-label">剩余预算</span>
-          <span
-            class="drawer-detail-value"
-            :class="
-              popoverRow.left_budget === '—' ? 'text-muted'
-              : popoverRow.left_budget < 0   ? 'amount-expense'
-              : 'amount-income'
-            "
-          >
-            {{
-              popoverRow.left_budget === '—'
-                ? '—'
-                : popoverRow.left_budget < 0
-                  ? `-¥${Math.abs(popoverRow.left_budget)}`
-                  : `¥${popoverRow.left_budget}`
-            }}
-          </span>
-        </div>
-      </div>
+      </template>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import api from '@/api'
 
 const props = defineProps({
@@ -280,15 +334,59 @@ const showDateColumn = computed(() => {
   return !!(sd && ed && sd !== ed)  // 跨多天范围
 })
 
-// 触摸行详情
+// 行详情抽屉状态
 const popoverRow = ref(null)
 const showPopover = ref(false)
+const drawerMode = ref('view')   // 'view' | 'edit'
+const editingRow = ref(null)     // 抽屉编辑副本
 
 function handleRowClick(row, column, event) {
   if (editingId.value !== null) return
   if (event.target.closest('.el-button, button, input, .el-select, .el-input, .el-date-editor')) return
   popoverRow.value = row
   showPopover.value = true
+}
+
+function onDrawerClose() {
+  drawerMode.value = 'view'
+  editingRow.value = null
+}
+
+function startDrawerEdit() {
+  editingRow.value = { ...popoverRow.value }
+  drawerMode.value = 'edit'
+}
+
+async function saveDrawerEdit() {
+  const url = props.type === 'expense'
+    ? `/api/records/${editingRow.value.id}`
+    : `/api/income/${editingRow.value.id}`
+  try {
+    await api.put(url, editingRow.value)
+    const idx = records.value.findIndex(r => r.id === editingRow.value.id)
+    if (idx !== -1) records.value[idx] = { ...editingRow.value }
+    popoverRow.value = { ...editingRow.value }
+    drawerMode.value = 'view'
+    emit('refresh')
+  } catch {
+    ElMessage.error('保存失败，请重试')
+  }
+}
+
+async function deleteFromDrawer() {
+  try {
+    await ElMessageBox.confirm('确定删除这条记录吗？', '删除确认', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+    })
+  } catch { return }
+  const url = props.type === 'expense'
+    ? `/api/records/${popoverRow.value.id}`
+    : `/api/income/${popoverRow.value.id}`
+  await api.delete(url)
+  records.value = records.value.filter(r => r.id !== popoverRow.value.id)
+  totalRecords.value = Math.max(0, totalRecords.value - 1)
+  showPopover.value = false
+  emit('refresh')
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize)))
@@ -499,14 +597,16 @@ watch(() => props.refreshFlag, () => {
   }
 }
 
-/* 触摸详情抽屉 */
+/* 行详情 / 编辑抽屉 */
 :deep(.row-detail-drawer) {
   border-radius: 16px 16px 0 0 !important;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12) !important;
 }
 :deep(.row-detail-drawer .el-drawer__body) {
   padding: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .drawer-handle-bar {
@@ -515,19 +615,21 @@ watch(() => props.refreshFlag, () => {
   background: #d1d5db;
   border-radius: 2px;
   margin: 10px auto 0;
+  flex-shrink: 0;
 }
 
+/* VIEW 模式：只读字段 */
 .drawer-detail-body {
-  padding: 16px 24px 20px;
+  padding: 8px 24px 12px;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  flex: 1;
 }
 .drawer-detail-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 0;
+  padding: 13px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .drawer-detail-row:last-child { border-bottom: none; }
@@ -545,4 +647,41 @@ watch(() => props.refreshFlag, () => {
 }
 .drawer-detail-value.text-normal { font-weight: 400; color: var(--color-text); }
 .drawer-detail-value.text-muted  { font-weight: 400; color: var(--color-text-muted); }
+
+/* EDIT 模式：表单 */
+.drawer-edit-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  padding: 14px 24px 6px;
+  flex-shrink: 0;
+}
+.drawer-edit-form {
+  padding: 4px 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  overflow-y: auto;
+}
+.drawer-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.drawer-edit-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+/* 抽屉底部按钮区（view 和 edit 共用） */
+.drawer-footer {
+  display: flex;
+  gap: 10px;
+  padding: 14px 24px 28px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  flex-shrink: 0;
+}
+.drawer-action-btn { flex: 1; }
 </style>
