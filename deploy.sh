@@ -5,12 +5,13 @@ echo "[start] Deploy script started..."
 
 BACKEND_LOG="backend.log"
 MCP_LOG="mcp.log"
+MINIMAX_MCP_LOG="minimax_mcp.log"
 FRONTEND_LOG="frontend.log"
 
 # === Backend Setup ===
 pushd backend >/dev/null
 
-for PORT in 5000 5001; do
+for PORT in 5000 5001 5002; do
   PID=$(lsof -ti:$PORT 2>/dev/null || true)
   if [ -n "$PID" ]; then
     echo "[backend] Port $PORT in use. Killing process $PID..."
@@ -40,6 +41,11 @@ python mcp_server.py > "../$MCP_LOG" 2>&1 &
 MCP_PID=$!
 echo "[mcp] MCP server running (PID $MCP_PID)"
 
+echo "[minimax-mcp] Starting MiniMax MCP server on port 5002..."
+python minimax_mcp_server.py > "../$MINIMAX_MCP_LOG" 2>&1 &
+MINIMAX_MCP_PID=$!
+echo "[minimax-mcp] MiniMax MCP server running (PID $MINIMAX_MCP_PID)"
+
 deactivate
 popd >/dev/null
 
@@ -59,14 +65,15 @@ cd ..
 
 echo ""
 echo "=========================================="
-echo "  Frontend : http://localhost:5173"
-echo "  Backend  : http://localhost:5000"
-echo "  MCP SSE  : http://localhost:5001/mcp/sse"
+echo "  Frontend     : http://localhost:5173"
+echo "  Backend      : http://localhost:5000"
+echo "  MCP SSE      : http://localhost:5001/mcp/sse"
+echo "  MiniMax MCP  : http://localhost:5002/mcp/sse"
 echo "=========================================="
 echo "Press Ctrl+C to stop all services."
 echo ""
 
 # === Trap and Wait ===
-trap "echo '[exit] Shutting down...'; kill $BACKEND_PID $MCP_PID $FRONTEND_PID 2>/dev/null" INT TERM
-wait $BACKEND_PID $MCP_PID $FRONTEND_PID
+trap "echo '[exit] Shutting down...'; kill $BACKEND_PID $MCP_PID $MINIMAX_MCP_PID $FRONTEND_PID 2>/dev/null" INT TERM
+wait $BACKEND_PID $MCP_PID $MINIMAX_MCP_PID $FRONTEND_PID
 

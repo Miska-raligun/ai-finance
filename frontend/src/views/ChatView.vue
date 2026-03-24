@@ -9,7 +9,8 @@
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
         <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="msg-body">
-          <div class="bubble">{{ msg.content }}</div>
+          <img v-if="msg.image" :src="msg.image" class="chat-image" alt="uploaded" />
+          <div v-if="msg.content" class="bubble">{{ msg.content }}</div>
 
           <!-- 可编辑确认卡片 -->
           <template v-if="msg.pending_records && msg.pending_records.length">
@@ -104,6 +105,18 @@
     </div>
 
     <div class="chat-input">
+      <input
+        ref="imageInput"
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style="display:none"
+        @change="handleImageSelect"
+      />
+      <button class="img-btn" :disabled="loading" @click="$refs.imageInput.click()" title="上传图片识别记账">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+        </svg>
+      </button>
       <el-input
         v-model="userInput"
         placeholder="告诉我你的消费，如：吃饭花了20元"
@@ -140,7 +153,8 @@ function sendQuick(text) {
 }
 
 const userInput = ref('')
-const messages = ref([{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，我会帮你自动记录。' }])
+const imageInput = ref(null)
+const messages = ref([{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，也可以点击图片按钮上传账单/小票自动识别记账。' }])
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
@@ -178,6 +192,50 @@ async function sendMessage() {
     messages.value.push(assistantMsg)
   } catch {
     messages.value.push({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
+  } finally {
+    loading.value = false
+    await scrollToBottom()
+  }
+}
+
+function handleImageSelect(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过 10MB')
+    e.target.value = ''
+    return
+  }
+  sendImage(file)
+  e.target.value = ''
+}
+
+async function sendImage(file) {
+  const previewUrl = URL.createObjectURL(file)
+  messages.value.push({ sender: 'user', content: '', image: previewUrl })
+  loading.value = true
+  await scrollToBottom()
+
+  try {
+    const formData = new FormData()
+    formData.append('image', file)
+    const res = await fetch('/api/chat/image', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    })
+    const data = await res.json()
+    const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
+    if (data.pending_records && data.pending_records.length > 0) {
+      assistantMsg.pending_records = data.pending_records.map(rec => ({
+        ...rec,
+        _state: 'pending',
+        _edit: { ...rec }
+      }))
+    }
+    messages.value.push(assistantMsg)
+  } catch {
+    messages.value.push({ sender: 'assistant', content: '❌ 图片识别失败，请重试或手动输入。' })
   } finally {
     loading.value = false
     await scrollToBottom()
@@ -427,9 +485,20 @@ onActivated(() => {
 }
 .quick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* 图片消息 */
+.chat-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 12px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+}
+
 /* 输入区 */
 .chat-input {
   display: flex;
+  align-items: center;
   gap: 10px;
   padding: 10px 12px 12px;
   margin: 0 12px 12px;
@@ -437,6 +506,26 @@ onActivated(() => {
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
 }
+.img-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.img-btn:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.img-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-text-input { flex: 1; }
 .send-btn {
   flex-shrink: 0;

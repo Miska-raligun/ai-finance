@@ -6,7 +6,8 @@ set -e
 
 # ===== 配置：按实际 systemd 服务名修改 =====
 FLASK_SERVICE="jzflask"
-MCP_SERVICE="ai-finance-mcp"    # MCP server 服务（端口 5001）
+MCP_SERVICE="ai-finance-mcp"              # MCP server 服务（端口 5001）
+MINIMAX_MCP_SERVICE="ai-finance-minimax-mcp"  # MiniMax MCP 图片识别服务（端口 5002）
 DEPLOY_BRANCH="claude/switch-deployment-branch-3B5ed"
 # ==========================================
 
@@ -46,11 +47,24 @@ echo "[systemd] 重启 $MCP_SERVICE ..."
 systemctl restart "$MCP_SERVICE"
 echo "[systemd] $MCP_SERVICE 已重启"
 
+# 6. 重启 MiniMax MCP 图片识别服务
+if systemctl list-unit-files | grep -q "$MINIMAX_MCP_SERVICE"; then
+    echo "[systemd] 重启 $MINIMAX_MCP_SERVICE ..."
+    systemctl restart "$MINIMAX_MCP_SERVICE"
+    echo "[systemd] $MINIMAX_MCP_SERVICE 已重启"
+else
+    echo "[warn] $MINIMAX_MCP_SERVICE 服务未创建，跳过。"
+    echo "  如需启用图片识别，请创建 systemd 服务："
+    echo "    sudo nano /etc/systemd/system/${MINIMAX_MCP_SERVICE}.service"
+    echo "  参考 backend/minimax_mcp_server.py 中的说明"
+fi
+
 echo ""
 echo "=========================================="
 echo "  部署完成！"
 echo "  请执行以下命令验证："
 echo "    systemctl status $FLASK_SERVICE"
 echo "    systemctl status $MCP_SERVICE"
+echo "    systemctl status $MINIMAX_MCP_SERVICE"
 echo "    sqlite3 records.db \".schema records\""
 echo "=========================================="

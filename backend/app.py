@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, g, session, make_response
 from db import init_db, get_db, add_chat_message, get_chat_history
 from handlers import *
 from dotenv import load_dotenv
-import os, requests, secrets, json, time, uuid, random
+import os, requests, secrets, json, time, uuid, random, base64, asyncio
 from collections import defaultdict
 from io import BytesIO
 from flask_cors import CORS
@@ -489,6 +489,138 @@ def chat():
 
     add_chat_message(g.user_id, "assistant", reply)
     return jsonify({"reply": reply, "pending_records": pending_records if tool_calls else []})
+
+
+# ── 图片识别记账 ──────────────────────────────────────────────
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MIME_TO_EXT = {"image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+async def _recognize_image_async(image_b64: str, mime_type: str) -> str:
+    """通过 MCP 协议调用 MiniMax understand_image 工具"""
+    from mcp.client.sse import sse_client
+    from mcp import ClientSession
+
+    mcp_port = os.getenv("MINIMAX_MCP_PORT", "5002")
+    mcp_url = f"http://localhost:{mcp_port}/mcp/sse"
+    ext = MIME_TO_EXT.get(mime_type, "jpeg")
+    data_url = f"data:image/{ext};base64,{image_b64}"
+
+    async with sse_client(mcp_url) as (read, write):
+        async with ClientSession(read, write) as sess:
+            await sess.initialize()
+            result = await sess.call_tool("understand_image", {
+                "prompt": "请识别这张图片中的消费或收入信息，包括金额、商品名称/服务、商家、日期等。如果是账单或小票，请逐条列出每一项的金额和名称。",
+                "image_url": data_url,
+            })
+            return result.content[0].text
+
+
+def recognize_image(image_b64: str, mime_type: str) -> str:
+    """同步包装：调用 MiniMax MCP understand_image"""
+    try:
+        loop = asyncio.new_event_loop()
+        text = loop.run_until_complete(_recognize_image_async(image_b64, mime_type))
+        loop.close()
+        return text
+    except Exception as e:
+        logger.error("图片识别失败: %s", e)
+        return None
+
+
+@app.route("/api/chat/image", methods=["POST"])
+@login_required
+def chat_image():
+    """接收图片，调用 MiniMax 识别后走记账流程"""
+    if "image" not in request.files:
+        return jsonify({"success": False, "message": "未收到图片文件"}), 400
+
+    file = request.files["image"]
+    mime_type = file.content_type
+    if mime_type not in ALLOWED_IMAGE_TYPES:
+        return jsonify({"success": False, "message": f"不支持的图片格式：{mime_type}，仅支持 JPEG/PNG/WebP"}), 400
+
+    image_bytes = file.read()
+    if len(image_bytes) > MAX_IMAGE_SIZE:
+        return jsonify({"success": False, "message": "图片大小超过 10MB 限制"}), 400
+
+    # 图片转 base64（纯内存操作）
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    del image_bytes  # 释放原始字节
+
+    # 调用 MiniMax 识别
+    recognized_text = recognize_image(image_b64, mime_type)
+    del image_b64  # 释放 base64 字符串
+
+    if not recognized_text:
+        return jsonify({"reply": "图片识别失败，请重试或手动输入记账信息。", "pending_records": []})
+
+    # 获取用户 LLM 配置
+    db = get_db()
+    llm_cfg = {}
+    row = db.execute(
+        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        (g.user_id,),
+    ).fetchone()
+    if row:
+        for k, v in dict(row).items():
+            llm_cfg.setdefault(k, v)
+
+    # 将识别文本送入 LLM 记账流程
+    user_msg = f"[图片识别结果] {recognized_text}"
+    add_chat_message(g.user_id, "user", "[用户上传了一张图片]")
+
+    response = call_llm_intent(user_msg, llm_cfg)
+
+    reply = None
+    pending_records = []
+    tool_calls = None
+    if response and "choices" in response:
+        msg_obj = response["choices"][0].get("message", {})
+        tool_calls = msg_obj.get("tool_calls")
+
+        if tool_calls:
+            results = []
+            for tc in tool_calls:
+                func_name = tc["function"]["name"]
+                params = json.loads(tc["function"]["arguments"])
+                if func_name in handlers:
+                    if func_name in ("add_record", "add_income"):
+                        rec_date = (params.get("时间") or "").strip() or datetime.now().strftime("%Y-%m-%d")
+                        rec = {
+                            "type": "expense" if func_name == "add_record" else "income",
+                            "category": params.get("分类", ""),
+                            "amount": float(params.get("金额", 0)),
+                            "date": rec_date,
+                            "note": params.get("备注", ""),
+                        }
+                        pending_records.append(rec)
+                        rec_type = "支出" if func_name == "add_record" else "收入"
+                        results.append(
+                            f"已识别到{rec_type}：分类「{rec['category']}」金额 ¥{rec['amount']}，"
+                            f"备注「{rec['note']}」，日期 {rec['date']}，等待用户确认。"
+                        )
+                    elif func_name == "suggest_budgets":
+                        r = handlers[func_name](g.user_id, params, llm_cfg)
+                        results.append(r)
+                    else:
+                        r = handlers[func_name](g.user_id, params)
+                        results.append(r)
+            if results:
+                llm_logger.info(f"[图片识别] Tools: {[tc['function']['name'] for tc in tool_calls]}")
+                reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
+        else:
+            reply = msg_obj.get("content")
+
+    if not reply:
+        chat_history = get_chat_history(g.user_id)
+        reply = call_llm_chat(chat_history, llm_cfg)
+
+    add_chat_message(g.user_id, "assistant", reply)
+    return jsonify({"reply": reply, "pending_records": pending_records})
+
 
 @app.route('/api/records')
 @login_required
