@@ -8,14 +8,14 @@ set -e
 FLASK_SERVICE="jzflask"
 MCP_SERVICE="ai-finance-mcp"              # MCP server 服务（端口 5001）
 MINIMAX_MCP_SERVICE="ai-finance-minimax-mcp"  # MiniMax MCP 图片识别服务（端口 5002）
-DEPLOY_BRANCH="claude/switch-deployment-branch-3B5ed"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 # ==========================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # 1. 备份数据库
-DB_FILE="/backend/records.db"
+DB_FILE="$SCRIPT_DIR/backend/records.db"
 if [ -f "$DB_FILE" ]; then
     BACKUP="${DB_FILE}.backup_$(date +%Y%m%d_%H%M%S)"
     cp "$DB_FILE" "$BACKUP"

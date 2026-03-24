@@ -32,6 +32,6 @@ from minimax_mcp.server import mcp  # noqa: E402
 if __name__ == "__main__":
     import uvicorn
 
-    app = mcp.http_app(path="/mcp")
+    app = mcp.sse_app()
     logger.info("MiniMax MCP Server 启动，端口 %d，API Host: %s", port, api_host)
     uvicorn.run(app, host="0.0.0.0", port=port)

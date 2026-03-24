@@ -504,7 +504,7 @@ async def _recognize_image_async(image_b64: str, mime_type: str) -> str:
     from mcp import ClientSession
 
     mcp_port = os.getenv("MINIMAX_MCP_PORT", "5002")
-    mcp_url = f"http://localhost:{mcp_port}/mcp/sse"
+    mcp_url = f"http://localhost:{mcp_port}/sse"
     ext = MIME_TO_EXT.get(mime_type, "jpeg")
     data_url = f"data:image/{ext};base64,{image_b64}"
 
@@ -513,7 +513,7 @@ async def _recognize_image_async(image_b64: str, mime_type: str) -> str:
             await sess.initialize()
             result = await sess.call_tool("understand_image", {
                 "prompt": "请识别这张图片中的消费或收入信息，包括金额、商品名称/服务、商家、日期等。如果是账单或小票，请逐条列出每一项的金额和名称。",
-                "image_url": data_url,
+                "image_source": data_url,
             })
             return result.content[0].text
 
