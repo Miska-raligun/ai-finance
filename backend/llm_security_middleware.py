@@ -1,10 +1,11 @@
 import logging
 import os
 import requests
-from flask import request, abort, make_response
+from flask import request, abort, make_response, Response
 from dotenv import load_dotenv
 from collections import defaultdict, deque
 import time
+import random
 
 # 记录被拦截次数
 ip_block_counts = defaultdict(int)
@@ -23,6 +24,10 @@ NOT_FOUND_WINDOW = 60     # 滑动窗口大小（秒）
 ip_req_times = defaultdict(deque)
 RATE_LIMIT_THRESHOLD = 60  # 窗口内最大请求数
 RATE_LIMIT_WINDOW = 60     # 滑动窗口大小（秒）
+
+# --- 垃圾数据流配置 ---
+JUNK_TOTAL_SIZE = 10 * 1024 * 1024   # 总共发送 10MB 垃圾数据
+JUNK_CHUNK_SIZE = 64 * 1024          # 每块 64KB（服务器内存占用极小）
 
 # --- 自定义警告响应模板 ---
 WARNING_TEMPLATE = """<!DOCTYPE html>
@@ -165,12 +170,26 @@ def _sliding_window_count(dq, window):
     dq.append(now)
     return len(dq)
 
+def _junk_generator(html):
+    """先发送 HTML 警告，然后流式追加垃圾数据消耗扫描器带宽。"""
+    yield html.encode("utf-8")
+    # HTML 注释包裹垃圾数据，浏览器不会渲染但 curl 会持续接收
+    yield b"\n<!-- "
+    sent = 0
+    while sent < JUNK_TOTAL_SIZE:
+        chunk = random.randbytes(JUNK_CHUNK_SIZE)
+        yield chunk
+        sent += JUNK_CHUNK_SIZE
+    yield b" -->\n"
+
 def _warning_response(ip, status_code, reason):
-    """返回自定义 HTML 警告响应。"""
-    body = WARNING_TEMPLATE.format(ip=ip, reason=reason)
-    resp = make_response(body, status_code)
-    resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    return resp
+    """返回自定义 HTML 警告 + 流式垃圾数据响应。"""
+    html = WARNING_TEMPLATE.format(ip=ip, reason=reason)
+    return Response(
+        _junk_generator(html),
+        status=status_code,
+        content_type="text/html; charset=utf-8",
+    )
 
 def register_llm_security(app):
     @app.before_request
