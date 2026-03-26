@@ -1,7 +1,7 @@
 import logging
 import os
 import requests
-from flask import request, abort
+from flask import request, abort, make_response
 from dotenv import load_dotenv
 from collections import defaultdict, deque
 import time
@@ -23,6 +23,28 @@ NOT_FOUND_WINDOW = 60     # 滑动窗口大小（秒）
 ip_req_times = defaultdict(deque)
 RATE_LIMIT_THRESHOLD = 60  # 窗口内最大请求数
 RATE_LIMIT_WINDOW = 60     # 滑动窗口大小（秒）
+
+# --- 自定义警告响应模板 ---
+WARNING_TEMPLATE = """<!DOCTYPE html>
+<html><head><title>Nice Try</title></head>
+<body style="font-family:monospace;padding:2em;background:#0a0a0a;color:#ff3333">
+<pre style="color:#ff3333">
+ ██     ██  █████  ██████  ███    ██ ██ ███    ██  ██████
+ ██     ██ ██   ██ ██   ██ ████   ██ ██ ████   ██ ██
+ ██  █  ██ ███████ ██████  ██ ██  ██ ██ ██ ██  ██ ██   ███
+ ██ ███ ██ ██   ██ ██   ██ ██  ██ ██ ██ ██  ██ ██ ██    ██
+  ███ ███  ██   ██ ██   ██ ██   ████ ██ ██   ████  ██████
+</pre>
+<h2>Oops. You've been caught.</h2>
+<p>Your IP address <strong>{ip}</strong> has been logged and reported
+to the National Internet Emergency Center (CNCERT/CC).</p>
+<p>All request fingerprints, timestamps, and payloads from this session
+have been archived for forensic analysis.</p>
+<hr style="border-color:#333">
+<p style="color:#ff6666"><strong>Reason:</strong> {reason}</p>
+<p style="color:#888">If you believe this is a mistake, it probably isn't.
+But feel free to keep trying &mdash; we enjoy watching.</p>
+</body></html>"""
 
 load_dotenv()
 
@@ -115,6 +137,13 @@ def _sliding_window_count(dq, window):
     dq.append(now)
     return len(dq)
 
+def _warning_response(ip, status_code, reason):
+    """返回自定义 HTML 警告响应。"""
+    body = WARNING_TEMPLATE.format(ip=ip, reason=reason)
+    resp = make_response(body, status_code)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    return resp
+
 def register_llm_security(app):
     @app.before_request
     def enforce_llm_policy():
@@ -123,7 +152,7 @@ def register_llm_security(app):
         # ✅ 封禁名单检查
         if _check_blacklist(ip):
             sec_logger.warning(f"[BLACKLIST BLOCKED] {ip} 封禁中，拒绝访问")
-            return abort(403)
+            return _warning_response(ip, 403, "IP blacklisted")
 
         # ✅ 白名单直接放行，不计入频率统计
         if is_whitelisted(request.path):
@@ -134,7 +163,7 @@ def register_llm_security(app):
         req_count = _sliding_window_count(ip_req_times[ip], RATE_LIMIT_WINDOW)
         if req_count > RATE_LIMIT_THRESHOLD:
             _ban_ip(ip, f"请求过于频繁 {req_count}次/{RATE_LIMIT_WINDOW}s")
-            return abort(429)
+            return _warning_response(ip, 429, "Rate limit exceeded")
 
         req_info = {
             "ip": ip,
@@ -153,7 +182,7 @@ def register_llm_security(app):
 
             if ip_block_counts[ip] >= BLOCK_THRESHOLD:
                 _ban_ip(ip, f"LLM 连续 block {ip_block_counts[ip]} 次")
-            return abort(403)
+            return _warning_response(ip, 403, "Request blocked by security policy")
 
         elif decision == "warn":
             sec_logger.warning(f"[WARN] {ip} → {req_info['path']}")
@@ -171,5 +200,6 @@ def register_llm_security(app):
         if count_404 >= NOT_FOUND_THRESHOLD:
             ip_404_times[ip].clear()
             _ban_ip(ip, f"{NOT_FOUND_WINDOW}s 内触发 {count_404} 次 404")
+            return _warning_response(ip, 403, "Scanning detected")
 
-        return "404 Not Found", 404
+        return _warning_response(ip, 404, "Not Found")
