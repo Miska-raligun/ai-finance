@@ -280,19 +280,25 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
+import { storeToRefs } from 'pinia'
 import api from '@/api'
+import { useCategoryStore } from '@/stores/categories'
 
 const props = defineProps({
   type: { type: String, default: 'expense' },
-  refreshFlag: Number,
   title: { type: String, default: '记录表格' },
   showBudget: { type: Boolean, default: true }
 })
-const emit = defineEmits(['refresh'])
+
+const categoryStore = useCategoryStore()
+const { refreshCounter } = storeToRefs(categoryStore)
 
 const records = ref([])
 const totalRecords = ref(0)
-const categories = ref([])
+// 分类列表：从 store 派生，按当前 type 挑选对应数组
+const categories = computed(() =>
+  props.type === 'expense' ? categoryStore.expenseNames : categoryStore.incomeNames
+)
 const filterCategory = ref('')
 const today = new Date().toISOString().slice(0, 10)
 
@@ -367,7 +373,7 @@ async function saveDrawerEdit() {
     if (idx !== -1) records.value[idx] = { ...editingRow.value }
     popoverRow.value = { ...editingRow.value }
     drawerMode.value = 'view'
-    emit('refresh')
+    categoryStore.bumpRefresh()
   } catch {
     ElMessage.error('保存失败，请重试')
   }
@@ -386,7 +392,7 @@ async function deleteFromDrawer() {
   records.value = records.value.filter(r => r.id !== popoverRow.value.id)
   totalRecords.value = Math.max(0, totalRecords.value - 1)
   showPopover.value = false
-  emit('refresh')
+  categoryStore.bumpRefresh()
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize)))
@@ -418,7 +424,7 @@ async function saveEdit(row) {
   await api.put(url, row)
   editingId.value = null
   await fetchData()
-  emit('refresh')
+  categoryStore.bumpRefresh()
 }
 
 function cancelEdit() {
@@ -438,7 +444,7 @@ async function deleteSelected() {
   records.value = records.value.filter(r => !deletedIds.has(r.id))
   totalRecords.value = Math.max(0, totalRecords.value - toDelete.length)
   selectedRows.value = []
-  emit('refresh')
+  categoryStore.bumpRefresh()
 }
 
 function applyFilter() {
@@ -457,13 +463,13 @@ async function fetchData() {
     if (sd) params.start_date = sd
     if (ed) params.end_date = ed
 
-    const [recRes, catRes] = await Promise.all([
+    // 分类列表从 store 取（缓存复用），记录表仍需每次独立请求
+    const [recRes] = await Promise.all([
       api.get(props.type === 'expense' ? '/api/records' : '/api/income', { params }),
-      api.get('/api/categories', { params: { type: props.type === 'expense' ? 'expense' : 'income' } })
+      categoryStore.fetchCategories(props.type),
     ])
     records.value = recRes.data.data
     totalRecords.value = recRes.data.total
-    categories.value = catRes.data.map(c => c.name)
   } catch (err) {
     console.error('❌ 记录加载失败：', err)
   }
@@ -471,10 +477,12 @@ async function fetchData() {
 
 onMounted(fetchData)
 let debounceTimer = null
-watch(() => props.refreshFlag, () => {
+watch(refreshCounter, () => {
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     currentPage.value = 1
+    // 刷新信号发生时，强制从后端重新拉取分类，保证列表最新
+    categoryStore.invalidate(props.type)
     fetchData()
   }, 100)
 })

@@ -4,10 +4,37 @@ import logging
 DB_FILE = 'records.db'
 logger = logging.getLogger(__name__)
 
+
 def get_db():
+    """在 Flask 请求上下文中复用连接并自动关闭；Flask 外返回独立连接（调用方需自行关闭）"""
+    try:
+        from flask import g, has_app_context
+        if has_app_context():
+            if 'db' not in g:
+                g.db = sqlite3.connect(DB_FILE)
+                g.db.row_factory = sqlite3.Row
+            return g.db
+    except ImportError:
+        pass
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def close_db(e=None):
+    """Flask teardown 回调，自动关闭请求级连接"""
+    try:
+        from flask import g
+        db = g.pop('db', None)
+        if db is not None:
+            db.close()
+    except ImportError:
+        pass
+
+
+def init_app(app):
+    """注册 teardown 回调，在 app.py 中调用"""
+    app.teardown_appcontext(close_db)
 
 def column_exists(cur, table, column):
     """Check if a column exists in a SQLite table."""
@@ -176,7 +203,6 @@ def add_chat_message(user_id: int, role: str, content: str):
         (user_id, user_id),
     )
     db.commit()
-    db.close()
 
 
 def get_chat_history(user_id: int):
@@ -186,6 +212,5 @@ def get_chat_history(user_id: int):
         "SELECT role, content FROM chat_history WHERE user_id = ? ORDER BY id",
         (user_id,),
     ).fetchall()
-    db.close()
     return [dict(row) for row in rows]
 

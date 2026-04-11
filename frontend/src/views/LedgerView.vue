@@ -10,19 +10,15 @@
         <el-tab-pane label="支出记录" name="expense">
           <RecordTable
             :type="'expense'"
-            :refresh-flag="refreshFlag"
             title="支出记录"
             :show-budget="true"
-            @refresh="refreshFlag++"
           />
         </el-tab-pane>
         <el-tab-pane label="收入记录" name="income" lazy>
           <RecordTable
             :type="'income'"
-            :refresh-flag="refreshFlag"
             title="收入记录"
             :show-budget="false"
-            @refresh="refreshFlag++"
           />
         </el-tab-pane>
       </el-tabs>
@@ -31,39 +27,34 @@
     <!-- 预算 + 图表 -->
     <div class="ledger-layout">
       <div class="ledger-col-left">
-        <BudgetAndCategoryPanel
-          :refresh-flag="refreshFlag"
-          @refresh="refreshFlag++"
-        />
+        <BudgetAndCategoryPanel />
       </div>
       <div class="ledger-col-right">
-        <ChartPanel :refresh-flag="refreshFlag" />
+        <ChartPanel :refresh-flag="categoryStore.refreshCounter" />
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onActivated, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onActivated, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
+import { useUserStore } from '@/stores/user'
+import { useCategoryStore } from '@/stores/categories'
 
 const activeTab = ref('expense')
-const refreshFlag = ref(0)
 const router = useRouter()
+const userStore = useUserStore()
+const categoryStore = useCategoryStore()
 
-onActivated(() => { refreshFlag.value++ })
-
-function onRecordChanged() { refreshFlag.value++ }
+onActivated(() => { categoryStore.bumpRefresh() })
 
 onMounted(() => {
-  const name = localStorage.getItem('username')
-  if (!name) router.push('/login')
-  window.addEventListener('record_changed', onRecordChanged)
+  if (!userStore.username) router.push('/login')
 })
-onBeforeUnmount(() => window.removeEventListener('record_changed', onRecordChanged))
 </script>
 
 <style scoped>

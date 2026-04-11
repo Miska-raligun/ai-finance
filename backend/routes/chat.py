@@ -1,0 +1,224 @@
+"""对话相关路由：文本聊天、图片识别、记录确认"""
+import os
+import json
+import base64
+import asyncio
+import logging
+import threading
+from datetime import datetime
+from flask import Blueprint, request, jsonify, g
+from db import get_db, add_chat_message, get_chat_history
+from auth import login_required
+from tools import handlers, FINANCE_TOOLS
+from services.llm import call_llm_intent, call_llm_summary, call_llm_chat, llm_logger
+from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE
+
+logger = logging.getLogger(__name__)
+chat_bp = Blueprint('chat', __name__)
+
+
+# ── 图片识别 ────────────────────────────────────────────────────
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MIME_TO_EXT = {"image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+
+# 全局事件循环（避免每次请求创建新循环）
+_loop = asyncio.new_event_loop()
+_loop_thread = threading.Thread(target=_loop.run_forever, daemon=True)
+_loop_thread.start()
+
+
+async def _recognize_image_async(image_b64: str, mime_type: str) -> str:
+    """通过 MCP 协议调用 MiniMax understand_image 工具"""
+    from mcp.client.sse import sse_client
+    from mcp import ClientSession
+
+    mcp_port = os.getenv("MINIMAX_MCP_PORT", "5002")
+    mcp_url = f"http://localhost:{mcp_port}/sse"
+    ext = MIME_TO_EXT.get(mime_type, "jpeg")
+    data_url = f"data:image/{ext};base64,{image_b64}"
+
+    async with sse_client(mcp_url) as (read, write):
+        async with ClientSession(read, write) as sess:
+            await sess.initialize()
+            result = await sess.call_tool("understand_image", {
+                "prompt": "请识别这张图片中的消费或收入信息，包括金额、商品名称/服务、商家、日期等。如果是账单或小票，请逐条列出每一项的金额和名称。",
+                "image_source": data_url,
+            })
+            return result.content[0].text
+
+
+def recognize_image(image_b64: str, mime_type: str) -> str | None:
+    """同步包装：使用全局事件循环调用 MiniMax MCP"""
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            _recognize_image_async(image_b64, mime_type), _loop
+        )
+        return future.result(timeout=30)
+    except Exception as e:
+        logger.error("图片识别失败: %s", e)
+        return None
+
+
+# ── 工具调用处理（chat 和 chat_image 共用） ──────────────────────
+
+def _process_tool_calls(tool_calls: list, llm_cfg: dict) -> tuple[list[str], list[dict]]:
+    """处理 LLM 返回的工具调用，返回 (results, pending_records)"""
+    results = []
+    pending_records = []
+    for tc in tool_calls:
+        func_name = tc["function"]["name"]
+        params = json.loads(tc["function"]["arguments"])
+        if func_name in handlers:
+            if func_name in ("add_record", "add_income"):
+                rec_date = (params.get(PARAM_DATE) or "").strip() or datetime.now().strftime("%Y-%m-%d")
+                rec = {
+                    "type": "expense" if func_name == "add_record" else "income",
+                    "category": params.get(PARAM_CATEGORY, ""),
+                    "amount": float(params.get(PARAM_AMOUNT, 0)),
+                    "date": rec_date,
+                    "note": params.get(PARAM_NOTE, ""),
+                }
+                pending_records.append(rec)
+                rec_type = "支出" if func_name == "add_record" else "收入"
+                results.append(
+                    f"已识别到{rec_type}：分类「{rec['category']}」金额 ¥{rec['amount']}，"
+                    f"备注「{rec['note']}」，日期 {rec['date']}，等待用户确认。"
+                )
+            elif func_name == "suggest_budgets":
+                r = handlers[func_name](g.user_id, params, llm_cfg)
+                results.append(r)
+            else:
+                r = handlers[func_name](g.user_id, params)
+                results.append(r)
+    return results, pending_records
+
+
+@chat_bp.route("/api/chat", methods=["POST"])
+@login_required
+def chat():
+    data = request.get_json()
+    llm_cfg = data.get("llm") or {}
+    db = get_db()
+    row = db.execute(
+        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        (g.user_id,),
+    ).fetchone()
+    if row:
+        for k, v in dict(row).items():
+            llm_cfg.setdefault(k, v)
+
+    user_msg = data.get("message", "")
+    latest_msg = user_msg.strip().split("\n")[-1] if isinstance(user_msg, str) else user_msg
+
+    add_chat_message(g.user_id, "user", user_msg)
+    chat_history = get_chat_history(g.user_id)
+
+    response = call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS)
+
+    reply = None
+    pending_records = []
+    tool_calls = None
+    if response and "choices" in response:
+        msg_obj = response["choices"][0].get("message", {})
+        tool_calls = msg_obj.get("tool_calls")
+
+        if tool_calls:
+            results, pending_records = _process_tool_calls(tool_calls, llm_cfg)
+            if results:
+                llm_logger.info("Tools: %s", [tc['function']['name'] for tc in tool_calls])
+                reply = call_llm_summary(latest_msg, "\n".join(results), llm_cfg)
+        else:
+            reply = msg_obj.get("content")
+
+    if not reply:
+        reply = call_llm_chat(chat_history, llm_cfg)
+
+    add_chat_message(g.user_id, "assistant", reply)
+    return jsonify({"reply": reply, "pending_records": pending_records})
+
+
+@chat_bp.route("/api/chat/image", methods=["POST"])
+@login_required
+def chat_image():
+    """接收图片，调用 MiniMax 识别后走记账流程"""
+    if "image" not in request.files:
+        return jsonify({"success": False, "message": "未收到图片文件"}), 400
+
+    file = request.files["image"]
+    mime_type = file.content_type
+    if mime_type not in ALLOWED_IMAGE_TYPES:
+        return jsonify({"success": False, "message": f"不支持的图片格式：{mime_type}，仅支持 JPEG/PNG/WebP"}), 400
+
+    image_bytes = file.read()
+    if len(image_bytes) > MAX_IMAGE_SIZE:
+        return jsonify({"success": False, "message": "图片大小超过 10MB 限制"}), 400
+
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    del image_bytes
+
+    recognized_text = recognize_image(image_b64, mime_type)
+    del image_b64
+
+    if not recognized_text:
+        return jsonify({"reply": "图片识别失败，请重试或手动输入记账信息。", "pending_records": []})
+
+    db = get_db()
+    llm_cfg = {}
+    row = db.execute(
+        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        (g.user_id,),
+    ).fetchone()
+    if row:
+        for k, v in dict(row).items():
+            llm_cfg.setdefault(k, v)
+
+    user_msg = f"[图片识别结果] {recognized_text}"
+    add_chat_message(g.user_id, "user", "[用户上传了一张图片]")
+
+    response = call_llm_intent(user_msg, llm_cfg, FINANCE_TOOLS)
+
+    reply = None
+    pending_records = []
+    tool_calls = None
+    if response and "choices" in response:
+        msg_obj = response["choices"][0].get("message", {})
+        tool_calls = msg_obj.get("tool_calls")
+
+        if tool_calls:
+            results, pending_records = _process_tool_calls(tool_calls, llm_cfg)
+            if results:
+                llm_logger.info("[图片识别] Tools: %s", [tc['function']['name'] for tc in tool_calls])
+                reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
+        else:
+            reply = msg_obj.get("content")
+
+    if not reply:
+        chat_history = get_chat_history(g.user_id)
+        reply = call_llm_chat(chat_history, llm_cfg)
+
+    add_chat_message(g.user_id, "assistant", reply)
+    return jsonify({"reply": reply, "pending_records": pending_records})
+
+
+@chat_bp.route("/api/commit_record", methods=["POST"])
+@login_required
+def commit_record():
+    data = request.get_json()
+    rec_type = data.get("type")
+    params = {
+        PARAM_CATEGORY: data.get("category", "").strip(),
+        PARAM_AMOUNT: float(data.get("amount", 0)),
+        PARAM_NOTE: data.get("note", "").strip(),
+        PARAM_DATE: data.get("date", "").strip(),
+    }
+    if not params[PARAM_CATEGORY] or not params[PARAM_AMOUNT]:
+        return jsonify({"success": False, "message": "分类和金额不能为空"}), 400
+    if rec_type == "expense":
+        result = handlers["add_record"](g.user_id, params)
+    elif rec_type == "income":
+        result = handlers["add_income"](g.user_id, params)
+    else:
+        return jsonify({"success": False, "message": "未知类型"}), 400
+    success = result.startswith("✅")
+    return jsonify({"success": success, "message": result})

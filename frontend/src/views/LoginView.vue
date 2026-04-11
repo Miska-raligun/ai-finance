@@ -88,8 +88,10 @@
 import { ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const username = ref('')
 const password = ref('')
 const isRegister = ref(false)
@@ -151,9 +153,7 @@ async function onLogin() {
     })
     const data = await res.json()
     if (data.success) {
-      localStorage.setItem('username', username.value)
-      if (data.is_admin) localStorage.setItem('is_admin', '1')
-      else localStorage.removeItem('is_admin')
+      userStore.setIdentity({ username: username.value, isAdmin: data.is_admin })
       router.push('/chat')
     } else {
       ElMessage.error(data.error || '登录失败')

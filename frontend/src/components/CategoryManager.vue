@@ -22,47 +22,44 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-const emit = defineEmits(['refresh'])
-import api from '@/api'
+import { ref } from 'vue'
+import { useCategoryStore } from '@/stores/categories'
+
 const props = defineProps({
-  refreshFlag: Number,
   type: { type: String, default: 'expense' }
 })
 
-const categories = ref([])
+const categoryStore = useCategoryStore()
+// 分类列表从 store 派生，新增/删除后自动响应
+const categories = computed(() =>
+  props.type === 'expense' ? categoryStore.expense : categoryStore.income
+)
 const newCategory = ref('')
-
-async function fetchCategories() {
-  const res = await api.get('/api/categories', { params: { type: props.type } })
-  categories.value = res.data
-}
 
 async function addCategory() {
   if (!newCategory.value) return
-  await api.post('/api/categories', {
-    name: newCategory.value,
-    type: props.type === 'income' ? '收入' : '支出'
-  })
-  newCategory.value = ''
-  await fetchCategories()
-  emit('refresh')
+  try {
+    await categoryStore.addCategory(newCategory.value, props.type)
+    newCategory.value = ''
+  } catch (e) {
+    const msg = e.response?.data?.error || '添加失败，请稍后重试'
+    ElMessage.error(msg)
+  }
 }
 
 async function deleteCategory(name) {
   try {
-    await api.delete(`/api/categories/${encodeURIComponent(name)}`)
-    await fetchCategories()
-    emit('refresh')
+    await categoryStore.deleteCategory(name, props.type)
   } catch (e) {
     const msg = e.response?.data?.error || '删除失败，请稍后重试'
     ElMessage.error(msg)
   }
 }
 
-onMounted(fetchCategories)
-watch([() => props.refreshFlag, () => props.type], fetchCategories)
+onMounted(() => categoryStore.fetchCategories(props.type))
+watch(() => props.type, (t) => categoryStore.fetchCategories(t))
 </script>
 
 <style scoped>

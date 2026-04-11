@@ -138,9 +138,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onActivated, nextTick } from 'vue'
+import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import { useCategoryStore } from '@/stores/categories'
+
+const userStore = useUserStore()
+const categoryStore = useCategoryStore()
 
 const quickActions = [
   { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
@@ -158,7 +163,7 @@ const messages = ref([{ sender: 'assistant', content: '你好！我是你的智�
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
-const currentUser = ref(localStorage.getItem('username') || '')
+const currentUser = computed(() => userStore.username)
 
 async function sendMessage() {
   const msg = userInput.value.trim()
@@ -169,11 +174,7 @@ async function sendMessage() {
   await scrollToBottom()
 
   try {
-    const cfgRaw = localStorage.getItem('llmConfig')
-    let llm = null
-    if (cfgRaw && cfgRaw !== 'default') {
-      try { llm = JSON.parse(cfgRaw) } catch {}
-    }
+    const llm = userStore.llmPayload
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -259,7 +260,7 @@ async function confirmRecord(rec) {
     const data = await res.json()
     if (data.success) {
       rec._state = 'confirmed'
-      window.dispatchEvent(new CustomEvent('record_changed'))
+      categoryStore.bumpRefresh()
     } else {
       ElMessage.error(data.message || '记录失败')
     }
@@ -274,16 +275,15 @@ function scrollToBottom() {
   })
 }
 
+let lastUser = userStore.username
 onMounted(() => {
-  const name = localStorage.getItem('username')
-  if (!name) router.push('/login')
+  if (!userStore.username) router.push('/login')
   else scrollToBottom()
 })
 
 onActivated(() => {
-  const name = localStorage.getItem('username') || ''
-  if (name !== currentUser.value) {
-    currentUser.value = name
+  if (userStore.username !== lastUser) {
+    lastUser = userStore.username
     messages.value = [{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，我会帮你自动记录。' }]
   }
 })

@@ -113,19 +113,23 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { ref, watchEffect, onMounted, watch, onBeforeUnmount } from 'vue'
-import api from '@/api'
+import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const { isAdmin } = storeToRefs(userStore)
+
+const username = computed(() => userStore.username)
+
 const active = ref(route.path)
 const showConfig = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
 const llmPersona = ref('')
-const username = ref('')
-const isAdmin = ref(false)
 const isMobile = ref(window.innerWidth < 768)
 const showDrawer = ref(false)
 
@@ -140,28 +144,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateIsMobile))
 
 watchEffect(() => { active.value = route.path })
 
-function updateUsername() {
-  api.get('/api/me')
-    .then(res => {
-      username.value = res.data.username || ''
-      isAdmin.value = !!res.data.is_admin
-      if (res.data.username) localStorage.setItem('username', res.data.username)
-      else localStorage.removeItem('username')
-      if (res.data.is_admin) localStorage.setItem('is_admin', '1')
-      else localStorage.removeItem('is_admin')
-    })
-    .catch(() => {
-      username.value = ''
-      isAdmin.value = false
-      localStorage.removeItem('username')
-      localStorage.removeItem('is_admin')
-    })
-}
-onMounted(updateUsername)
-watch(() => route.path, updateUsername)
+onMounted(() => userStore.fetchMe())
+watch(() => route.path, () => userStore.fetchMe())
 
 function checkConfig() {
-  if (route.path !== '/login' && !localStorage.getItem('llmConfig')) {
+  if (route.path !== '/login' && userStore.needLlmConfig()) {
     showConfig.value = true
   }
 }
@@ -169,26 +156,20 @@ onMounted(checkConfig)
 watch(() => route.path, checkConfig)
 
 async function saveConfig() {
-  await fetch('/api/llm_config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ url: llmUrl.value, apikey: llmKey.value, model: llmModel.value, persona: llmPersona.value })
+  await userStore.saveLlmConfig({
+    url: llmUrl.value,
+    apikey: llmKey.value,
+    model: llmModel.value,
+    persona: llmPersona.value,
   })
-  localStorage.setItem('llmConfig', JSON.stringify({ url: llmUrl.value, apikey: llmKey.value, model: llmModel.value, persona: llmPersona.value }))
   showConfig.value = false
 }
 async function useDefault() {
-  await fetch('/api/llm_config', { method: 'DELETE', credentials: 'include' })
-  localStorage.setItem('llmConfig', 'default')
+  await userStore.useDefaultLlm()
   showConfig.value = false
 }
 async function logout() {
-  try {
-    await fetch('/api/logout', { method: 'POST', credentials: 'include' })
-  } catch { /* 网络错误也正常退出 */ }
-  localStorage.removeItem('username')
-  localStorage.removeItem('is_admin')
+  await userStore.logout()
   router.push('/login')
 }
 function openConfigPanel() {

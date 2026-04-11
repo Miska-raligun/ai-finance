@@ -63,27 +63,31 @@
     <!-- 分类管理 -->
     <el-tabs v-model="activeTab">
       <el-tab-pane label="支出分类" name="支出">
-        <CategoryManager type="expense" :refresh-flag="props.refreshFlag" @refresh="onCategoryChange" />
+        <CategoryManager type="expense" />
       </el-tab-pane>
       <el-tab-pane label="收入分类" name="收入">
-        <CategoryManager type="income" :refresh-flag="props.refreshFlag" @refresh="onCategoryChange" />
+        <CategoryManager type="income" />
       </el-tab-pane>
     </el-tabs>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
-const emit = defineEmits(['refresh'])
-const props = defineProps({ refreshFlag: Number })
+import { storeToRefs } from 'pinia'
 import api from '@/api'
 import CategoryManager from './CategoryManager.vue'
+import { useCategoryStore } from '@/stores/categories'
+
+const categoryStore = useCategoryStore()
+const { refreshCounter } = storeToRefs(categoryStore)
+// 支出分类从 store 派生，CategoryManager 更新后自动响应
+const expenseCategories = computed(() => categoryStore.expenseNames)
 
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
 const budgets = ref([])
-const expenseCategories = ref([])
 const activeTab = ref('支出')
 const budgetForm = ref({ category: '', amount: 0 })
 const selectedBudgets = ref([])
@@ -91,12 +95,12 @@ const selectedBudgets = ref([])
 async function fetchBudgets() {
   budgets.value = []
   const month = selectedMonth.value
-  const [bRes, cRes] = await Promise.all([
+  // 分类列表从 store 取（缓存），预算仍需独立请求
+  const [bRes] = await Promise.all([
     api.get('/api/budgets', { params: { month } }),
-    api.get('/api/categories', { params: { type: 'expense' } })
+    categoryStore.fetchCategories('expense'),
   ])
   budgets.value = bRes.data
-  expenseCategories.value = cRes.data.map(c => c.name)
 }
 
 async function submitBudget() {
@@ -106,7 +110,7 @@ async function submitBudget() {
     month: selectedMonth.value
   })
   await fetchBudgets()
-  emit('refresh')
+  categoryStore.bumpRefresh()
 }
 
 async function deleteBulk() {
@@ -127,7 +131,7 @@ async function deleteBulk() {
   )
   selectedBudgets.value = []
   await fetchBudgets()
-  emit('refresh')
+  categoryStore.bumpRefresh()
 }
 
 async function deleteBudget(category) {
@@ -140,16 +144,11 @@ async function deleteBudget(category) {
   }
   await api.delete('/api/budgets', { data: { category, month: selectedMonth.value } })
   await fetchBudgets()
-  emit('refresh')
-}
-
-function onCategoryChange() {
-  fetchBudgets()
-  emit('refresh')
+  categoryStore.bumpRefresh()
 }
 
 onMounted(fetchBudgets)
-watch(() => props.refreshFlag, fetchBudgets)
+watch(refreshCounter, fetchBudgets)
 </script>
 
 <style scoped>
