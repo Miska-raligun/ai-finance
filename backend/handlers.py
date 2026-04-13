@@ -56,7 +56,35 @@ def add_record(user_id: int, params: dict[str, Any]) -> str:
     )
     db.commit()
 
-    return f"✅ 成功记录一笔消费：你在「{category}」方面支出了 ¥{amount}，备注为「{note}」，日期为 {date}。"
+    msg = f"✅ 成功记录一笔消费：你在「{category}」方面支出了 ¥{amount}，备注为「{note}」，日期为 {date}。"
+
+    # 预算预警：查询该分类本月预算
+    month = date[:7]  # "YYYY-MM"
+    budget_row = db.execute(
+        "SELECT amount FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
+        (user_id, category, month),
+    ).fetchone()
+    if budget_row:
+        budget_amount = float(budget_row["amount"])
+        spent_total = float(db.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM records "
+            "WHERE user_id = ? AND category = ? AND strftime('%Y-%m', date) = ?",
+            (user_id, category, month),
+        ).fetchone()[0])
+        remaining = budget_amount - spent_total
+        pct = spent_total / budget_amount * 100 if budget_amount > 0 else 0
+        if remaining < 0:
+            msg += (
+                f"\n⚠️ 注意：「{category}」本月已超预算！"
+                f"预算 ¥{budget_amount}，已花 ¥{spent_total:.2f}，超支 ¥{abs(remaining):.2f}。"
+            )
+        elif pct >= 80:
+            msg += (
+                f"\n⚠️ 提醒：「{category}」本月预算已用 {pct:.0f}%，"
+                f"剩余 ¥{remaining:.2f}，请注意控制支出。"
+            )
+
+    return msg
 
 
 def add_income(user_id: int, params: dict[str, Any]) -> str:
@@ -248,6 +276,33 @@ def analyze_spend(user_id: int, params: dict[str, Any]) -> str:
             reply += f"📈 来源「{cat}」累计收入 ¥{total:.2f}\n"
     else:
         reply += "暂无历史收入数据。\n"
+
+    # ── 环比上月对比 ──
+    year, mon = int(month[:4]), int(month[5:7])
+    prev_month = f"{year - 1}-12" if mon == 1 else f"{year}-{mon - 1:02d}"
+
+    prev_spend = float(db.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM records WHERE strftime('%Y-%m', date) = ? AND user_id = ?",
+        (prev_month, user_id),
+    ).fetchone()[0])
+    prev_income = float(db.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM income WHERE strftime('%Y-%m', date) = ? AND user_id = ?",
+        (prev_month, user_id),
+    ).fetchone()[0])
+
+    cur_spend = sum(r["monthly_total"] for r in spend_rows)
+    cur_income = sum(r["monthly_total"] for r in income_rows)
+
+    def _arrow(cur: float, prev: float) -> str:
+        if prev == 0:
+            return "（上月无数据）"
+        pct = (cur - prev) / prev * 100
+        arrow = "↑" if pct > 0 else "↓"
+        return f"{arrow} {abs(pct):.1f}%（上月 ¥{prev:.2f}）"
+
+    reply += f"\n📊 **环比上月（{prev_month}）**\n"
+    reply += f"  支出：¥{cur_spend:.2f} {_arrow(cur_spend, prev_spend)}\n"
+    reply += f"  收入：¥{cur_income:.2f} {_arrow(cur_income, prev_income)}\n"
 
     reply += "\n📌 建议：保持合理收支平衡，做好财务规划 👍"
     return reply

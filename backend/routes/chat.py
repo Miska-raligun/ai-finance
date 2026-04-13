@@ -201,6 +201,14 @@ def chat_image():
     return jsonify({"reply": reply, "pending_records": pending_records})
 
 
+@chat_bp.route("/api/chat/history", methods=["GET"])
+@login_required
+def chat_history_api():
+    """获取用户聊天记录"""
+    history = get_chat_history(g.user_id)
+    return jsonify(history)
+
+
 @chat_bp.route("/api/commit_record", methods=["POST"])
 @login_required
 def commit_record():
@@ -221,4 +229,38 @@ def commit_record():
     else:
         return jsonify({"success": False, "message": "未知类型"}), 400
     success = result.startswith("✅")
-    return jsonify({"success": success, "message": result})
+
+    # 预算预警：支出类型且成功时查询该分类本月预算状态
+    budget_warning = None
+    if success and rec_type == "expense":
+        month = (data.get("date") or "")[:7]
+        category = data.get("category", "").strip()
+        if month and category:
+            db = get_db()
+            budget_row = db.execute(
+                "SELECT amount FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
+                (g.user_id, category, month),
+            ).fetchone()
+            if budget_row:
+                budget_amt = float(budget_row["amount"])
+                spent = float(db.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM records "
+                    "WHERE user_id = ? AND category = ? AND strftime('%Y-%m', date) = ?",
+                    (g.user_id, category, month),
+                ).fetchone()[0])
+                remaining = budget_amt - spent
+                pct = spent / budget_amt * 100 if budget_amt > 0 else 0
+                if remaining < 0:
+                    budget_warning = {
+                        "level": "over", "category": category,
+                        "budget": budget_amt, "spent": round(spent, 2),
+                        "remaining": round(remaining, 2),
+                    }
+                elif pct >= 80:
+                    budget_warning = {
+                        "level": "warn", "category": category,
+                        "budget": budget_amt, "spent": round(spent, 2),
+                        "remaining": round(remaining, 2),
+                    }
+
+    return jsonify({"success": success, "message": result, "budget_warning": budget_warning})

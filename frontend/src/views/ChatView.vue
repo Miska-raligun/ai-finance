@@ -143,9 +143,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
+import { useChatStore } from '@/stores/chat'
 
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
+const chatStore = useChatStore()
 
 const quickActions = [
   { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
@@ -159,7 +161,8 @@ function sendQuick(text) {
 
 const userInput = ref('')
 const imageInput = ref(null)
-const messages = ref([{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，也可以点击图片按钮上传账单/小票自动识别记账。' }])
+const welcomeMsg = { sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，也可以点击图片按钮上传账单/小票自动识别记账。' }
+const messages = computed(() => chatStore.messages)
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
@@ -168,7 +171,7 @@ const currentUser = computed(() => userStore.username)
 async function sendMessage() {
   const msg = userInput.value.trim()
   if (!msg) return
-  messages.value.push({ sender: 'user', content: msg })
+  chatStore.pushMessage({ sender: 'user', content: msg })
   userInput.value = ''
   loading.value = true
   await scrollToBottom()
@@ -190,9 +193,9 @@ async function sendMessage() {
         _edit: { ...rec }
       }))
     }
-    messages.value.push(assistantMsg)
+    chatStore.pushMessage(assistantMsg)
   } catch {
-    messages.value.push({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
+    chatStore.pushMessage({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
   } finally {
     loading.value = false
     await scrollToBottom()
@@ -213,7 +216,7 @@ function handleImageSelect(e) {
 
 async function sendImage(file) {
   const previewUrl = URL.createObjectURL(file)
-  messages.value.push({ sender: 'user', content: '', image: previewUrl })
+  chatStore.pushMessage({ sender: 'user', content: '', image: previewUrl })
   loading.value = true
   await scrollToBottom()
 
@@ -234,9 +237,9 @@ async function sendImage(file) {
         _edit: { ...rec }
       }))
     }
-    messages.value.push(assistantMsg)
+    chatStore.pushMessage(assistantMsg)
   } catch {
-    messages.value.push({ sender: 'assistant', content: '❌ 图片识别失败，请重试或手动输入。' })
+    chatStore.pushMessage({ sender: 'assistant', content: '❌ 图片识别失败，请重试或手动输入。' })
   } finally {
     loading.value = false
     await scrollToBottom()
@@ -261,6 +264,15 @@ async function confirmRecord(rec) {
     if (data.success) {
       rec._state = 'confirmed'
       categoryStore.bumpRefresh()
+      // 预算预警提示
+      if (data.budget_warning) {
+        const w = data.budget_warning
+        const warnMsg = w.level === 'over'
+          ? `⚠️ 「${w.category}」本月已超预算！预算 ¥${w.budget}，已花 ¥${w.spent.toFixed(2)}，超支 ¥${Math.abs(w.remaining).toFixed(2)}`
+          : `⚠️ 「${w.category}」本月预算已用 ${(w.spent / w.budget * 100).toFixed(0)}%，剩余 ¥${w.remaining.toFixed(2)}`
+        chatStore.pushMessage({ sender: 'assistant', content: warnMsg })
+        await scrollToBottom()
+      }
     } else {
       ElMessage.error(data.message || '记录失败')
     }
@@ -276,15 +288,20 @@ function scrollToBottom() {
 }
 
 let lastUser = userStore.username
-onMounted(() => {
-  if (!userStore.username) router.push('/login')
-  else scrollToBottom()
+onMounted(async () => {
+  if (!userStore.username) { router.push('/login'); return }
+  await chatStore.loadHistory()
+  if (chatStore.messages.length === 0) {
+    chatStore.pushMessage(welcomeMsg)
+  }
+  await scrollToBottom()
 })
 
 onActivated(() => {
   if (userStore.username !== lastUser) {
     lastUser = userStore.username
-    messages.value = [{ sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，我会帮你自动记录。' }]
+    chatStore.reset()
+    chatStore.pushMessage(welcomeMsg)
   }
 })
 </script>

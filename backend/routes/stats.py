@@ -8,6 +8,73 @@ from constants import CATEGORY_EXPENSE, CATEGORY_INCOME
 stats_bp = Blueprint('stats', __name__)
 
 
+@stats_bp.route("/api/stats/comparison", methods=["GET"])
+@login_required
+def comparison_stats():
+    """本月 vs 上月环比对比"""
+    db = get_db()
+    month = request.args.get("month") or datetime.now().strftime("%Y-%m")
+    year, mon = int(month[:4]), int(month[5:7])
+    prev_month = f"{year - 1}-12" if mon == 1 else f"{year}-{mon - 1:02d}"
+
+    def _month_totals(m):
+        expense = float(db.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM records WHERE strftime('%Y-%m', date) = ? AND user_id = ?",
+            (m, g.user_id),
+        ).fetchone()[0])
+        income = float(db.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM income WHERE strftime('%Y-%m', date) = ? AND user_id = ?",
+            (m, g.user_id),
+        ).fetchone()[0])
+        return {"expense": expense, "income": income, "balance": income - expense}
+
+    def _category_breakdown(m):
+        rows = db.execute(
+            "SELECT category, SUM(amount) as total FROM records "
+            "WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
+            (m, g.user_id),
+        ).fetchall()
+        return {r["category"]: float(r["total"]) for r in rows}
+
+    current = _month_totals(month)
+    previous = _month_totals(prev_month)
+
+    cur_cats = _category_breakdown(month)
+    prev_cats = _category_breakdown(prev_month)
+    all_cats = sorted(set(cur_cats) | set(prev_cats))
+
+    categories = []
+    for cat in all_cats:
+        cur_val = cur_cats.get(cat, 0)
+        prev_val = prev_cats.get(cat, 0)
+        change = cur_val - prev_val
+        pct = (change / prev_val * 100) if prev_val > 0 else (100 if cur_val > 0 else 0)
+        categories.append({
+            "category": cat,
+            "current": round(cur_val, 2),
+            "previous": round(prev_val, 2),
+            "change": round(change, 2),
+            "change_pct": round(pct, 1),
+        })
+
+    def _calc_change(cur, prev):
+        change = cur - prev
+        pct = (change / prev * 100) if prev > 0 else (100 if cur > 0 else 0)
+        return {
+            "current": round(cur, 2), "previous": round(prev, 2),
+            "change": round(change, 2), "change_pct": round(pct, 1),
+        }
+
+    return jsonify({
+        "month": month,
+        "prev_month": prev_month,
+        "expense": _calc_change(current["expense"], previous["expense"]),
+        "income": _calc_change(current["income"], previous["income"]),
+        "balance": _calc_change(current["balance"], previous["balance"]),
+        "categories": categories,
+    })
+
+
 @stats_bp.route("/api/stats/monthly", methods=["GET"])
 @login_required
 def monthly_stats():

@@ -24,10 +24,16 @@
       <div class="stat-item income">
         <span class="stat-label">收入</span>
         <span class="stat-value">¥{{ fmtNum(totalIncome) }}</span>
+        <span v-if="incomeChangePct !== null" :class="['stat-delta', incomeChangePct >= 0 ? 'delta-up' : 'delta-down']">
+          {{ incomeChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(incomeChangePct).toFixed(1) }}%
+        </span>
       </div>
       <div class="stat-item expense">
         <span class="stat-label">支出</span>
         <span class="stat-value">¥{{ fmtNum(totalExpense) }}</span>
+        <span v-if="expenseChangePct !== null" :class="['stat-delta', expenseChangePct >= 0 ? 'delta-up' : 'delta-down']">
+          {{ expenseChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(expenseChangePct).toFixed(1) }}%
+        </span>
       </div>
       <div class="stat-item" :class="totalBalance >= 0 ? 'balance-pos' : 'balance-neg'">
         <span class="stat-label">结余</span>
@@ -73,6 +79,8 @@ const lineOption = ref({})
 const totalIncome = ref(0)
 const totalExpense = ref(0)
 const totalBalance = computed(() => totalIncome.value - totalExpense.value)
+const incomeChangePct = ref(null)
+const expenseChangePct = ref(null)
 const fmtNum = v => Math.abs(v).toFixed(2)
 
 const PRIMARY = '#4F46E5'
@@ -89,19 +97,32 @@ const fetchChartData = async () => {
   if (!selectedTime.value && mode.value === 'month') return
   totalIncome.value = 0
   totalExpense.value = 0
+  incomeChangePct.value = null
+  expenseChangePct.value = null
   const time = selectedTime.value
   const catParams = {}
   if (mode.value === 'month' && time) catParams.month = time
   else if (mode.value === 'year' && time) catParams.year = time
 
-  const [cats, trend] = await Promise.all([
+  const requests = [
     api.get('/api/stats/by-category', { params: catParams }),
     mode.value === 'month'
       ? api.get('/api/stats/daily', { params: { month: time } })
       : (time
           ? api.get('/api/stats/monthly', { params: { year: time } })
           : api.get('/api/stats/yearly'))
-  ])
+  ]
+  // 月度模式时同时拉取环比对比数据
+  if (mode.value === 'month' && time) {
+    requests.push(api.get('/api/stats/comparison', { params: { month: time } }))
+  }
+  const results = await Promise.all(requests)
+  const [cats, trend] = results
+  if (results[2] && results[2].data) {
+    const comp = results[2].data
+    incomeChangePct.value = comp.income.change_pct
+    expenseChangePct.value = comp.expense.change_pct
+  }
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')
   const spendCats = cats.data.filter(x => x['类型'] === '支出')
@@ -234,6 +255,16 @@ watch(mode, () => {
 .expense .stat-value { color: #DC2626; }
 .balance-pos .stat-value { color: #2563EB; }
 .balance-neg .stat-value { color: #EA580C; }
+
+.stat-delta {
+  font-size: 11px;
+  font-weight: 600;
+}
+.delta-up { color: #22c55e; }
+.delta-down { color: #ef4444; }
+/* 支出项语义反转：支出减少是好事 */
+.stat-item.expense .delta-up { color: #ef4444; }
+.stat-item.expense .delta-down { color: #22c55e; }
 
 .toolbar {
   display: flex;

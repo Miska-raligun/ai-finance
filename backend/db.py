@@ -187,7 +187,7 @@ def init_db():
 
 
 def add_chat_message(user_id: int, role: str, content: str):
-    """Insert a chat message and keep only the latest 10 records for the user."""
+    """Insert a chat message and keep only the latest 50 records for the user."""
     db = get_db()
     db.execute(
         "INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)",
@@ -197,7 +197,7 @@ def add_chat_message(user_id: int, role: str, content: str):
         """
         DELETE FROM chat_history
         WHERE user_id = ? AND id NOT IN (
-            SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 10
+            SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 50
         )
         """,
         (user_id, user_id),
