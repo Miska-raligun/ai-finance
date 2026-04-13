@@ -10,6 +10,8 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 from fastmcp import FastMCP
 from db import get_db
+import handlers
+from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE
 
 logger = logging.getLogger(__name__)
 
@@ -24,26 +26,22 @@ def uid() -> int:
 @mcp.tool()
 def add_record(category: str, amount: float, note: str = "", date: str = "") -> str:
     """记录一笔支出。category:分类, amount:金额, note:备注, date:YYYY-MM-DD(默认今天)"""
-    if not date: date = datetime.now().strftime("%Y-%m-%d")
-    db = get_db()
-    row = db.execute("SELECT type FROM categories WHERE name=? AND user_id=?", (category, uid())).fetchone()
-    if row and row["type"] == "收入": return f"⚠️ 「{category}」是收入来源，请更换分类名。"
-    if not row: db.execute("INSERT INTO categories (user_id,name,type) VALUES (?,?,?)", (uid(), category, "支出"))
-    db.execute("INSERT INTO records (user_id,category,amount,note,date) VALUES (?,?,?,?,?)", (uid(), category, amount, note, date))
-    db.commit()
-    return f"✅ 支出记录：{category} ¥{amount}，备注「{note}」，日期 {date}"
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    return handlers.add_record(uid(), {
+        PARAM_CATEGORY: category, PARAM_AMOUNT: amount,
+        PARAM_NOTE: note, PARAM_DATE: date,
+    })
 
 @mcp.tool()
 def add_income(category: str, amount: float, note: str = "", date: str = "") -> str:
     """记录一笔收入。category:来源, amount:金额, note:备注, date:YYYY-MM-DD(默认今天)"""
-    if not date: date = datetime.now().strftime("%Y-%m-%d")
-    db = get_db()
-    row = db.execute("SELECT type FROM categories WHERE name=? AND user_id=?", (category, uid())).fetchone()
-    if row and row["type"] == "支出": return f"⚠️ 「{category}」已是支出分类，请更换名称。"
-    if not row: db.execute("INSERT INTO categories (user_id,name,type) VALUES (?,?,?)", (uid(), category, "收入"))
-    db.execute("INSERT INTO income (user_id,category,amount,note,date) VALUES (?,?,?,?,?)", (uid(), category, amount, note, date))
-    db.commit()
-    return f"✅ 收入记录：{category} ¥{amount}，备注「{note}」，日期 {date}"
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    return handlers.add_income(uid(), {
+        PARAM_CATEGORY: category, PARAM_AMOUNT: amount,
+        PARAM_NOTE: note, PARAM_DATE: date,
+    })
 
 @mcp.tool()
 def category_sum(category: str = "", month: str = "", start_date: str = "", end_date: str = "") -> str:

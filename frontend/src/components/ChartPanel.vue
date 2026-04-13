@@ -38,6 +38,9 @@
       <div class="stat-item" :class="totalBalance >= 0 ? 'balance-pos' : 'balance-neg'">
         <span class="stat-label">结余</span>
         <span class="stat-value">{{ totalBalance >= 0 ? '+' : '-' }}¥{{ fmtNum(totalBalance) }}</span>
+        <span v-if="balanceChangePct !== null" :class="['stat-delta', balanceChangePct >= 0 ? 'delta-up' : 'delta-down']">
+          {{ balanceChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(balanceChangePct).toFixed(1) }}%
+        </span>
       </div>
     </div>
 
@@ -81,6 +84,7 @@ const totalExpense = ref(0)
 const totalBalance = computed(() => totalIncome.value - totalExpense.value)
 const incomeChangePct = ref(null)
 const expenseChangePct = ref(null)
+const balanceChangePct = ref(null)
 const fmtNum = v => Math.abs(v).toFixed(2)
 
 const PRIMARY = '#4F46E5'
@@ -99,6 +103,7 @@ const fetchChartData = async () => {
   totalExpense.value = 0
   incomeChangePct.value = null
   expenseChangePct.value = null
+  balanceChangePct.value = null
   const time = selectedTime.value
   const catParams = {}
   if (mode.value === 'month' && time) catParams.month = time
@@ -122,6 +127,7 @@ const fetchChartData = async () => {
     const comp = results[2].data
     incomeChangePct.value = comp.income.change_pct
     expenseChangePct.value = comp.expense.change_pct
+    balanceChangePct.value = comp.balance.change_pct
   }
 
   const incomeCats = cats.data.filter(x => x['类型'] === '收入')

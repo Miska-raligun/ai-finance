@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { ref, onActivated, onMounted } from 'vue'
+import { ref, onActivated, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
@@ -52,8 +52,19 @@ const categoryStore = useCategoryStore()
 
 onActivated(() => { categoryStore.bumpRefresh() })
 
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    categoryStore.bumpRefresh()
+  }
+}
+
 onMounted(() => {
   if (!userStore.username) router.push('/login')
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 

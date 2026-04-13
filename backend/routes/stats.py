@@ -11,51 +11,34 @@ stats_bp = Blueprint('stats', __name__)
 @stats_bp.route("/api/stats/comparison", methods=["GET"])
 @login_required
 def comparison_stats():
-    """本月 vs 上月环比对比"""
+    """本月 vs 上月环比对比（优化：2 条 SQL）"""
     db = get_db()
     month = request.args.get("month") or datetime.now().strftime("%Y-%m")
     year, mon = int(month[:4]), int(month[5:7])
     prev_month = f"{year - 1}-12" if mon == 1 else f"{year}-{mon - 1:02d}"
 
-    def _month_totals(m):
-        expense = float(db.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM records WHERE strftime('%Y-%m', date) = ? AND user_id = ?",
-            (m, g.user_id),
-        ).fetchone()[0])
-        income = float(db.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM income WHERE strftime('%Y-%m', date) = ? AND user_id = ?",
-            (m, g.user_id),
-        ).fetchone()[0])
-        return {"expense": expense, "income": income, "balance": income - expense}
+    # 一条 SQL 同时获取本月和上月支出
+    expense_row = db.execute(
+        """SELECT
+             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
+             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
+           FROM records WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
+        (month, prev_month, g.user_id, month, prev_month),
+    ).fetchone()
 
-    def _category_breakdown(m):
-        rows = db.execute(
-            "SELECT category, SUM(amount) as total FROM records "
-            "WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
-            (m, g.user_id),
-        ).fetchall()
-        return {r["category"]: float(r["total"]) for r in rows}
+    # 一条 SQL 同时获取本月和上月收入
+    income_row = db.execute(
+        """SELECT
+             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
+             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
+           FROM income WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
+        (month, prev_month, g.user_id, month, prev_month),
+    ).fetchone()
 
-    current = _month_totals(month)
-    previous = _month_totals(prev_month)
-
-    cur_cats = _category_breakdown(month)
-    prev_cats = _category_breakdown(prev_month)
-    all_cats = sorted(set(cur_cats) | set(prev_cats))
-
-    categories = []
-    for cat in all_cats:
-        cur_val = cur_cats.get(cat, 0)
-        prev_val = prev_cats.get(cat, 0)
-        change = cur_val - prev_val
-        pct = (change / prev_val * 100) if prev_val > 0 else (100 if cur_val > 0 else 0)
-        categories.append({
-            "category": cat,
-            "current": round(cur_val, 2),
-            "previous": round(prev_val, 2),
-            "change": round(change, 2),
-            "change_pct": round(pct, 1),
-        })
+    cur_expense, prev_expense = float(expense_row["cur"]), float(expense_row["prev"])
+    cur_income, prev_income = float(income_row["cur"]), float(income_row["prev"])
+    cur_balance = cur_income - cur_expense
+    prev_balance = prev_income - prev_expense
 
     def _calc_change(cur, prev):
         change = cur - prev
@@ -68,10 +51,9 @@ def comparison_stats():
     return jsonify({
         "month": month,
         "prev_month": prev_month,
-        "expense": _calc_change(current["expense"], previous["expense"]),
-        "income": _calc_change(current["income"], previous["income"]),
-        "balance": _calc_change(current["balance"], previous["balance"]),
-        "categories": categories,
+        "expense": _calc_change(cur_expense, prev_expense),
+        "income": _calc_change(cur_income, prev_income),
+        "balance": _calc_change(cur_balance, prev_balance),
     })
 
 
