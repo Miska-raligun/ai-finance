@@ -1,6 +1,6 @@
 """支出记录路由"""
 from flask import Blueprint, request, jsonify, g
-from db import get_db
+from db import get_db, cleanup_empty_category
 from auth import login_required
 
 records_bp = Blueprint('records', __name__)
@@ -93,11 +93,17 @@ def get_records():
 @login_required
 def delete_record(record_id):
     db = get_db()
+    row = db.execute(
+        "SELECT category FROM records WHERE id = ? AND user_id = ?",
+        (record_id, g.user_id),
+    ).fetchone()
     db.execute(
         "DELETE FROM records WHERE id = ? AND user_id = ?",
         (record_id, g.user_id)
     )
     db.commit()
+    if row:
+        cleanup_empty_category(g.user_id, row["category"])
     return jsonify({"success": True})
 
 
@@ -110,9 +116,15 @@ def update_record(record_id):
     note = data.get('note', '').strip()
     date = data.get('date')
     db = get_db()
+    old_row = db.execute(
+        "SELECT category FROM records WHERE id = ? AND user_id = ?",
+        (record_id, g.user_id),
+    ).fetchone()
     db.execute(
         "UPDATE records SET category = ?, amount = ?, note = ?, date = ? WHERE id = ? AND user_id = ?",
         (category, amount, note, date, record_id, g.user_id),
     )
     db.commit()
+    if old_row and old_row["category"] != category:
+        cleanup_empty_category(g.user_id, old_row["category"])
     return jsonify({"success": True})

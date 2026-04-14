@@ -1,6 +1,6 @@
 from flask import Flask
 from flask_cors import CORS
-from db import init_db, init_app
+from db import init_db, init_app, cleanup_all_empty_categories
 from dotenv import load_dotenv
 import os, secrets, logging
 from datetime import timedelta
@@ -13,6 +13,7 @@ logging.basicConfig(
 )
 
 init_db()
+cleanup_all_empty_categories()
 load_dotenv()
 
 app = Flask(__name__)

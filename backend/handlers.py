@@ -15,7 +15,7 @@ from constants import (
     PARAM_MONTH,
     PARAM_NOTE,
 )
-from db import get_db
+from db import get_db, cleanup_empty_category
 
 logger = logging.getLogger(__name__)
 llm_logger = logging.getLogger("llm_budget_suggest")
@@ -576,9 +576,11 @@ def delete_record(user_id: int, params: dict[str, Any]) -> str:
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{record_id} 的支出记录（或不属于当前用户）。"
+    category = row['category']
     db.execute("DELETE FROM records WHERE id=? AND user_id=?", (int(record_id), user_id))
     db.commit()
-    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+    cleanup_empty_category(user_id, category)
+    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 
 def delete_income(user_id: int, params: dict[str, Any]) -> str:
@@ -593,9 +595,11 @@ def delete_income(user_id: int, params: dict[str, Any]) -> str:
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{income_id} 的收入记录（或不属于当前用户）。"
+    category = row['category']
     db.execute("DELETE FROM income WHERE id=? AND user_id=?", (int(income_id), user_id))
     db.commit()
-    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+    cleanup_empty_category(user_id, category)
+    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 
 def query_income(user_id: int, params: dict[str, Any]) -> str:

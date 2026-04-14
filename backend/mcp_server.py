@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 from fastmcp import FastMCP
-from db import get_db
+from db import get_db, cleanup_empty_category
 import handlers
 from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE
 
@@ -134,9 +134,11 @@ def delete_record(record_id: int) -> str:
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{record_id} 的支出记录。"
+    category = row['category']
     db.execute("DELETE FROM records WHERE id=? AND user_id=?", (record_id, uid()))
     db.commit()
-    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+    cleanup_empty_category(uid(), category)
+    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
 def delete_income(income_id: int) -> str:
@@ -148,9 +150,11 @@ def delete_income(income_id: int) -> str:
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{income_id} 的收入记录。"
+    category = row['category']
     db.execute("DELETE FROM income WHERE id=? AND user_id=?", (income_id, uid()))
     db.commit()
-    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
+    cleanup_empty_category(uid(), category)
+    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
 def set_budget(category: str, amount: float, month: str = "") -> str:

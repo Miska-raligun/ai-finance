@@ -214,3 +214,47 @@ def get_chat_history(user_id: int):
     ).fetchall()
     return [dict(row) for row in rows]
 
+
+def cleanup_empty_category(user_id: int, category: str):
+    """删除指定用户下没有任何记录的分类（及关联预算）。"""
+    db = get_db()
+    has_records = db.execute(
+        "SELECT 1 FROM records WHERE user_id = ? AND category = ? LIMIT 1",
+        (user_id, category),
+    ).fetchone()
+    if has_records:
+        return
+    has_income = db.execute(
+        "SELECT 1 FROM income WHERE user_id = ? AND category = ? LIMIT 1",
+        (user_id, category),
+    ).fetchone()
+    if has_income:
+        return
+    db.execute("DELETE FROM budgets WHERE user_id = ? AND category = ?", (user_id, category))
+    db.execute("DELETE FROM categories WHERE user_id = ? AND name = ?", (user_id, category))
+    db.commit()
+
+
+def cleanup_all_empty_categories():
+    """启动时清理所有用户下没有任何记录的分类。"""
+    db = get_db()
+    db.execute("""
+        DELETE FROM budgets WHERE NOT EXISTS (
+            SELECT 1 FROM categories
+            WHERE categories.user_id = budgets.user_id AND categories.name = budgets.category
+        )
+    """)
+    db.execute("""
+        DELETE FROM categories WHERE type = '支出' AND NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE records.user_id = categories.user_id AND records.category = categories.name
+        )
+    """)
+    db.execute("""
+        DELETE FROM categories WHERE type = '收入' AND NOT EXISTS (
+            SELECT 1 FROM income
+            WHERE income.user_id = categories.user_id AND income.category = categories.name
+        )
+    """)
+    db.commit()
+
