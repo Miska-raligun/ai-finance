@@ -117,9 +117,11 @@ const fetchChartData = async () => {
           ? api.get('/api/stats/monthly', { params: { year: time } })
           : api.get('/api/stats/yearly'))
   ]
-  // 月度模式时同时拉取环比对比数据
+  // 月度环比 / 年度同比对比数据
   if (mode.value === 'month' && time) {
     requests.push(api.get('/api/stats/comparison', { params: { month: time } }))
+  } else if (mode.value === 'year' && time) {
+    requests.push(api.get('/api/stats/comparison', { params: { year: time } }))
   }
   const results = await Promise.all(requests)
   const [cats, trend] = results

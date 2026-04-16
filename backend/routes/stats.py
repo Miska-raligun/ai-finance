@@ -11,29 +11,47 @@ stats_bp = Blueprint('stats', __name__)
 @stats_bp.route("/api/stats/comparison", methods=["GET"])
 @login_required
 def comparison_stats():
-    """本月 vs 上月环比对比（优化：2 条 SQL）"""
+    """月度环比 / 年度同比对比（优化：2 条 SQL）"""
     db = get_db()
-    month = request.args.get("month") or datetime.now().strftime("%Y-%m")
-    year, mon = int(month[:4]), int(month[5:7])
-    prev_month = f"{year - 1}-12" if mon == 1 else f"{year}-{mon - 1:02d}"
+    month = request.args.get("month")
+    year = request.args.get("year")
 
-    # 一条 SQL 同时获取本月和上月支出
-    expense_row = db.execute(
-        """SELECT
-             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
-             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
-           FROM records WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
-        (month, prev_month, g.user_id, month, prev_month),
-    ).fetchone()
-
-    # 一条 SQL 同时获取本月和上月收入
-    income_row = db.execute(
-        """SELECT
-             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
-             COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
-           FROM income WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
-        (month, prev_month, g.user_id, month, prev_month),
-    ).fetchone()
+    if year:
+        # 年度同比
+        prev_year = str(int(year) - 1)
+        expense_row = db.execute(
+            """SELECT
+                 COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as cur,
+                 COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as prev
+               FROM records WHERE user_id=? AND strftime('%Y',date) IN (?,?)""",
+            (year, prev_year, g.user_id, year, prev_year),
+        ).fetchone()
+        income_row = db.execute(
+            """SELECT
+                 COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as cur,
+                 COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as prev
+               FROM income WHERE user_id=? AND strftime('%Y',date) IN (?,?)""",
+            (year, prev_year, g.user_id, year, prev_year),
+        ).fetchone()
+    else:
+        # 月度环比
+        month = month or datetime.now().strftime("%Y-%m")
+        yr, mon = int(month[:4]), int(month[5:7])
+        prev_month = f"{yr - 1}-12" if mon == 1 else f"{yr}-{mon - 1:02d}"
+        expense_row = db.execute(
+            """SELECT
+                 COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
+                 COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
+               FROM records WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
+            (month, prev_month, g.user_id, month, prev_month),
+        ).fetchone()
+        income_row = db.execute(
+            """SELECT
+                 COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
+                 COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
+               FROM income WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
+            (month, prev_month, g.user_id, month, prev_month),
+        ).fetchone()
 
     cur_expense, prev_expense = float(expense_row["cur"]), float(expense_row["prev"])
     cur_income, prev_income = float(income_row["cur"]), float(income_row["prev"])
@@ -49,8 +67,6 @@ def comparison_stats():
         }
 
     return jsonify({
-        "month": month,
-        "prev_month": prev_month,
         "expense": _calc_change(cur_expense, prev_expense),
         "income": _calc_change(cur_income, prev_income),
         "balance": _calc_change(cur_balance, prev_balance),
