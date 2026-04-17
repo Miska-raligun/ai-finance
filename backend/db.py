@@ -1,7 +1,8 @@
+import os
 import sqlite3
 import logging
 
-DB_FILE = 'records.db'
+DB_FILE = os.getenv('DB_FILE', 'records.db')
 logger = logging.getLogger(__name__)
 
 
@@ -183,7 +184,15 @@ def init_db():
 
 
     conn.commit()
-    conn.close()
+
+    # 应用增量迁移（baseline 对老库幂等无副作用，新版本表按需创建）
+    try:
+        from migrations import apply_migrations
+        apply_migrations(conn)
+    except Exception as e:
+        logger.error("迁移执行失败：%s", e)
+    finally:
+        conn.close()
 
 
 def add_chat_message(user_id: int, role: str, content: str):

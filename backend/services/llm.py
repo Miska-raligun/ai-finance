@@ -6,13 +6,54 @@ from constants import DEFAULT_LLM_URL, DEFAULT_LLM_MODEL, DEFAULT_PERSONA
 
 logger = logging.getLogger(__name__)
 
+# 为兼容旧调用方，保留 llm_logger 名称；handlers 由 logging_config 统一注册
 llm_logger = logging.getLogger("llm_return")
-llm_logger.setLevel(logging.INFO)
 if not llm_logger.handlers:
+    # 兜底：未启用集中日志配置时仍写一份本地文件，避免吞日志
     handler = logging.FileHandler("llm_return.log", encoding="utf-8")
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     llm_logger.addHandler(handler)
+    llm_logger.setLevel(logging.INFO)
+
+
+def _record_usage(endpoint: str, model: str, data: dict | None) -> None:
+    """把 LLM 返回的 token 用量写入 llm_usage 表，失败静默。"""
+    if not data:
+        return
+    usage = data.get("usage") or {}
+    if not usage:
+        return
+    try:
+        from db import get_db
+        from flask import g, has_request_context
+        user_id = None
+        rid = None
+        if has_request_context():
+            user_id = getattr(g, "user_id", None)
+            rid = getattr(g, "request_id", None)
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO llm_usage
+              (user_id, endpoint, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, request_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                endpoint,
+                model,
+                int(usage.get("prompt_tokens") or 0),
+                int(usage.get("completion_tokens") or 0),
+                int(usage.get("total_tokens") or 0),
+                0.0,
+                rid,
+                datetime.utcnow().isoformat(timespec="seconds"),
+            ),
+        )
+        db.commit()
+    except Exception as e:
+        logger.debug("LLM usage 记录失败（已忽略）：%s", e)
 
 
 def _call_llm(
@@ -22,18 +63,20 @@ def _call_llm(
     tool_choice: str | None = None,
     temperature: float = 0.3,
     timeout: int = 10,
+    endpoint: str = "unknown",
 ) -> dict | None:
     """统一 LLM API 调用，返回完整 response JSON 或 None"""
     llm = llm or {}
     api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
     url = llm.get("url") or DEFAULT_LLM_URL
+    model = llm.get("model") or DEFAULT_LLM_MODEL
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
     payload: dict = {
-        "model": llm.get("model") or DEFAULT_LLM_MODEL,
+        "model": model,
         "temperature": temperature,
         "messages": messages,
     }
@@ -48,6 +91,7 @@ def _call_llm(
         if "error" in data:
             logger.error("LLM API 错误：%s", data["error"])
             return None
+        _record_usage(endpoint, model, data)
         return data
     except Exception as e:
         logger.error("LLM 调用失败: %s", e)
@@ -63,6 +107,7 @@ def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list |
     ]
     return _call_llm(
         messages, llm=llm, tools=finance_tools, tool_choice="auto", temperature=0.3, timeout=10,
+        endpoint="chat.intent",
     )
 
 
@@ -84,7 +129,7 @@ def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None
         {"role": "system", "content": "你是一个善于总结和分析的财务顾问。"},
         {"role": "user", "content": summary_prompt},
     ]
-    result = _call_llm(messages, llm=llm, timeout=30)
+    result = _call_llm(messages, llm=llm, timeout=30, endpoint="chat.summary")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"]
     if result and "error" in result:
@@ -102,7 +147,7 @@ def call_llm_chat(history: list[dict], llm: dict | None = None) -> str:
         "回答控制在50字以内。"
     )
     messages = [{"role": "system", "content": prompt}] + history[-10:]
-    result = _call_llm(messages, llm=llm, timeout=10)
+    result = _call_llm(messages, llm=llm, timeout=10, endpoint="chat.freeform")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"]
     return "⚠️ 暂时无法回复"
@@ -111,7 +156,7 @@ def call_llm_chat(history: list[dict], llm: dict | None = None) -> str:
 def call_llm_budget_advice(prompt: str, llm: dict | None = None) -> str:
     """预算建议 LLM 调用（供 handlers.py 使用）"""
     messages = [{"role": "user", "content": prompt}]
-    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=60)
+    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=60, endpoint="budget.advice")
     if result is None:
         raise RuntimeError("预算推荐 API 调用失败")
     if "choices" not in result:

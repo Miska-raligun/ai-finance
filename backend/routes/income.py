@@ -2,6 +2,7 @@
 from flask import Blueprint, request, jsonify, g
 from db import get_db, cleanup_empty_category
 from auth import login_required
+from cache import invalidate_user
 
 income_bp = Blueprint('income', __name__)
 
@@ -74,6 +75,7 @@ def delete_income(income_id):
     db.commit()
     if row:
         cleanup_empty_category(g.user_id, row["category"])
+    invalidate_user(g.user_id)
     return jsonify({"success": True})
 
 
@@ -97,4 +99,5 @@ def update_income(income_id):
     db.commit()
     if old_row and old_row["category"] != category:
         cleanup_empty_category(g.user_id, old_row["category"])
+    invalidate_user(g.user_id)
     return jsonify({"success": True})

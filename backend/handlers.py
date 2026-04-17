@@ -16,6 +16,7 @@ from constants import (
     PARAM_NOTE,
 )
 from db import get_db, cleanup_empty_category
+from cache import invalidate_user
 
 logger = logging.getLogger(__name__)
 llm_logger = logging.getLogger("llm_budget_suggest")
@@ -55,6 +56,7 @@ def add_record(user_id: int, params: dict[str, Any]) -> str:
         (user_id, category, amount, note, date)
     )
     db.commit()
+    invalidate_user(user_id)
 
     msg = f"✅ 成功记录一笔消费：你在「{category}」方面支出了 ¥{amount}，备注为「{note}」，日期为 {date}。"
 
@@ -118,6 +120,7 @@ def add_income(user_id: int, params: dict[str, Any]) -> str:
         (user_id, category, amount, note, date)
     )
     db.commit()
+    invalidate_user(user_id)
 
     return f"✅ 成功记录一笔收入：你从「{category}」获得了 ¥{amount}，备注为「{note}」，日期为 {date}。"
 
@@ -580,6 +583,7 @@ def delete_record(user_id: int, params: dict[str, Any]) -> str:
     db.execute("DELETE FROM records WHERE id=? AND user_id=?", (int(record_id), user_id))
     db.commit()
     cleanup_empty_category(user_id, category)
+    invalidate_user(user_id)
     return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 
@@ -599,6 +603,7 @@ def delete_income(user_id: int, params: dict[str, Any]) -> str:
     db.execute("DELETE FROM income WHERE id=? AND user_id=?", (int(income_id), user_id))
     db.commit()
     cleanup_empty_category(user_id, category)
+    invalidate_user(user_id)
     return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 

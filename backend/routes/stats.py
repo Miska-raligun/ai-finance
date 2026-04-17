@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, g
 from db import get_db
 from auth import login_required
 from constants import CATEGORY_EXPENSE, CATEGORY_INCOME
+from cache import make_key, get_or_compute
 
 stats_bp = Blueprint('stats', __name__)
 
@@ -76,8 +77,13 @@ def comparison_stats():
 @stats_bp.route("/api/stats/monthly", methods=["GET"])
 @login_required
 def monthly_stats():
-    db = get_db()
     year = request.args.get("year")
+    cache_key = make_key(g.user_id, "monthly", year=year or "all")
+    return jsonify(get_or_compute(cache_key, lambda: _monthly_stats_compute(year)))
+
+
+def _monthly_stats_compute(year):
+    db = get_db()
     if year:
         spend_cursor = db.execute(
             """
@@ -131,7 +137,7 @@ def monthly_stats():
             CATEGORY_INCOME: income_data.get(m, 0.0)
         })
 
-    return jsonify(result)
+    return result
 
 
 @stats_bp.route("/api/stats/yearly", methods=["GET"])
@@ -160,10 +166,14 @@ def yearly_stats():
 @stats_bp.route("/api/stats/by-category", methods=["GET"])
 @login_required
 def category_stats():
-    db = get_db()
     month = request.args.get("month")
     year = request.args.get("year")
+    cache_key = make_key(g.user_id, "by_category", month=month, year=year)
+    return jsonify(get_or_compute(cache_key, lambda: _category_stats_compute(month, year)))
 
+
+def _category_stats_compute(month, year):
+    db = get_db()
     if month:
         spend_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM records WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
@@ -200,7 +210,7 @@ def category_stats():
         {"名称": row["name"], "金额": float(row["total"]), "类型": CATEGORY_EXPENSE}
         for row in spend_cursor.fetchall()
     ]
-    return jsonify(spend_result + income_result)
+    return spend_result + income_result
 
 
 @stats_bp.route("/api/stats/summary", methods=["GET"])
@@ -242,11 +252,15 @@ def summary_stats():
 @stats_bp.route("/api/stats/daily")
 @login_required
 def daily_stats():
-    db = get_db()
     month = request.args.get("month")
     if not month:
         return jsonify({"error": "缺少参数 month"}), 400
+    cache_key = make_key(g.user_id, "daily", month=month)
+    return jsonify(get_or_compute(cache_key, lambda: _daily_stats_compute(month)))
 
+
+def _daily_stats_compute(month):
+    db = get_db()
     spend_cursor = db.execute(
         """
         SELECT date, SUM(amount) AS total
@@ -281,4 +295,4 @@ def daily_stats():
             "结余": round(income - spend, 2)
         })
 
-    return jsonify(result)
+    return result

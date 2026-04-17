@@ -1,4 +1,5 @@
 """管理员路由"""
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import generate_password_hash
 from db import get_db
@@ -66,3 +67,56 @@ def admin_batch_delete():
         db.execute(f"DELETE FROM llm_config WHERE user_id IN ({placeholders})", ids)
         db.execute(f"DELETE FROM chat_history WHERE user_id IN ({placeholders})", ids)
     return jsonify({"success": True})
+
+
+@admin_bp.route("/api/admin/llm-usage", methods=["GET"])
+@admin_required
+def llm_usage_stats():
+    """LLM 用量看板：默认最近 7 天，按日期 + endpoint 聚合。
+
+    查询参数：
+      range=7d|30d|all (默认 7d)
+    """
+    rng = request.args.get("range", "7d")
+    db = get_db()
+    where = "WHERE 1=1"
+    args: list = []
+    if rng != "all":
+        try:
+            days = int(rng.rstrip("d"))
+        except ValueError:
+            days = 7
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat(timespec="seconds")
+        where += " AND created_at >= ?"
+        args.append(cutoff)
+
+    rows = db.execute(
+        f"""
+        SELECT substr(created_at, 1, 10) as day,
+               endpoint,
+               model,
+               COUNT(*) as calls,
+               SUM(prompt_tokens) as prompt_tokens,
+               SUM(completion_tokens) as completion_tokens,
+               SUM(total_tokens) as total_tokens
+        FROM llm_usage
+        {where}
+        GROUP BY day, endpoint, model
+        ORDER BY day DESC, total_tokens DESC
+        """,
+        args,
+    ).fetchall()
+
+    total_row = db.execute(
+        f"SELECT COUNT(*) as calls, COALESCE(SUM(total_tokens),0) as total_tokens FROM llm_usage {where}",
+        args,
+    ).fetchone()
+
+    return jsonify({
+        "range": rng,
+        "summary": {
+            "calls": int(total_row["calls"]),
+            "total_tokens": int(total_row["total_tokens"]),
+        },
+        "rows": [dict(r) for r in rows],
+    })

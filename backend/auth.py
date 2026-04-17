@@ -5,7 +5,7 @@ import random
 from functools import wraps
 from collections import defaultdict
 from io import BytesIO
-from flask import request, jsonify, g, session
+from flask import abort, request, jsonify, g, session
 
 try:
     from captcha.image import ImageCaptcha
@@ -79,7 +79,7 @@ def login_required(f):
     def wrapper(*args, **kwargs):
         user_id = session.get("user_id")
         if not user_id:
-            return jsonify({"error": "Unauthorized"}), 401
+            abort(401, description="未登录或会话已过期")
         g.user_id = user_id
         return f(*args, **kwargs)
     return wrapper
@@ -90,7 +90,7 @@ def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not session.get("is_admin"):
-            return jsonify({"error": "Admin only"}), 403
+            abort(403, description="需要管理员权限")
         g.user_id = session.get("user_id")
         return f(*args, **kwargs)
     return wrapper
