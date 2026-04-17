@@ -64,6 +64,7 @@
       style="width: 100%"
       @selection-change="handleSelectionChange"
       @row-click="handleRowClick"
+      @sort-change="handleSortChange"
       :row-class-name="isTouch ? 'touch-tappable-row' : ''"
       class="record-table"
     >
@@ -88,7 +89,7 @@
           <template v-else>{{ scope.row.note }}</template>
         </template>
       </el-table-column>
-      <el-table-column v-if="showDateColumn" prop="date" label="日期" sortable min-width="100">
+      <el-table-column v-if="showDateColumn" prop="date" label="日期" sortable="custom" min-width="100">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-date-picker v-model="scope.row.date" type="date" value-format="YYYY-MM-DD" style="width:130px" />
@@ -96,7 +97,7 @@
           <template v-else>{{ scope.row.date }}</template>
         </template>
       </el-table-column>
-      <el-table-column prop="amount" :label="showBudget ? '支出金额' : '收入金额'" sortable min-width="90">
+      <el-table-column prop="amount" :label="showBudget ? '支出金额' : '收入金额'" sortable="custom" min-width="90">
         <template #default="scope">
           <template v-if="editingId === scope.row.id">
             <el-input-number v-model="scope.row.amount" :min="0" style="width:120px" />
@@ -115,7 +116,7 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column v-if="showBudget && !isNarrow" prop="left_budget" label="剩余预算" sortable min-width="90">
+      <el-table-column v-if="showBudget && !isNarrow" prop="left_budget" label="剩余预算" sortable="custom" min-width="90">
         <template #default="scope">
           <span v-if="scope.row.left_budget === '—'" style="color: var(--color-text-muted)">—</span>
           <span v-else :class="scope.row.left_budget < 0 ? 'amount-expense' : 'amount-income'">
@@ -326,6 +327,8 @@ const selectedRows = ref([])
 const editingId = ref(null)
 const pageSize = 10
 const currentPage = ref(1)
+const sortBy = ref('')
+const sortOrder = ref('')
 
 // 触控能力检测（手机 + 平板）：决定是否支持触摸行弹出详情
 const touchQuery = window.matchMedia('(hover: none) and (pointer: coarse)')
@@ -425,6 +428,13 @@ function resetFilters() {
   fetchData()
 }
 
+function handleSortChange({ prop, order }) {
+  sortBy.value = order ? prop : ''
+  sortOrder.value = order === 'ascending' ? 'ASC' : order === 'descending' ? 'DESC' : ''
+  currentPage.value = 1
+  fetchData()
+}
+
 function handleSelectionChange(val) {
   selectedRows.value = val
 }
@@ -469,6 +479,8 @@ function applyFilter() {
 async function fetchData() {
   try {
     const params = { page: currentPage.value, limit: pageSize }
+    if (sortBy.value) params.sort_by = sortBy.value
+    if (sortOrder.value) params.sort_order = sortOrder.value
     if (filterCategory.value) params.category = filterCategory.value
 
     // 统一处理日期范围：窄屏用独立字段，桌面用 dateRange

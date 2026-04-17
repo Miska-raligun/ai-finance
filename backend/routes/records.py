@@ -28,6 +28,14 @@ def get_records():
         page, limit = 1, 50
     offset = (page - 1) * limit
 
+    sort_by = request.args.get("sort_by", "date")
+    sort_order = request.args.get("sort_order", "DESC").upper()
+    allowed_sort = {"date", "amount", "left_budget"}
+    if sort_by not in allowed_sort:
+        sort_by = "date"
+    if sort_order not in ("ASC", "DESC"):
+        sort_order = "DESC"
+
     category = request.args.get("category")
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
@@ -59,10 +67,16 @@ def get_records():
         [g.user_id] + outer_params
     ).fetchone()[0]
 
+    if sort_by == 'left_budget':
+        order_clause = f"CASE WHEN left_budget IS NULL THEN 1 ELSE 0 END, left_budget {sort_order}, id DESC"
+    else:
+        order_clause = f"{sort_by} {sort_order}, id DESC"
+
     rows = db.execute(
         f"""
         WITH base AS (
             SELECT r.id, r.category, r.amount, r.note, r.date,
+                   r.anomaly_score, r.anomaly_flag,
                    strftime('%Y-%m', r.date) as month,
                    SUM(r.amount) OVER (
                        PARTITION BY r.user_id, r.category, strftime('%Y-%m', r.date)
@@ -70,30 +84,27 @@ def get_records():
                        ROWS UNBOUNDED PRECEDING
                    ) as cumulative_spend
             FROM records r WHERE r.user_id = ?
+        ),
+        enriched AS (
+            SELECT base.id, base.category, base.amount, base.note, base.date, base.month,
+                   base.anomaly_score, base.anomaly_flag,
+                   CASE WHEN b.amount IS NOT NULL
+                        THEN ROUND(b.amount - base.cumulative_spend, 2)
+                        ELSE NULL END as left_budget
+            FROM base
+            LEFT JOIN budgets b ON b.user_id = ? AND b.category = base.category AND b.month = base.month
         )
-        SELECT * FROM base {outer_where}
-        ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
+        SELECT * FROM enriched {outer_where}
+        ORDER BY {order_clause} LIMIT ? OFFSET ?
         """,
-        [g.user_id] + outer_params + [limit, offset]
+        [g.user_id, g.user_id] + outer_params + [limit, offset]
     ).fetchall()
-
-    category_months = {(row['category'], row['month']) for row in rows}
-    budget_map = {}
-    for cat, mon in category_months:
-        b = db.execute(
-            "SELECT amount FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
-            (g.user_id, cat, mon)
-        ).fetchone()
-        if b:
-            budget_map[f"{cat}_{mon}"] = float(b['amount'])
 
     results = []
     for row in rows:
         r = dict(row)
-        key = f"{r['category']}_{r['month']}"
-        budget = budget_map.get(key)
-        r['left_budget'] = f"{budget - r['cumulative_spend']:.2f}" if budget is not None else '—'
-        del r['cumulative_spend']
+        lb = r['left_budget']
+        r['left_budget'] = f"{lb:.2f}" if lb is not None else '—'
         results.append(r)
 
     return jsonify({"data": results, "total": total, "page": page, "limit": limit})

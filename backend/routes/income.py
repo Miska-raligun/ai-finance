@@ -19,6 +19,13 @@ def get_income():
         page, limit = 1, 50
     offset = (page - 1) * limit
 
+    sort_by = request.args.get("sort_by", "date")
+    sort_order = request.args.get("sort_order", "DESC").upper()
+    if sort_by not in ("date", "amount"):
+        sort_by = "date"
+    if sort_order not in ("ASC", "DESC"):
+        sort_order = "DESC"
+
     category = request.args.get("category")
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
@@ -46,7 +53,7 @@ def get_income():
 
     rows = db.execute(
         f"SELECT id, category, amount, note, date, strftime('%Y-%m', date) as month "
-        f"FROM income WHERE {where} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?",
+        f"FROM income WHERE {where} ORDER BY {sort_by} {sort_order}, id DESC LIMIT ? OFFSET ?",
         params + [limit, offset]
     ).fetchall()
 
