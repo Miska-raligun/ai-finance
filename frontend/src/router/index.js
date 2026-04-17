@@ -4,6 +4,7 @@ import LedgerView from '../views/LedgerView.vue'
 import LoginView from '../views/LoginView.vue'
 import AdminView from '../views/AdminView.vue'
 import InvestmentView from '../views/InvestmentView.vue'
+import ReportsView from '../views/ReportsView.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -11,6 +12,7 @@ const routes = [
   { path: '/chat', name: 'ChatView', component: ChatView },
   { path: '/ledger', component: LedgerView },
   { path: '/investment', component: InvestmentView },
+  { path: '/reports', component: ReportsView },
   { path: '/admin', component: AdminView }
 ]
 

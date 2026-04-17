@@ -98,13 +98,16 @@ def _call_llm(
         return None
 
 
-def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list | None = None) -> dict | None:
-    """意图识别（带工具调用）"""
+def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list | None = None,
+                    extra_system: str | None = None) -> dict | None:
+    """意图识别（带工具调用）。extra_system 可注入用户长期画像等上下文。"""
     today_str = datetime.now().strftime("%Y-%m-%d")
     messages = [
         {"role": "system", "content": f"今天是 {today_str}。你是智能财务助手，根据用户输入调用合适的工具完成记账操作。用户有多个操作时可同时调用多个工具。闲聊时不调用工具。"},
-        {"role": "user", "content": message},
     ]
+    if extra_system:
+        messages.append({"role": "system", "content": extra_system})
+    messages.append({"role": "user", "content": message})
     return _call_llm(
         messages, llm=llm, tools=finance_tools, tool_choice="auto", temperature=0.3, timeout=10,
         endpoint="chat.intent",
@@ -138,7 +141,8 @@ def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None
     return "⚠️ 暂时无法获取 AI 总结，请稍后重试"
 
 
-def call_llm_chat(history: list[dict], llm: dict | None = None) -> str:
+def call_llm_chat(history: list[dict], llm: dict | None = None,
+                  extra_system: str | None = None) -> str:
     """当用户没有执行记账相关操作时，与其闲聊。"""
     llm = llm or {}
     persona = llm.get("persona") or DEFAULT_PERSONA
@@ -146,7 +150,10 @@ def call_llm_chat(history: list[dict], llm: dict | None = None) -> str:
         f"你是{persona}，你的名字叫Anon。可以和用户闲聊，并在合适的时候提醒保持良好的记账习惯。\n"
         "回答控制在50字以内。"
     )
-    messages = [{"role": "system", "content": prompt}] + history[-10:]
+    messages = [{"role": "system", "content": prompt}]
+    if extra_system:
+        messages.append({"role": "system", "content": extra_system})
+    messages += history[-10:]
     result = _call_llm(messages, llm=llm, timeout=10, endpoint="chat.freeform")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"]
@@ -251,6 +258,89 @@ def call_llm_risk_questionnaire(answers: dict, llm: dict | None = None) -> dict:
         "level": fallback_level,
         "summary": "根据你的答题得分，我们给出了默认级别（LLM 解析失败时的本地兜底结果）。",
     }
+
+
+def call_llm_categorize(note: str, candidates: list[str], llm: dict | None = None) -> str | None:
+    """从候选分类中挑出最匹配的一个。temperature=0 提高一致性，最坏返回 None。"""
+    if not candidates:
+        return None
+    cand_str = "/".join(candidates)
+    messages = [
+        {"role": "system", "content": (
+            "你是一名记账分类助手。根据用户的备注内容，从候选分类中精确选择一个最匹配的分类。\n"
+            f"候选分类（必须严格从中选择，不能新创建）：{cand_str}\n"
+            "仅输出该分类名，不要解释，不要标点，不要 Markdown。\n"
+            "如果备注与所有分类都明显不相关，输出 NONE。"
+        )},
+        {"role": "user", "content": f"备注：{note}"},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.0, timeout=10, endpoint="smart.categorize")
+    if not result or "choices" not in result:
+        return None
+    raw = (result["choices"][0]["message"]["content"] or "").strip()
+    raw = raw.strip("「」\"'`. \n")
+    if raw == "NONE" or raw not in candidates:
+        return None
+    return raw
+
+
+def call_llm_monthly_report(insights: dict, llm: dict | None = None) -> str:
+    """生成 Markdown 月度报告。"""
+    import json as _json
+    period = insights.get("period")
+    system = (
+        "你是一名个人财务顾问。基于以下结构化数据生成中文 Markdown 月度报告。\n"
+        "格式要求：\n"
+        "1. 一级标题：「{period} 月度报告」\n"
+        "2. 二级章节：① 概览 ② 支出明细 ③ 收入明细 ④ 预算执行 ⑤ 异常提醒 ⑥ 下月建议\n"
+        "3. 数字一律保留两位小数，表格用 Markdown 表格语法。\n"
+        "4. 概览段必须明确给出净结余金额并指出是结余还是赤字。\n"
+        "5. 异常提醒只列举提供的数据，不要编造。\n"
+        "6. 下月建议给 3 条具体可执行的行动项。\n"
+    ).replace("{period}", str(period))
+    user_msg = "数据如下：\n```json\n" + _json.dumps(insights, ensure_ascii=False, indent=2) + "\n```"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_msg},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=60, endpoint="smart.monthly_report")
+    if result and "choices" in result:
+        return result["choices"][0]["message"]["content"]
+    return f"# {period} 月度报告\n\n⚠️ 生成失败，请稍后重试。"
+
+
+def call_llm_profile_extract(history: list[dict], old_facts: dict | None = None,
+                             llm: dict | None = None) -> dict | None:
+    """从最近对话中提取/合并用户长期事实。返回严格 JSON 字典或 None。"""
+    import json as _json
+    import re as _re
+    snippets = "\n".join(
+        f"{m.get('role', '?')}: {(m.get('content') or '')[:200]}" for m in history[-30:]
+    )
+    old_str = _json.dumps(old_facts or {}, ensure_ascii=False)
+    messages = [
+        {"role": "system", "content": (
+            "你是一名画像构建助手。基于用户与 AI 的对话片段，提取/合并用户的长期事实信息。\n"
+            "输出必须是严格 JSON：{\"facts\": {\"income_band\": str|null, \"family_size\": int|null,"
+            " \"mortgage\": float|null, \"goals\": [str], \"preferences\": [str], \"risk_tolerance\": str|null}}\n"
+            "保留旧 facts 中已有的字段（除非对话中明确推翻）。不能编造。"
+        )},
+        {"role": "user", "content": f"旧 facts：{old_str}\n\n最近对话片段：\n{snippets}"},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.2, timeout=20, endpoint="smart.profile")
+    if not result or "choices" not in result:
+        return None
+    content = (result["choices"][0]["message"]["content"] or "").strip()
+    try:
+        return _json.loads(content)
+    except _json.JSONDecodeError:
+        m = _re.search(r"\{[\s\S]*\}", content)
+        if not m:
+            return None
+        try:
+            return _json.loads(m.group(0))
+        except _json.JSONDecodeError:
+            return None
 
 
 def call_llm_advisor_chat(history: list[dict], context: dict | None = None, llm: dict | None = None) -> str:

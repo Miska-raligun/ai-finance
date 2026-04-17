@@ -117,6 +117,11 @@
           <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
+      <VoiceInput
+        :disabled="loading"
+        @partial="onVoicePartial"
+        @result="onVoiceResult"
+      />
       <el-input
         v-model="userInput"
         placeholder="告诉我你的消费，如：吃饭花了20元"
@@ -144,6 +149,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 import { useChatStore } from '@/stores/chat'
+import VoiceInput from '@/components/VoiceInput.vue'
 
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
@@ -157,6 +163,13 @@ const quickActions = [
 function sendQuick(text) {
   userInput.value = text
   sendMessage()
+}
+
+function onVoicePartial(text) {
+  userInput.value = text
+}
+function onVoiceResult(text) {
+  userInput.value = text
 }
 
 const userInput = ref('')

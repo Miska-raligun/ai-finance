@@ -1,10 +1,19 @@
 """支出记录路由"""
 from flask import Blueprint, request, jsonify, g
+from constants import PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE, PARAM_NOTE
 from db import get_db, cleanup_empty_category
 from auth import login_required
 from cache import invalidate_user
 
 records_bp = Blueprint('records', __name__)
+
+
+def _load_llm_cfg() -> dict:
+    row = get_db().execute(
+        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        (g.user_id,),
+    ).fetchone()
+    return dict(row) if row else {}
 
 
 @records_bp.route('/api/records')
@@ -88,6 +97,59 @@ def get_records():
         results.append(r)
 
     return jsonify({"data": results, "total": total, "page": page, "limit": limit})
+
+
+@records_bp.route('/api/records', methods=['POST'])
+@login_required
+def create_record():
+    """直接创建记录。支持 auto_categorize=true：当未提供 category 且有备注时，
+    查缓存 / 调 LLM 自动归类；命中即写库，未命中返回 needs_category。"""
+    data = request.get_json() or {}
+    category = (data.get("category") or "").strip()
+    note = (data.get("note") or "").strip()
+    try:
+        amount = float(data.get("amount") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "amount 必须为数字"}), 400
+    if amount <= 0:
+        return jsonify({"success": False, "error": "amount 必须大于 0"}), 400
+    date = (data.get("date") or "").strip()
+
+    auto = bool(data.get("auto_categorize")) and not category
+    cat_source = None
+    if auto:
+        if not note:
+            return jsonify({
+                "success": False,
+                "needs_category": True,
+                "error": "自动归类需要填写备注",
+            }), 400
+        from services.categorizer import categorize
+        pick = categorize(g.user_id, note, llm=_load_llm_cfg())
+        category = pick["category"]
+        cat_source = pick["source"]
+        if not category:
+            return jsonify({
+                "success": False,
+                "needs_category": True,
+                "error": "无法自动归类，请手动选择分类",
+            }), 200
+
+    if not category:
+        return jsonify({"success": False, "error": "分类不能为空"}), 400
+
+    from handlers import add_record
+    msg = add_record(g.user_id, {
+        PARAM_CATEGORY: category,
+        PARAM_AMOUNT: amount,
+        PARAM_NOTE: note,
+        PARAM_DATE: date,
+    })
+    success = msg.startswith("✅")
+    payload = {"success": success, "message": msg, "category": category}
+    if cat_source:
+        payload["category_source"] = cat_source
+    return jsonify(payload), (200 if success else 400)
 
 
 @records_bp.route('/api/records/<int:record_id>', methods=['DELETE'])

@@ -114,7 +114,10 @@ def chat():
     add_chat_message(g.user_id, "user", user_msg)
     chat_history = get_chat_history(g.user_id)
 
-    response = call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS)
+    from services.profile import context_message
+    profile_ctx = context_message(g.user_id)
+
+    response = call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS, extra_system=profile_ctx)
 
     reply = None
     pending_records = []
@@ -132,7 +135,7 @@ def chat():
             reply = msg_obj.get("content")
 
     if not reply:
-        reply = call_llm_chat(chat_history, llm_cfg)
+        reply = call_llm_chat(chat_history, llm_cfg, extra_system=profile_ctx)
 
     add_chat_message(g.user_id, "assistant", reply)
     return jsonify({"reply": reply, "pending_records": pending_records})
@@ -207,6 +210,26 @@ def chat_history_api():
     """获取用户聊天记录"""
     history = get_chat_history(g.user_id)
     return jsonify(history)
+
+
+@chat_bp.route("/api/profile", methods=["GET"])
+@login_required
+def get_user_profile():
+    from services.profile import get_profile
+    return jsonify(get_profile(g.user_id) or {"facts": None})
+
+
+@chat_bp.route("/api/profile/refresh", methods=["POST"])
+@login_required
+def refresh_user_profile():
+    from services.profile import refresh_profile
+    db = get_db()
+    row = db.execute(
+        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        (g.user_id,),
+    ).fetchone()
+    llm_cfg = dict(row) if row else {}
+    return jsonify(refresh_profile(g.user_id, llm=llm_cfg))
 
 
 @chat_bp.route("/api/commit_record", methods=["POST"])

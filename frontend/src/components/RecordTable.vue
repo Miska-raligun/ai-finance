@@ -105,6 +105,13 @@
             <span :class="showBudget ? 'amount-expense' : 'amount-income'">
               ¥{{ scope.row.amount }}
             </span>
+            <el-tooltip
+              v-if="showBudget && scope.row.anomaly_flag"
+              :content="`异常分值 ${Number(scope.row.anomaly_score || 0).toFixed(1)}：金额显著偏离同分类历史均值`"
+              placement="top"
+            >
+              <el-tag size="small" type="danger" effect="plain" class="anomaly-tag">🚨 异常</el-tag>
+            </el-tooltip>
           </template>
         </template>
       </el-table-column>
@@ -195,6 +202,13 @@
             <span class="drawer-detail-label">金额</span>
             <span :class="showBudget ? 'drawer-detail-value amount-expense' : 'drawer-detail-value amount-income'">
               ¥{{ popoverRow.amount }}
+              <el-tag
+                v-if="showBudget && popoverRow.anomaly_flag"
+                size="small"
+                type="danger"
+                effect="plain"
+                class="anomaly-tag"
+              >🚨 异常</el-tag>
             </span>
           </div>
           <div class="drawer-detail-row">
@@ -529,6 +543,11 @@ watch(refreshCounter, () => {
   color: var(--color-primary) !important;
   border-color: transparent !important;
   font-weight: 500;
+}
+.anomaly-tag {
+  margin-left: 6px;
+  font-size: 11px;
+  vertical-align: middle;
 }
 
 /* 表格 */

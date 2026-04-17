@@ -51,14 +51,21 @@ def add_record(user_id: int, params: dict[str, Any]) -> str:
     else:
         db.execute("INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)", (user_id, category, CATEGORY_EXPENSE))
 
+    # 写入前先计算异常分（基于历史，不含本笔）
+    from services.anomaly import detect as _detect_anomaly
+    anomaly = _detect_anomaly(user_id, category, amount, date)
+
     db.execute(
-        "INSERT INTO records (user_id, category, amount, note, date) VALUES (?, ?, ?, ?, ?)",
-        (user_id, category, amount, note, date)
+        "INSERT INTO records (user_id, category, amount, note, date, anomaly_score, anomaly_flag) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date, anomaly["score"], anomaly["flag"])
     )
     db.commit()
     invalidate_user(user_id)
 
     msg = f"✅ 成功记录一笔消费：你在「{category}」方面支出了 ¥{amount}，备注为「{note}」，日期为 {date}。"
+    if anomaly["flag"] and anomaly["reason"]:
+        msg += f"\n🚨 异常提醒：{anomaly['reason']}"
 
     # 预算预警：查询该分类本月预算
     month = date[:7]  # "YYYY-MM"

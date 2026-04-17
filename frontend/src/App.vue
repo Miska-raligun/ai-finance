@@ -17,6 +17,9 @@
         <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }">
           <span class="nav-icon">📈</span> 投资理财
         </router-link>
+        <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }">
+          <span class="nav-icon">📑</span> 月度报告
+        </router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }">
           <span class="nav-icon">🛠</span> 用户管理
         </router-link>
@@ -56,6 +59,9 @@
           </router-link>
           <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }" @click="showDrawer=false">
             <span class="nav-icon">📈</span> 投资理财
+          </router-link>
+          <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }" @click="showDrawer=false">
+            <span class="nav-icon">📑</span> 月度报告
           </router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" @click="showDrawer=false">
             <span class="nav-icon">🛠</span> 用户管理
@@ -132,6 +138,7 @@ const topbarTitle = computed(() => {
     '/chat': '聊天记账',
     '/ledger': '账本管理',
     '/investment': '投资理财',
+    '/reports': '月度报告',
     '/admin': '用户管理',
   }
   return map[route.path] || '智能记账'

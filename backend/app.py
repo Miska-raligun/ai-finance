@@ -37,9 +37,10 @@ from routes.budgets import budgets_bp
 from routes.stats import stats_bp
 from routes.admin import admin_bp
 from routes.investment import investment_bp
+from routes.reports import reports_bp
 
 for bp in [auth_bp, chat_bp, records_bp, income_bp,
-           categories_bp, budgets_bp, stats_bp, admin_bp, investment_bp]:
+           categories_bp, budgets_bp, stats_bp, admin_bp, investment_bp, reports_bp]:
     app.register_blueprint(bp)
 
 # LLM 成本敏感端点的用户级限流（IP 级仍由 llm_security_middleware 兜底）
@@ -49,6 +50,7 @@ apply_endpoint_limits(app, {
     "chat.commit_record": "120/minute",
     "investment.advisor_chat": "30/minute",
     "investment.submit_risk_quiz": "10/minute",
+    "reports.api_generate_report": "5/minute",
 })
 
 if __name__ == "__main__":
