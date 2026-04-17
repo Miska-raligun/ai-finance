@@ -157,6 +157,40 @@ def delete_income(income_id: int) -> str:
     return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
+def add_asset(name: str, type: str, current_value: float = 0,
+              cost_basis: float = 0, holdings: float = 0,
+              symbol: str = "", notes: str = "") -> str:
+    """登记一项投资资产。type 必须是 stock/fund/bond/cash/crypto/realestate/other 之一。"""
+    return handlers.invest_add_asset(uid(), {
+        "名称": name, "类型": type, "代码": symbol,
+        "数量": holdings, "成本": cost_basis, "现值": current_value,
+        "备注": notes,
+    })
+
+
+@mcp.tool()
+def update_asset_value(name: str, current_value: float) -> str:
+    """更新某项资产的当前市值。"""
+    return handlers.invest_update_value(uid(), {"名称": name, "现值": current_value})
+
+
+@mcp.tool()
+def add_goal(name: str, target_amount: float, deadline: str = "",
+             current_progress: float = 0, priority: int = 3, note: str = "") -> str:
+    """创建理财目标。deadline 为 YYYY-MM-DD，priority 1-5。"""
+    return handlers.invest_add_goal(uid(), {
+        "名称": name, "目标金额": target_amount, "截止日期": deadline,
+        "已完成": current_progress, "优先级": priority, "备注": note,
+    })
+
+
+@mcp.tool()
+def portfolio_summary() -> str:
+    """查看投资组合总览（总市值、类型分布、累计回报率）。"""
+    return handlers.invest_portfolio_summary(uid())
+
+
+@mcp.tool()
 def set_budget(category: str, amount: float, month: str = "") -> str:
     """设置或更新某分类的月预算。month:YYYY-MM(默认当月)。"""
     if not month: month = datetime.now().strftime("%Y-%m")

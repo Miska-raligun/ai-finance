@@ -3,12 +3,14 @@ import ChatView from '../views/ChatView.vue'
 import LedgerView from '../views/LedgerView.vue'
 import LoginView from '../views/LoginView.vue'
 import AdminView from '../views/AdminView.vue'
+import InvestmentView from '../views/InvestmentView.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', component: LoginView },
   { path: '/chat', name: 'ChatView', component: ChatView },
   { path: '/ledger', component: LedgerView },
+  { path: '/investment', component: InvestmentView },
   { path: '/admin', component: AdminView }
 ]
 

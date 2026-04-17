@@ -5,6 +5,8 @@ from handlers import (
     budget_remain, delete_budget, suggest_budgets,
     query_income, category_sum, search_records,
     delete_record, delete_income,
+    invest_add_asset, invest_update_value, invest_add_goal,
+    invest_portfolio_summary, invest_analyze_portfolio,
 )
 
 handlers = {
@@ -23,6 +25,11 @@ handlers = {
     "search_records": search_records,
     "delete_record": delete_record,
     "delete_income": delete_income,
+    "invest_add_asset": invest_add_asset,
+    "invest_update_value": invest_update_value,
+    "invest_add_goal": invest_add_goal,
+    "invest_portfolio_summary": invest_portfolio_summary,
+    "invest_analyze_portfolio": invest_analyze_portfolio,
 }
 
 FINANCE_TOOLS = [
@@ -84,4 +91,30 @@ FINANCE_TOOLS = [
     {"type": "function", "function": {"name": "delete_income", "description": "按记录ID删除一条收入记录。请先用 query_income（全部=是）查询获取ID再调用",
         "parameters": {"type": "object", "required": ["收入ID"],
             "properties": {"收入ID": {"type": "integer", "description": "收入记录的唯一ID"}}}}},
+    # ===== 投资模块 =====
+    {"type": "function", "function": {"name": "invest_add_asset", "description": "登记一项投资资产（基金/股票/现金/加密货币/房产等）",
+        "parameters": {"type": "object", "required": ["名称", "类型"],
+            "properties": {"名称": {"type": "string"},
+                           "类型": {"type": "string", "enum": ["stock", "fund", "bond", "cash", "crypto", "realestate", "other"]},
+                           "代码": {"type": "string", "description": "股票/基金代码，可选"},
+                           "数量": {"type": "number"},
+                           "成本": {"type": "number", "description": "持仓总成本"},
+                           "现值": {"type": "number", "description": "当前市值"},
+                           "备注": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "invest_update_value", "description": "更新某项资产的当前市值",
+        "parameters": {"type": "object", "required": ["名称", "现值"],
+            "properties": {"名称": {"type": "string"},
+                           "现值": {"type": "number"}}}}},
+    {"type": "function", "function": {"name": "invest_add_goal", "description": "创建一个理财目标（如买房首付、子女教育金）",
+        "parameters": {"type": "object", "required": ["名称", "目标金额"],
+            "properties": {"名称": {"type": "string"},
+                           "目标金额": {"type": "number"},
+                           "截止日期": {"type": "string", "description": "YYYY-MM-DD"},
+                           "已完成": {"type": "number", "description": "当前已攒金额"},
+                           "优先级": {"type": "integer", "description": "1 最高 / 5 最低"},
+                           "备注": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "invest_portfolio_summary", "description": "查看当前投资组合总览（总市值、按类型的占比、累计回报率）",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "invest_analyze_portfolio", "description": "基于当前持仓与风险等级，生成投资组合诊断与再平衡建议（会调用 LLM）",
+        "parameters": {"type": "object", "properties": {}}}},
 ]

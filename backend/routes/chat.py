@@ -85,7 +85,7 @@ def _process_tool_calls(tool_calls: list, llm_cfg: dict) -> tuple[list[str], lis
                     f"已识别到{rec_type}：分类「{rec['category']}」金额 ¥{rec['amount']}，"
                     f"备注「{rec['note']}」，日期 {rec['date']}，等待用户确认。"
                 )
-            elif func_name == "suggest_budgets":
+            elif func_name in ("suggest_budgets", "invest_analyze_portfolio"):
                 r = handlers[func_name](g.user_id, params, llm_cfg)
                 results.append(r)
             else:

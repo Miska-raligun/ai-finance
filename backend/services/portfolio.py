@@ -1,0 +1,187 @@
+"""投资组合纯函数计算：分配、漂移、回报率，全部不依赖外部 API。"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Iterable
+
+# 资产类型 → 默认目标占比（保守组合，可被风险等级覆盖）
+DEFAULT_TARGET_ALLOCATION = {
+    "cash": 0.10,
+    "bond": 0.30,
+    "fund": 0.30,
+    "stock": 0.20,
+    "crypto": 0.05,
+    "realestate": 0.05,
+    "other": 0.0,
+}
+
+# 风险等级 → 目标占比（用于 compute_drift 的 target 默认值）
+RISK_TARGET_ALLOCATION = {
+    "conservative": {"cash": 0.20, "bond": 0.50, "fund": 0.20, "stock": 0.10},
+    "balanced":     {"cash": 0.10, "bond": 0.30, "fund": 0.35, "stock": 0.20, "crypto": 0.05},
+    "aggressive":   {"cash": 0.05, "bond": 0.10, "fund": 0.30, "stock": 0.45, "crypto": 0.10},
+}
+
+
+def _ensure_dict(rows: Iterable) -> list[dict]:
+    """sqlite3.Row 可能传进来，统一转成 dict 方便操作。"""
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            out.append(r)
+        else:
+            out.append({k: r[k] for k in r.keys()})
+    return out
+
+
+def compute_allocation(assets: Iterable) -> dict:
+    """根据持仓 current_value 计算总市值与各类型占比。
+
+    返回：{total_value, by_type:[{type,value,pct}], by_asset:[{name,type,value,pct}]}
+    """
+    items = _ensure_dict(assets)
+    total = float(sum((a.get("current_value") or 0) for a in items))
+
+    by_type_map: dict[str, float] = {}
+    for a in items:
+        t = (a.get("type") or "other").strip() or "other"
+        by_type_map[t] = by_type_map.get(t, 0.0) + float(a.get("current_value") or 0)
+
+    by_type = []
+    for t, v in sorted(by_type_map.items(), key=lambda x: x[1], reverse=True):
+        by_type.append({
+            "type": t,
+            "value": round(v, 2),
+            "pct": round((v / total * 100) if total > 0 else 0.0, 2),
+        })
+
+    by_asset = []
+    for a in items:
+        v = float(a.get("current_value") or 0)
+        by_asset.append({
+            "id": a.get("id"),
+            "name": a.get("name"),
+            "type": a.get("type"),
+            "value": round(v, 2),
+            "pct": round((v / total * 100) if total > 0 else 0.0, 2),
+        })
+    by_asset.sort(key=lambda x: x["value"], reverse=True)
+
+    return {
+        "total_value": round(total, 2),
+        "by_type": by_type,
+        "by_asset": by_asset,
+    }
+
+
+def compute_drift(allocation: dict, target: dict | None = None, risk_level: str | None = None) -> list[dict]:
+    """基于当前 allocation 与目标占比，计算各类型漂移百分比。
+
+    target 优先；否则按 risk_level 取预设；都没有则按 DEFAULT。
+    返回：[{type, current_pct, target_pct, drift_pct, action}]
+    """
+    if not target:
+        if risk_level and risk_level in RISK_TARGET_ALLOCATION:
+            target = RISK_TARGET_ALLOCATION[risk_level]
+        else:
+            target = DEFAULT_TARGET_ALLOCATION
+
+    cur = {row["type"]: row["pct"] for row in allocation.get("by_type", [])}
+    types = set(cur) | set(target.keys())
+
+    out = []
+    for t in sorted(types):
+        cur_pct = cur.get(t, 0.0)
+        tgt_pct = target.get(t, 0.0) * 100  # target 用 0~1 表示
+        drift = round(cur_pct - tgt_pct, 2)
+        if abs(drift) < 1.0:
+            action = "保持"
+        elif drift > 0:
+            action = "建议减仓"
+        else:
+            action = "建议加仓"
+        out.append({
+            "type": t,
+            "current_pct": round(cur_pct, 2),
+            "target_pct": round(tgt_pct, 2),
+            "drift_pct": drift,
+            "action": action,
+        })
+    return out
+
+
+def compute_return(assets: Iterable) -> dict:
+    """简化总回报：(current_value 之和 - cost_basis 之和) / cost_basis 之和。"""
+    items = _ensure_dict(assets)
+    total_value = float(sum((a.get("current_value") or 0) for a in items))
+    total_cost = float(sum((a.get("cost_basis") or 0) for a in items))
+    pnl = total_value - total_cost
+    pct = (pnl / total_cost * 100) if total_cost > 0 else 0.0
+    return {
+        "total_value": round(total_value, 2),
+        "total_cost": round(total_cost, 2),
+        "pnl": round(pnl, 2),
+        "return_pct": round(pct, 2),
+    }
+
+
+def compute_top_movers(assets: Iterable, top_n: int = 3) -> list[dict]:
+    """按单品种盈亏百分比排序，返回涨/跌前 N 名。"""
+    items = _ensure_dict(assets)
+    movers = []
+    for a in items:
+        cost = float(a.get("cost_basis") or 0)
+        value = float(a.get("current_value") or 0)
+        if cost <= 0:
+            continue
+        pnl_pct = (value - cost) / cost * 100
+        movers.append({
+            "id": a.get("id"),
+            "name": a.get("name"),
+            "type": a.get("type"),
+            "pnl_pct": round(pnl_pct, 2),
+            "pnl_value": round(value - cost, 2),
+        })
+    movers.sort(key=lambda x: x["pnl_pct"], reverse=True)
+    return movers[:top_n] + movers[-top_n:][::-1] if len(movers) > top_n * 2 else movers
+
+
+def compute_goal_plan(target_amount: float, current_progress: float, deadline: str | None,
+                      monthly_net_cashflow: float = 0.0) -> dict:
+    """三档储蓄方案（保守 3% / 平衡 6% / 激进 9%）下的月供建议。
+
+    使用未来值年金近似公式：FV = PMT * ((1+r/12)^n - 1) / (r/12)
+    返回：{months_left, gap, plans:[{level, annual_rate, monthly_pmt, feasible}]}
+    """
+    today = datetime.now().date()
+    if deadline:
+        try:
+            d = datetime.strptime(deadline, "%Y-%m-%d").date()
+            months_left = max(1, (d.year - today.year) * 12 + (d.month - today.month))
+        except ValueError:
+            months_left = 60  # 兜底 5 年
+    else:
+        months_left = 60
+
+    gap = max(0.0, float(target_amount) - float(current_progress or 0))
+    plans = []
+    for level, rate in (("conservative", 0.03), ("balanced", 0.06), ("aggressive", 0.09)):
+        monthly_rate = rate / 12
+        if monthly_rate > 0:
+            denom = ((1 + monthly_rate) ** months_left - 1) / monthly_rate
+            pmt = gap / denom if denom > 0 else gap / months_left
+        else:
+            pmt = gap / months_left
+        plans.append({
+            "level": level,
+            "annual_rate": rate,
+            "monthly_pmt": round(pmt, 2),
+            "feasible": (monthly_net_cashflow == 0) or (pmt <= monthly_net_cashflow),
+        })
+
+    return {
+        "months_left": months_left,
+        "gap": round(gap, 2),
+        "monthly_net_cashflow": round(float(monthly_net_cashflow or 0), 2),
+        "plans": plans,
+    }

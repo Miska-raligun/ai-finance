@@ -14,6 +14,9 @@
         <router-link to="/ledger" class="nav-item" :class="{ active: route.path === '/ledger' }">
           <span class="nav-icon">📒</span> 账本管理
         </router-link>
+        <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }">
+          <span class="nav-icon">📈</span> 投资理财
+        </router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }">
           <span class="nav-icon">🛠</span> 用户管理
         </router-link>
@@ -51,6 +54,9 @@
           <router-link to="/ledger" class="nav-item" :class="{ active: route.path === '/ledger' }" @click="showDrawer=false">
             <span class="nav-icon">📒</span> 账本管理
           </router-link>
+          <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }" @click="showDrawer=false">
+            <span class="nav-icon">📈</span> 投资理财
+          </router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" @click="showDrawer=false">
             <span class="nav-icon">🛠</span> 用户管理
           </router-link>
@@ -72,9 +78,7 @@
       <!-- 移动端顶部导航栏 -->
       <header v-if="isMobile && route.path !== '/login'" class="mobile-topbar">
         <button class="topbar-menu-btn" @click="showDrawer = true">☰</button>
-        <span class="topbar-title">
-          {{ route.path === '/chat' ? '聊天记账' : route.path === '/ledger' ? '账本管理' : '用户管理' }}
-        </span>
+        <span class="topbar-title">{{ topbarTitle }}</span>
         <div class="topbar-user">{{ username.slice(0, 1).toUpperCase() }}</div>
       </header>
 
@@ -123,6 +127,15 @@ const userStore = useUserStore()
 const { isAdmin } = storeToRefs(userStore)
 
 const username = computed(() => userStore.username)
+const topbarTitle = computed(() => {
+  const map = {
+    '/chat': '聊天记账',
+    '/ledger': '账本管理',
+    '/investment': '投资理财',
+    '/admin': '用户管理',
+  }
+  return map[route.path] || '智能记账'
+})
 
 const active = ref(route.path)
 const showConfig = ref(false)

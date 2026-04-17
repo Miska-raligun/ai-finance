@@ -162,3 +162,106 @@ def call_llm_budget_advice(prompt: str, llm: dict | None = None) -> str:
     if "choices" not in result:
         raise RuntimeError(f"预算推荐 API 响应异常：{result.get('error', result)}")
     return result["choices"][0]["message"]["content"]
+
+
+# ===== 投资顾问相关 =====
+
+def call_llm_portfolio_advice(allocation: dict, drift: list[dict], returns: dict,
+                              risk_level: str | None = None, llm: dict | None = None) -> str:
+    """Portfolio Analyst：输入持仓 + 漂移 + 回报，输出诊断与行动项。"""
+    from prompts.investment import (
+        PORTFOLIO_ANALYST_SYSTEM, build_portfolio_analyst_prompt, DISCLAIMER,
+    )
+    messages = [
+        {"role": "system", "content": PORTFOLIO_ANALYST_SYSTEM},
+        {"role": "user", "content": build_portfolio_analyst_prompt(allocation, drift, returns, risk_level)},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.4, timeout=30, endpoint="invest.portfolio_advice")
+    if result and "choices" in result:
+        return result["choices"][0]["message"]["content"] + DISCLAIMER
+    return "⚠️ 暂时无法获取投资分析，请稍后再试。" + DISCLAIMER
+
+
+def call_llm_goal_plan(goal: dict, plan: dict, llm: dict | None = None) -> str:
+    """Goal Coach：输入目标 + 三档方案，输出 Markdown 表格与建议。"""
+    from prompts.investment import GOAL_COACH_SYSTEM, build_goal_coach_prompt, DISCLAIMER
+    messages = [
+        {"role": "system", "content": GOAL_COACH_SYSTEM},
+        {"role": "user", "content": build_goal_coach_prompt(goal, plan)},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.4, timeout=30, endpoint="invest.goal_plan")
+    if result and "choices" in result:
+        return result["choices"][0]["message"]["content"] + DISCLAIMER
+    return "⚠️ 暂时无法生成目标方案，请稍后再试。" + DISCLAIMER
+
+
+def call_llm_risk_questionnaire(answers: dict, llm: dict | None = None) -> dict:
+    """Risk Questionnaire：输入答案，输出 {score, level, summary}。
+
+    任何解析失败都会回退到本地打分，保证接口稳定。
+    """
+    import json as _json
+    import re as _re
+    from prompts.investment import (
+        RISK_QUIZ_SYSTEM, RISK_QUIZ_QUESTIONS, build_risk_quiz_prompt,
+    )
+
+    # 先本地算分兜底
+    try:
+        score = sum(int(answers.get(q["id"], 0)) for q in RISK_QUIZ_QUESTIONS)
+    except (TypeError, ValueError):
+        score = 0
+    if score <= 11:
+        fallback_level = "conservative"
+    elif score <= 18:
+        fallback_level = "balanced"
+    else:
+        fallback_level = "aggressive"
+
+    messages = [
+        {"role": "system", "content": RISK_QUIZ_SYSTEM},
+        {"role": "user", "content": build_risk_quiz_prompt(answers)},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.2, timeout=20, endpoint="invest.risk_quiz")
+    content = ""
+    if result and "choices" in result:
+        content = result["choices"][0]["message"]["content"] or ""
+
+    parsed = None
+    if content:
+        try:
+            parsed = _json.loads(content)
+        except (_json.JSONDecodeError, TypeError):
+            m = _re.search(r"\{[\s\S]*\}", content)
+            if m:
+                try:
+                    parsed = _json.loads(m.group(0))
+                except _json.JSONDecodeError:
+                    parsed = None
+
+    if isinstance(parsed, dict) and parsed.get("level") in {"conservative", "balanced", "aggressive"}:
+        return {
+            "score": int(parsed.get("score") or score),
+            "level": parsed["level"],
+            "summary": str(parsed.get("summary") or ""),
+        }
+
+    return {
+        "score": score,
+        "level": fallback_level,
+        "summary": "根据你的答题得分，我们给出了默认级别（LLM 解析失败时的本地兜底结果）。",
+    }
+
+
+def call_llm_advisor_chat(history: list[dict], context: dict | None = None, llm: dict | None = None) -> str:
+    """投资顾问对话：在 system 中注入用户资产/目标摘要，再接 history。"""
+    import json as _json
+    from prompts.investment import ADVISOR_CHAT_SYSTEM, DISCLAIMER
+    ctx_msg = ""
+    if context:
+        ctx_msg = "\n\n当前用户数据摘要：\n```json\n" + _json.dumps(context, ensure_ascii=False) + "\n```"
+    messages = [{"role": "system", "content": ADVISOR_CHAT_SYSTEM + ctx_msg}] + history[-10:]
+    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=20, endpoint="invest.advisor_chat")
+    if result and "choices" in result:
+        return result["choices"][0]["message"]["content"] + DISCLAIMER
+    return "⚠️ 暂时无法回复，请稍后再试。" + DISCLAIMER
