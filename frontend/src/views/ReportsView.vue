@@ -19,6 +19,7 @@
         >
           ✨ 生成本月报告
         </el-button>
+        <ExportMenu scope="reports" :report-period="store.current?.period || ''" />
       </div>
     </div>
 
@@ -58,6 +59,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReportsStore } from '@/stores/reports'
 import { useUserStore } from '@/stores/user'
 import MonthlyReport from '@/components/MonthlyReport.vue'
+import ExportMenu from '@/components/ExportMenu.vue'
 
 const store = useReportsStore()
 const userStore = useUserStore()

@@ -55,8 +55,10 @@ def app(temp_db, monkeypatch):
     from routes.admin import admin_bp
     from routes.investment import investment_bp
     from routes.reports import reports_bp
+    from routes.export import export_bp
 
-    for bp in [auth_bp, records_bp, income_bp, categories_bp, budgets_bp, stats_bp, admin_bp, investment_bp, reports_bp]:
+    for bp in [auth_bp, records_bp, income_bp, categories_bp, budgets_bp, stats_bp, admin_bp,
+               investment_bp, reports_bp, export_bp]:
         flask_app.register_blueprint(bp)
 
     yield flask_app

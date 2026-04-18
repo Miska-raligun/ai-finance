@@ -18,6 +18,7 @@
           <span class="chip-value">{{ LEVEL_LABEL[portfolio.risk_level] || '未测评' }}</span>
         </div>
       </div>
+      <ExportMenu scope="investment" />
     </div>
 
     <el-tabs v-model="activeTab" class="invest-tabs">
@@ -83,6 +84,7 @@ import AssetTable from '@/components/AssetTable.vue'
 import GoalProgress from '@/components/GoalProgress.vue'
 import RiskQuestionnaire from '@/components/RiskQuestionnaire.vue'
 import AdvisorChat from '@/components/AdvisorChat.vue'
+import ExportMenu from '@/components/ExportMenu.vue'
 
 const router = useRouter()
 const userStore = useUserStore()

@@ -46,14 +46,25 @@
 
     <div class="chart-row">
       <div class="pie-wrap">
-        <VChart :option="incomePieOption" style="height: 280px; width: 100%" autoresize />
+        <el-skeleton v-if="loading" animated>
+          <template #template>
+            <el-skeleton-item variant="circle" style="width: 200px; height: 200px; margin: 30px auto;" />
+          </template>
+        </el-skeleton>
+        <VChart v-else :option="incomePieOption" style="height: 280px; width: 100%" autoresize />
       </div>
       <div class="pie-wrap">
-        <VChart :option="spendPieOption" style="height: 280px; width: 100%" autoresize />
+        <el-skeleton v-if="loading" animated>
+          <template #template>
+            <el-skeleton-item variant="circle" style="width: 200px; height: 200px; margin: 30px auto;" />
+          </template>
+        </el-skeleton>
+        <VChart v-else :option="spendPieOption" style="height: 280px; width: 100%" autoresize />
       </div>
     </div>
 
-    <VChart :option="lineOption" style="height: 280px; width: 100%" autoresize />
+    <el-skeleton v-if="loading" animated :rows="3" style="margin-top: 12px" />
+    <VChart v-else :option="lineOption" style="height: 280px; width: 100%" autoresize />
   </el-card>
 </template>
 
@@ -76,6 +87,7 @@ use([PieChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, Gri
 const props = defineProps({ refreshFlag: Number })
 const mode = ref('month')
 const selectedTime = ref()
+const loading = ref(true)
 const incomePieOption = ref({})
 const spendPieOption = ref({})
 const lineOption = ref({})
@@ -99,6 +111,15 @@ function showAll() {
 
 const fetchChartData = async () => {
   if (!selectedTime.value && mode.value === 'month') return
+  loading.value = true
+  try {
+    await _doFetchChartData()
+  } finally {
+    loading.value = false
+  }
+}
+
+const _doFetchChartData = async () => {
   totalIncome.value = 0
   totalExpense.value = 0
   incomeChangePct.value = null

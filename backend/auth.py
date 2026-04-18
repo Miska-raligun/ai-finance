@@ -1,4 +1,4 @@
-"""认证装饰器、验证码管理、登录频率限制"""
+"""认证装饰器、验证码管理（DB 持久化）、登录频率限制"""
 import time
 import uuid
 import random
@@ -13,17 +13,24 @@ try:
 except ImportError:
     CAPTCHA_AVAILABLE = False
 
-# ===== 验证码存储 =====
-_captcha_store: dict = {}
+# ===== 验证码存储（持久化到 captcha_store 表，重启不失效）=====
 _CAPTCHA_TTL = 300  # 5 分钟有效期
 _CAPTCHA_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'  # 去掉易混淆字符
 
 
+def _captcha_db():
+    from db import get_db
+    return get_db()
+
+
 def clean_expired_captchas():
-    now = time.time()
-    expired = [k for k, v in list(_captcha_store.items()) if v['expires_at'] < now]
-    for k in expired:
-        del _captcha_store[k]
+    """清理过期记录。可定期调用，但 generate/validate 也会自动 piggyback。"""
+    try:
+        db = _captcha_db()
+        db.execute("DELETE FROM captcha_store WHERE expires_at < ?", (int(time.time()),))
+        db.commit()
+    except Exception:
+        pass
 
 
 def generate_captcha() -> tuple[str, str, str]:
@@ -32,7 +39,12 @@ def generate_captcha() -> tuple[str, str, str]:
     clean_expired_captchas()
     token = str(uuid.uuid4())
     chars = ''.join(random.choices(_CAPTCHA_CHARS, k=4))
-    _captcha_store[token] = {'answer': chars, 'expires_at': time.time() + _CAPTCHA_TTL}
+    db = _captcha_db()
+    db.execute(
+        "INSERT INTO captcha_store (token, answer, expires_at) VALUES (?, ?, ?)",
+        (token, chars, int(time.time()) + _CAPTCHA_TTL),
+    )
+    db.commit()
     image = ImageCaptcha(width=160, height=60)
     buf = BytesIO()
     image.generate_image(chars).save(buf, format='PNG')
@@ -41,14 +53,22 @@ def generate_captcha() -> tuple[str, str, str]:
 
 
 def validate_captcha(token: str, user_input: str) -> tuple[bool, str]:
-    """校验验证码，返回 (是否通过, 错误信息)"""
-    entry = _captcha_store.get(token)
-    if not entry or entry['expires_at'] < time.time():
+    """校验验证码，返回 (是否通过, 错误信息)。无论成功失败都消耗 token。"""
+    if not token:
+        return False, "缺少验证码 token"
+    db = _captcha_db()
+    row = db.execute(
+        "SELECT answer, expires_at FROM captcha_store WHERE token = ?", (token,),
+    ).fetchone()
+    if not row or row["expires_at"] < int(time.time()):
+        db.execute("DELETE FROM captcha_store WHERE token = ?", (token,))
+        db.commit()
         return False, "验证码已过期，请刷新"
-    if user_input.upper() != entry['answer']:
-        del _captcha_store[token]
+    answer = row["answer"]
+    db.execute("DELETE FROM captcha_store WHERE token = ?", (token,))
+    db.commit()
+    if user_input.upper() != answer:
         return False, "验证码错误"
-    del _captcha_store[token]
     return True, ""
 
 

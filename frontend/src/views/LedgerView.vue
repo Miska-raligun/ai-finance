@@ -2,6 +2,7 @@
   <div class="ledger-page">
     <div class="page-header">
       <h2 class="page-title">📒 账本管理</h2>
+      <ExportMenu scope="ledger" />
     </div>
 
     <!-- 记录表格 Tab -->
@@ -42,6 +43,7 @@ import { useRouter } from 'vue-router'
 import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
+import ExportMenu from '@/components/ExportMenu.vue'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 
@@ -78,6 +80,8 @@ onUnmounted(() => {
 .page-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .page-title {
   font-size: 20px;
