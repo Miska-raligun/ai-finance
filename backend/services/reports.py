@@ -61,14 +61,14 @@ def generate_monthly_report(user_id: int, period: Optional[str] = None,
             "period": period,
             "content": f"# {period} 月度报告\n\n📭 该月无任何记录，无需生成报告。",
             "insights": insights,
-            "created_at": datetime.utcnow().isoformat(timespec="seconds"),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
             "stored": False,
         }
 
     from services.llm import call_llm_monthly_report
     content = call_llm_monthly_report(insights, llm=llm)
 
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = datetime.now().isoformat(timespec="seconds")
     db = get_db()
     db.execute(
         """

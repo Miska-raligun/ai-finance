@@ -52,74 +52,66 @@ function formatTime(iso) {
 }
 
 // 简易 Markdown 渲染（标题/列表/强调/表格/换行）
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const inline = (s) => esc(s)
+  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line)
+const isTableSep = (line) => /^\s*\|?[\s\-:|]+\|?\s*$/.test(line) && line.includes('-')
+const splitRow = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+
 function renderMarkdown(md) {
   if (!md) return ''
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-
-  const lines = esc(md).split('\n')
+  const lines = md.split('\n')
   const out = []
+  let i = 0
   let inList = false
-  let inTable = false
-  let tableRows = []
+  const closeList = () => { if (inList) { out.push('</ul>'); inList = false } }
 
-  const flushList = () => {
-    if (inList) { out.push('</ul>'); inList = false }
-  }
-  const flushTable = () => {
-    if (inTable) {
-      const [head, ...body] = tableRows
-      const ths = head.map(c => `<th>${c.trim()}</th>`).join('')
-      const trs = body.map(r => '<tr>' + r.map(c => `<td>${c.trim()}</td>`).join('') + '</tr>').join('')
-      out.push(`<table class="md-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`)
-      inTable = false
-      tableRows = []
-    }
-  }
-
-  for (let i = 0; i < lines.length; i++) {
+  while (i < lines.length) {
     const line = lines[i]
-    const tableMatch = line.match(/^\s*\|(.+)\|\s*$/)
-    const sepMatch = line.match(/^\s*\|?[\s\-:|]+\|?\s*$/) && line.includes('-')
 
-    if (tableMatch && !sepMatch) {
-      flushList()
-      const cells = tableMatch[1].split('|')
-      // 跳过分隔行
-      if (i + 1 < lines.length && /^\s*\|?[\s\-:|]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
-        inTable = true
-        tableRows.push(cells)
-        continue
+    // 表格：表头 + 分隔行 + 若干数据行
+    if (isTableRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      closeList()
+      const header = splitRow(line)
+      i += 2
+      const body = []
+      while (i < lines.length && isTableRow(lines[i]) && !isTableSep(lines[i])) {
+        body.push(splitRow(lines[i]))
+        i++
       }
-      if (inTable) {
-        tableRows.push(cells)
-        continue
-      }
-    } else if (inTable && /^\s*$/.test(line)) {
-      flushTable()
-    } else {
-      flushTable()
-    }
-
-    if (/^### (.+)$/.test(line)) { flushList(); out.push(`<h3>${RegExp.$1}</h3>`); continue }
-    if (/^## (.+)$/.test(line)) { flushList(); out.push(`<h2>${RegExp.$1}</h2>`); continue }
-    if (/^# (.+)$/.test(line)) { flushList(); out.push(`<h1>${RegExp.$1}</h1>`); continue }
-    if (/^[-*] (.+)$/.test(line)) {
-      if (!inList) { out.push('<ul>'); inList = true }
-      let item = RegExp.$1
-      item = item.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                 .replace(/`([^`]+)`/g, '<code>$1</code>')
-      out.push(`<li>${item}</li>`)
+      const ths = header.map(c => `<th>${inline(c)}</th>`).join('')
+      const trs = body.map(r => '<tr>' + r.map(c => `<td>${inline(c)}</td>`).join('') + '</tr>').join('')
+      out.push(`<table class="md-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`)
       continue
     }
-    flushList()
-    if (/^\s*$/.test(line)) { out.push(''); continue }
-    let p = line
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-    out.push(`<p>${p}</p>`)
+
+    // 标题
+    let m
+    if ((m = line.match(/^###\s+(.+)$/))) { closeList(); out.push(`<h3>${inline(m[1])}</h3>`); i++; continue }
+    if ((m = line.match(/^##\s+(.+)$/)))  { closeList(); out.push(`<h2>${inline(m[1])}</h2>`); i++; continue }
+    if ((m = line.match(/^#\s+(.+)$/)))   { closeList(); out.push(`<h1>${inline(m[1])}</h1>`); i++; continue }
+
+    // 列表
+    if ((m = line.match(/^\s*[-*]\s+(.+)$/))) {
+      if (!inList) { out.push('<ul>'); inList = true }
+      out.push(`<li>${inline(m[1])}</li>`)
+      i++
+      continue
+    }
+
+    closeList()
+
+    // 空行
+    if (/^\s*$/.test(line)) { i++; continue }
+
+    // 段落
+    out.push(`<p>${inline(line)}</p>`)
+    i++
   }
-  flushList()
-  flushTable()
+  closeList()
   return out.join('\n')
 }
 
