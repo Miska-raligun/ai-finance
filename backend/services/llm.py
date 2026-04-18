@@ -288,8 +288,11 @@ def call_llm_monthly_report(insights: dict, llm: dict | None = None) -> str:
     """生成 Markdown 月度报告。"""
     import json as _json
     period = insights.get("period")
+    today_str = datetime.now().strftime("%Y-%m-%d")
     system = (
         "你是一名个人财务顾问。基于以下结构化数据生成中文 Markdown 月度报告。\n"
+        f"今天日期是 {today_str}。不要在报告中自行写『生成时间』『报告日期』等字段，"
+        "系统会在外层卡片展示时间戳。\n"
         "格式要求：\n"
         "1. 一级标题：「{period} 月度报告」\n"
         "2. 二级章节：① 概览 ② 支出明细 ③ 收入明细 ④ 预算执行 ⑤ 异常提醒 ⑥ 下月建议\n"
@@ -297,6 +300,7 @@ def call_llm_monthly_report(insights: dict, llm: dict | None = None) -> str:
         "4. 概览段必须明确给出净结余金额并指出是结余还是赤字。\n"
         "5. 异常提醒只列举提供的数据，不要编造。\n"
         "6. 下月建议给 3 条具体可执行的行动项。\n"
+        "7. 不要使用 `---` 或 `***` 等水平分隔线，章节之间用空行和二级标题自然分隔。\n"
     ).replace("{period}", str(period))
     user_msg = "数据如下：\n```json\n" + _json.dumps(insights, ensure_ascii=False, indent=2) + "\n```"
     messages = [

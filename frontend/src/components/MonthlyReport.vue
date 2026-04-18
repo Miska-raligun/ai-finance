@@ -59,6 +59,7 @@ const inline = (s) => esc(s)
 
 const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line)
 const isTableSep = (line) => /^\s*\|?[\s\-:|]+\|?\s*$/.test(line) && line.includes('-')
+const isHorizRule = (line) => /^\s*(?:[-*_]\s*){3,}\s*$/.test(line) && !isTableRow(line)
 const splitRow = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
 
 function renderMarkdown(md) {
@@ -87,6 +88,9 @@ function renderMarkdown(md) {
       out.push(`<table class="md-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`)
       continue
     }
+
+    // 水平分隔线（--- / *** / ___ / - - -）
+    if (isHorizRule(line)) { closeList(); out.push('<hr class="md-hr" />'); i++; continue }
 
     // 标题
     let m
@@ -159,4 +163,9 @@ const rendered = computed(() => renderMarkdown(props.report?.content || ''))
   text-align: left;
 }
 .markdown :deep(.md-table th) { background: #F8FAFC; }
+.markdown :deep(.md-hr) {
+  border: none;
+  border-top: 1px solid var(--color-border, #E5E7EB);
+  margin: 14px 0;
+}
 </style>
