@@ -32,8 +32,16 @@
           <label class="field-label">持仓</label>
           <el-input-number v-model="rec._edit.holdings" :min="0" size="small" style="width:100%" controls-position="right" />
         </div>
-        <div class="card-field">
-          <label class="field-label">成本</label>
+        <div v-if="isAutoType(rec._edit.type)" class="card-field">
+          <label class="field-label">成本价（每股/每份）</label>
+          <el-input-number
+            v-model="rec._edit.cost_price"
+            :min="0" :step="0.01" :precision="4"
+            size="small" style="width:100%" controls-position="right"
+          />
+        </div>
+        <div v-else class="card-field">
+          <label class="field-label">总成本</label>
           <el-input-number v-model="rec._edit.cost_basis" :min="0" size="small" style="width:100%" controls-position="right" />
         </div>
         <div v-if="!isAutoType(rec._edit.type)" class="card-field">
@@ -41,8 +49,10 @@
           <el-input-number v-model="rec._edit.current_value" :min="0" size="small" style="width:100%" controls-position="right" />
         </div>
         <div v-else class="card-field card-field-wide">
-          <label class="field-label">当前市值</label>
-          <div class="auto-hint">股票/基金：保存后按代码自动拉取最新价</div>
+          <div class="auto-hint">
+            总成本 = {{ Number(rec._edit.holdings) || 0 }} × ¥{{ Number(rec._edit.cost_price) || 0 }}
+            = ¥{{ computedCost.toFixed(2) }}；当前市值由系统按代码自动拉取
+          </div>
         </div>
       </div>
       <div v-if="rec._error" class="card-error-msg">⚠️ {{ rec._error }}</div>
@@ -57,6 +67,8 @@
 </template>
 
 <script setup>
+import { computed, watch } from 'vue'
+
 const TYPE_LABEL = {
   stock: '股票', fund: '基金', bond: '债券', cash: '现金',
   crypto: '加密货币', realestate: '房地产', other: '其他',
@@ -71,10 +83,40 @@ function symbolPlaceholder(type) {
   return '可选'
 }
 
-defineProps({
+const props = defineProps({
   rec: { type: Object, required: true },
 })
 defineEmits(['confirm', 'cancel'])
+
+// 若 LLM 只给了总成本 + 持仓，反推出成本价作为初始值，保持股票/基金 UX 一致
+watch(
+  () => [props.rec._edit.type, props.rec._edit.holdings, props.rec._edit.cost_basis],
+  ([type, holdings, basis]) => {
+    if (!isAutoType(type)) return
+    if (props.rec._edit.cost_price != null && props.rec._edit.cost_price > 0) return
+    const h = Number(holdings) || 0
+    const b = Number(basis) || 0
+    if (h > 0 && b > 0) {
+      props.rec._edit.cost_price = Number((b / h).toFixed(4))
+    }
+  },
+  { immediate: true },
+)
+
+const computedCost = computed(() => {
+  const h = Number(props.rec._edit.holdings) || 0
+  const cp = Number(props.rec._edit.cost_price) || 0
+  return h * cp
+})
+
+// 股票/基金类型：保持 cost_basis 与 持仓×成本价 同步，避免提交时漏算
+watch(
+  [() => props.rec._edit.type, () => props.rec._edit.holdings, () => props.rec._edit.cost_price],
+  ([type]) => {
+    if (!isAutoType(type)) return
+    props.rec._edit.cost_basis = Number(computedCost.value.toFixed(2))
+  },
+)
 </script>
 
 <style scoped>

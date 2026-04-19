@@ -84,8 +84,12 @@
             <span class="drawer-label">持仓</span>
             <span class="drawer-value text-normal">{{ popoverRow.holdings || '—' }}</span>
           </div>
+          <div v-if="isAutoType(popoverRow.type) && popoverRow.holdings > 0" class="drawer-row">
+            <span class="drawer-label">成本价</span>
+            <span class="drawer-value">¥{{ unitCostStr(popoverRow) }}</span>
+          </div>
           <div class="drawer-row">
-            <span class="drawer-label">成本</span>
+            <span class="drawer-label">总成本</span>
             <span class="drawer-value">¥{{ (popoverRow.cost_basis || 0).toFixed(2) }}</span>
           </div>
           <div class="drawer-row">
@@ -158,7 +162,23 @@
               style="width:100%"
             />
           </div>
-          <div class="drawer-edit-field">
+          <div v-if="isAutoType(editingRow.type)" class="drawer-edit-field">
+            <label class="drawer-edit-label">
+              成本价（每股/每份）
+            </label>
+            <el-input-number
+              v-model="editingRow.cost_price"
+              :min="0"
+              :step="0.01"
+              :precision="4"
+              controls-position="right"
+              style="width:100%"
+            />
+            <div class="auto-value-hint">
+              总成本 = 持仓 × 成本价 = ¥{{ computedCostBasis.toFixed(2) }}
+            </div>
+          </div>
+          <div v-else class="drawer-edit-field">
             <label class="drawer-edit-label">总成本</label>
             <el-input-number
               v-model="editingRow.cost_basis"
@@ -202,7 +222,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import { useInvestmentStore } from '@/stores/investment'
@@ -233,6 +253,14 @@ const popoverRow = ref(null)
 const editingRow = ref(null)
 const refreshing = ref(false)
 
+const computedCostBasis = computed(() => {
+  const r = editingRow.value
+  if (!r || !isAutoType(r.type)) return r?.cost_basis || 0
+  const h = Number(r.holdings) || 0
+  const cp = Number(r.cost_price) || 0
+  return h * cp
+})
+
 const touchQuery = window.matchMedia('(hover: none) and (pointer: coarse)')
 const isTouch = ref(touchQuery.matches)
 function onTouchChange(e) { isTouch.value = e.matches }
@@ -260,7 +288,7 @@ function onDrawerClose() {
 function openCreate() {
   editingRow.value = {
     id: null, name: '', type: 'fund', symbol: '',
-    holdings: 0, cost_basis: 0, current_value: 0, notes: '',
+    holdings: 0, cost_basis: 0, cost_price: 0, current_value: 0, notes: '',
   }
   popoverRow.value = null
   drawerMode.value = 'edit'
@@ -268,15 +296,22 @@ function openCreate() {
 }
 
 function startDrawerEdit() {
+  const r = popoverRow.value
+  const holdings = r.holdings || 0
+  const costBasis = r.cost_basis || 0
+  const costPrice = isAutoType(r.type) && holdings > 0
+    ? Number((costBasis / holdings).toFixed(4))
+    : 0
   editingRow.value = {
-    id: popoverRow.value.id,
-    name: popoverRow.value.name,
-    type: popoverRow.value.type,
-    symbol: popoverRow.value.symbol || '',
-    holdings: popoverRow.value.holdings || 0,
-    cost_basis: popoverRow.value.cost_basis || 0,
-    current_value: popoverRow.value.current_value || 0,
-    notes: popoverRow.value.notes || '',
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    symbol: r.symbol || '',
+    holdings,
+    cost_basis: costBasis,
+    cost_price: costPrice,
+    current_value: r.current_value || 0,
+    notes: r.notes || '',
   }
   drawerMode.value = 'edit'
 }
@@ -299,8 +334,12 @@ async function saveDrawerEdit() {
   }
   try {
     const payload = { ...r }
-    // 股票/基金的 current_value 由后端算；避免覆盖旧值
-    if (isAutoType(r.type)) delete payload.current_value
+    // 股票/基金：总成本由 持仓 × 成本价 算出；current_value 由后端算
+    if (isAutoType(r.type)) {
+      payload.cost_basis = computedCostBasis.value
+      delete payload.current_value
+    }
+    delete payload.cost_price
 
     if (r.id) {
       await store.updateAsset(r.id, payload)
@@ -349,6 +388,13 @@ async function refreshPrices() {
   } finally {
     refreshing.value = false
   }
+}
+
+function unitCostStr(row) {
+  const h = Number(row?.holdings) || 0
+  const cb = Number(row?.cost_basis) || 0
+  if (h <= 0) return '—'
+  return (cb / h).toFixed(4)
 }
 
 function pnl(row) {
