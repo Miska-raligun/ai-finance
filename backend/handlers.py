@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 from datetime import datetime
 from typing import Any
 
@@ -682,18 +683,41 @@ def invest_add_asset(user_id: int, params: dict[str, Any]) -> str:
         return "⚠️ 数量/成本/现值必须是数字"
 
     db = get_db()
-    now = datetime.utcnow().isoformat(timespec="seconds")
-    db.execute(
-        "INSERT INTO assets (user_id, name, type, symbol, holdings, cost_basis, "
-        "current_value, currency, notes, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?)",
-        (user_id, name, atype, (params.get("代码") or "").strip() or None,
-         holdings, cost_basis, current_value,
-         (params.get("备注") or "").strip() or None, now, now),
-    )
-    db.commit()
+    dup = db.execute(
+        "SELECT 1 FROM assets WHERE user_id = ? AND name = ?",
+        (user_id, name),
+    ).fetchone()
+    if dup:
+        return f"⚠️ 资产「{name}」已存在，请换个名称或使用更新接口修改"
+
+    symbol = (params.get("代码") or "").strip() or None
+
+    # 股票/基金自动尝试拉行情，避免用户手填市值
+    if atype in ("stock", "fund") and symbol and holdings > 0 and current_value <= 0:
+        try:
+            from services.quotes import get_quote
+            q = get_quote(db, symbol, atype, force=True)
+            if q is not None:
+                current_value = round(q.price * holdings, 2)
+        except (ImportError, RuntimeError) as e:
+            logger.warning("[invest_add_asset] quote fetch failed: %s", e)
+
+    now = datetime.now().isoformat(timespec="seconds")
+    try:
+        db.execute(
+            "INSERT INTO assets (user_id, name, type, symbol, holdings, cost_basis, "
+            "current_value, currency, notes, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?)",
+            (user_id, name, atype, symbol,
+             holdings, cost_basis, current_value,
+             (params.get("备注") or "").strip() or None, now, now),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        return f"⚠️ 资产「{name}」已存在"
     invalidate_user(user_id)
-    return f"✅ 已登记资产「{name}」（{atype}），当前市值 ¥{current_value:.2f}"
+    tail = f"当前市值 ¥{current_value:.2f}" if current_value > 0 else "稍后可刷新行情自动更新市值"
+    return f"✅ 已登记资产「{name}」（{atype}），{tail}"
 
 
 def invest_update_value(user_id: int, params: dict[str, Any]) -> str:
@@ -707,7 +731,7 @@ def invest_update_value(user_id: int, params: dict[str, Any]) -> str:
     db = get_db()
     res = db.execute(
         "UPDATE assets SET current_value = ?, updated_at = ? WHERE user_id = ? AND name = ?",
-        (current_value, datetime.utcnow().isoformat(timespec="seconds"), user_id, name),
+        (current_value, datetime.now().isoformat(timespec="seconds"), user_id, name),
     )
     db.commit()
     invalidate_user(user_id)
@@ -727,7 +751,7 @@ def invest_add_goal(user_id: int, params: dict[str, Any]) -> str:
     if target <= 0:
         return "⚠️ 目标金额需大于 0"
     db = get_db()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = datetime.now().isoformat(timespec="seconds")
     db.execute(
         "INSERT INTO financial_goals (user_id, name, target_amount, deadline, "
         "current_progress, priority, note, created_at, updated_at) "
@@ -783,6 +807,19 @@ def invest_analyze_portfolio(user_id: int, params: dict[str, Any] | None = None,
     risk_level = risk_row["level"] if risk_row else None
     drift = compute_drift(allocation, risk_level=risk_level)
     return call_llm_portfolio_advice(allocation, drift, returns, risk_level, llm=llm)
+
+
+def invest_refresh_prices(user_id: int, params: dict[str, Any] | None = None) -> str:
+    """强制刷新该用户股票/基金行情并更新 current_value。"""
+    from services.quotes import refresh_user_assets
+    stats = refresh_user_assets(get_db(), user_id, force=True)
+    invalidate_user(user_id)
+    if stats["updated"] == 0:
+        return "ℹ️ 未更新任何资产（无股票/基金或缺少代码/持仓）"
+    msg = f"🔄 已刷新 {stats['updated']} 项股票/基金行情"
+    if stats["stale"]:
+        msg += f"（其中 {stats['stale']} 项使用旧缓存）"
+    return msg
 
 
 def category_sum(user_id: int, params: dict[str, Any]) -> str:

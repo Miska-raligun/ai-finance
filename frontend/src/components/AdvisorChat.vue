@@ -17,15 +17,37 @@
     <div ref="scrollRef" class="messages">
       <div v-if="!messages.length" class="empty">
         你可以问我："我的持仓风险高吗？""有什么再平衡建议？""怎么达成我的理财目标？"
+        <br /><br />
+        💡 也可以上传持仓截图或目标截图，Anon 会自动识别并生成待确认的入库卡。
       </div>
       <div
         v-for="(m, i) in messages"
         :key="i"
-        class="bubble"
-        :class="m.role"
+        :class="['msg-wrapper', m.role]"
       >
-        <div class="bubble-role">{{ m.role === 'user' ? '你' : 'Anon' }}</div>
-        <div class="bubble-content" v-html="render(m.content)"></div>
+        <div class="bubble" :class="m.role">
+          <div class="bubble-role">{{ m.role === 'user' ? '你' : 'Anon' }}</div>
+          <img v-if="m.image" :src="m.image" class="msg-image" />
+          <div v-if="m.content" class="bubble-content" v-html="render(m.content)"></div>
+        </div>
+        <template v-if="m.pending_assets && m.pending_assets.length">
+          <PendingAssetCard
+            v-for="(rec, ai) in m.pending_assets"
+            :key="`a${i}-${ai}`"
+            :rec="rec"
+            @cancel="rec._state = 'cancelled'"
+            @confirm="confirmAsset(rec)"
+          />
+        </template>
+        <template v-if="m.pending_goals && m.pending_goals.length">
+          <PendingGoalCard
+            v-for="(rec, gi) in m.pending_goals"
+            :key="`g${i}-${gi}`"
+            :rec="rec"
+            @cancel="rec._state = 'cancelled'"
+            @confirm="confirmGoal(rec)"
+          />
+        </template>
       </div>
       <div v-if="loading" class="bubble assistant">
         <div class="bubble-role">Anon</div>
@@ -34,6 +56,19 @@
     </div>
 
     <div class="composer">
+      <input
+        ref="imageInput"
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style="display:none"
+        @change="handleImageSelect"
+      />
+      <el-button
+        class="img-upload-btn"
+        :disabled="loading"
+        :title="'上传持仓 / 目标截图识别'"
+        @click="imageInput?.click()"
+      >📷</el-button>
       <el-input
         v-model="draft"
         type="textarea"
@@ -52,6 +87,8 @@ import { ref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
+import PendingAssetCard from '@/components/PendingAssetCard.vue'
+import PendingGoalCard from '@/components/PendingGoalCard.vue'
 
 const store = useInvestmentStore()
 const userStore = useUserStore()
@@ -60,6 +97,7 @@ const messages = ref([])
 const draft = ref('')
 const loading = ref(false)
 const scrollRef = ref(null)
+const imageInput = ref(null)
 
 function scrollToBottom() {
   nextTick(() => {
@@ -108,6 +146,88 @@ async function analyzePortfolio() {
 
 function clear() {
   messages.value = []
+}
+
+function handleImageSelect(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过 10MB')
+    e.target.value = ''
+    return
+  }
+  uploadImage(file)
+  e.target.value = ''
+}
+
+async function uploadImage(file) {
+  const previewUrl = URL.createObjectURL(file)
+  messages.value.push({ role: 'user', content: '（上传了一张图片）', image: previewUrl })
+  loading.value = true
+  scrollToBottom()
+  try {
+    const fd = new FormData()
+    fd.append('image', file)
+    const res = await fetch('/api/investment/parse-image', {
+      method: 'POST',
+      credentials: 'include',
+      body: fd,
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      messages.value.push({ role: 'assistant', content: data.error || '识别失败' })
+      return
+    }
+    const msg = { role: 'assistant', content: data.reply || '已识别' }
+    if (data.pending_assets?.length) {
+      msg.pending_assets = data.pending_assets.map(a => ({ ...a, _state: 'pending', _edit: { ...a } }))
+    }
+    if (data.pending_goals?.length) {
+      msg.pending_goals = data.pending_goals.map(g => ({ ...g, _state: 'pending', _edit: { ...g } }))
+    }
+    messages.value.push(msg)
+  } catch {
+    messages.value.push({ role: 'assistant', content: '❌ 网络异常，请稍后重试。' })
+  } finally {
+    loading.value = false
+    scrollToBottom()
+  }
+}
+
+async function confirmAsset(rec) {
+  rec._state = 'saving'
+  rec._error = ''
+  try {
+    const res = await store.commitPendingAsset({ ...rec._edit })
+    if (res?.success) {
+      rec._state = 'confirmed'
+      ElMessage.success('已添加到投资理财')
+    } else {
+      rec._state = 'error'
+      rec._error = res?.message || '入库失败'
+    }
+  } catch (e) {
+    rec._state = 'error'
+    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
+  }
+}
+
+async function confirmGoal(rec) {
+  rec._state = 'saving'
+  rec._error = ''
+  try {
+    const res = await store.commitPendingGoal({ ...rec._edit })
+    if (res?.success) {
+      rec._state = 'confirmed'
+      ElMessage.success('已添加理财目标')
+    } else {
+      rec._state = 'error'
+      rec._error = res?.message || '入库失败'
+    }
+  } catch (e) {
+    rec._state = 'error'
+    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
+  }
 }
 
 function render(md) {
@@ -174,6 +294,23 @@ function render(md) {
   margin-bottom: 4px;
 }
 .typing { font-style: italic; opacity: 0.8; }
+
+.msg-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 86%;
+}
+.msg-wrapper.user { align-self: flex-end; align-items: flex-end; }
+.msg-wrapper.assistant { align-self: flex-start; align-items: flex-start; }
+.msg-image {
+  max-width: 160px;
+  max-height: 160px;
+  border-radius: 8px;
+  margin-top: 4px;
+  display: block;
+}
+
 .composer {
   display: flex;
   gap: 8px;
@@ -181,4 +318,12 @@ function render(md) {
   align-items: flex-end;
 }
 .composer .el-textarea { flex: 1; }
+.img-upload-btn {
+  flex-shrink: 0;
+  padding: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-size: 16px;
+}
 </style>

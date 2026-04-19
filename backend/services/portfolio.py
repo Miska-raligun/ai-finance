@@ -147,11 +147,12 @@ def compute_top_movers(assets: Iterable, top_n: int = 3) -> list[dict]:
 
 
 def compute_goal_plan(target_amount: float, current_progress: float, deadline: str | None,
-                      monthly_net_cashflow: float = 0.0) -> dict:
+                      monthly_net_cashflow: float = 0.0, priority: int | None = None) -> dict:
     """三档储蓄方案（保守 3% / 平衡 6% / 激进 9%）下的月供建议。
 
     使用未来值年金近似公式：FV = PMT * ((1+r/12)^n - 1) / (r/12)
-    返回：{months_left, gap, plans:[{level, annual_rate, monthly_pmt, feasible}]}
+    priority 1~2 时推荐上浮一档（例：平衡 → 激进），引导用户更激进地完成高优先级目标。
+    返回：{months_left, gap, plans:[{level, annual_rate, monthly_pmt, feasible}], recommended_level}
     """
     today = datetime.now().date()
     if deadline:
@@ -179,9 +180,23 @@ def compute_goal_plan(target_amount: float, current_progress: float, deadline: s
             "feasible": (monthly_net_cashflow == 0) or (pmt <= monthly_net_cashflow),
         })
 
+    # 默认推"平衡"；priority 1~2 上浮到"激进"；priority 5 下沉到"保守"
+    recommended = "balanced"
+    if priority is not None:
+        try:
+            p = int(priority)
+            if p <= 2:
+                recommended = "aggressive"
+            elif p >= 5:
+                recommended = "conservative"
+        except (TypeError, ValueError):
+            pass
+
     return {
         "months_left": months_left,
         "gap": round(gap, 2),
         "monthly_net_cashflow": round(float(monthly_net_cashflow or 0), 2),
         "plans": plans,
+        "priority": priority,
+        "recommended_level": recommended,
     }

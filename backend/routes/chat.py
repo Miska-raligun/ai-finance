@@ -62,36 +62,77 @@ def recognize_image(image_b64: str, mime_type: str) -> str | None:
 
 # ── 工具调用处理（chat 和 chat_image 共用） ──────────────────────
 
-def _process_tool_calls(tool_calls: list, llm_cfg: dict) -> tuple[list[str], list[dict]]:
-    """处理 LLM 返回的工具调用，返回 (results, pending_records)"""
+def _process_tool_calls(tool_calls: list, llm_cfg: dict) -> tuple[list[str], list[dict], list[dict], list[dict]]:
+    """处理 LLM 返回的工具调用。
+
+    返回 (results, pending_records, pending_assets, pending_goals)。
+    记账 / 投资资产 / 理财目标三类工具调用都被转成待确认卡片，
+    避免 LLM 直接改库。
+    """
     results = []
     pending_records = []
+    pending_assets = []
+    pending_goals = []
     for tc in tool_calls:
         func_name = tc["function"]["name"]
         params = json.loads(tc["function"]["arguments"])
-        if func_name in handlers:
-            if func_name in ("add_record", "add_income"):
-                rec_date = (params.get(PARAM_DATE) or "").strip() or datetime.now().strftime("%Y-%m-%d")
-                rec = {
-                    "type": "expense" if func_name == "add_record" else "income",
-                    "category": params.get(PARAM_CATEGORY, ""),
-                    "amount": float(params.get(PARAM_AMOUNT, 0)),
-                    "date": rec_date,
-                    "note": params.get(PARAM_NOTE, ""),
-                }
-                pending_records.append(rec)
-                rec_type = "支出" if func_name == "add_record" else "收入"
-                results.append(
-                    f"已识别到{rec_type}：分类「{rec['category']}」金额 ¥{rec['amount']}，"
-                    f"备注「{rec['note']}」，日期 {rec['date']}，等待用户确认。"
-                )
-            elif func_name in ("suggest_budgets", "invest_analyze_portfolio"):
-                r = handlers[func_name](g.user_id, params, llm_cfg)
-                results.append(r)
-            else:
-                r = handlers[func_name](g.user_id, params)
-                results.append(r)
-    return results, pending_records
+        if func_name not in handlers:
+            continue
+        if func_name in ("add_record", "add_income"):
+            rec_date = (params.get(PARAM_DATE) or "").strip() or datetime.now().strftime("%Y-%m-%d")
+            rec = {
+                "type": "expense" if func_name == "add_record" else "income",
+                "category": params.get(PARAM_CATEGORY, ""),
+                "amount": float(params.get(PARAM_AMOUNT, 0)),
+                "date": rec_date,
+                "note": params.get(PARAM_NOTE, ""),
+            }
+            pending_records.append(rec)
+            rec_type = "支出" if func_name == "add_record" else "收入"
+            results.append(
+                f"已识别到{rec_type}：分类「{rec['category']}」金额 ¥{rec['amount']}，"
+                f"备注「{rec['note']}」，日期 {rec['date']}，等待用户确认。"
+            )
+        elif func_name == "invest_add_asset":
+            asset = {
+                "name": (params.get("名称") or "").strip(),
+                "type": (params.get("类型") or "other").strip(),
+                "symbol": (params.get("代码") or "").strip(),
+                "holdings": float(params.get("数量", 0) or 0),
+                "cost_basis": float(params.get("成本", 0) or 0),
+                "current_value": float(params.get("现值", 0) or 0),
+                "notes": (params.get("备注") or "").strip(),
+            }
+            if not asset["name"]:
+                continue
+            pending_assets.append(asset)
+            results.append(
+                f"已识别到资产：「{asset['name']}」（{asset['type']}），"
+                f"持仓 {asset['holdings']}，成本 ¥{asset['cost_basis']:.2f}，等待用户确认。"
+            )
+        elif func_name == "invest_add_goal":
+            goal = {
+                "name": (params.get("名称") or "").strip(),
+                "target_amount": float(params.get("目标金额", 0) or 0),
+                "deadline": (params.get("截止日期") or "").strip(),
+                "current_progress": float(params.get("已完成", 0) or 0),
+                "priority": int(params.get("优先级", 3) or 3),
+                "note": (params.get("备注") or "").strip(),
+            }
+            if not goal["name"] or goal["target_amount"] <= 0:
+                continue
+            pending_goals.append(goal)
+            results.append(
+                f"已识别到理财目标：「{goal['name']}」目标 ¥{goal['target_amount']:.2f}，"
+                f"优先级 {goal['priority']}，等待用户确认。"
+            )
+        elif func_name in ("suggest_budgets", "invest_analyze_portfolio"):
+            r = handlers[func_name](g.user_id, params, llm_cfg)
+            results.append(r)
+        else:
+            r = handlers[func_name](g.user_id, params)
+            results.append(r)
+    return results, pending_records, pending_assets, pending_goals
 
 
 @chat_bp.route("/api/chat", methods=["POST"])
@@ -121,13 +162,15 @@ def chat():
 
     reply = None
     pending_records = []
+    pending_assets = []
+    pending_goals = []
     tool_calls = None
     if response and "choices" in response:
         msg_obj = response["choices"][0].get("message", {})
         tool_calls = msg_obj.get("tool_calls")
 
         if tool_calls:
-            results, pending_records = _process_tool_calls(tool_calls, llm_cfg)
+            results, pending_records, pending_assets, pending_goals = _process_tool_calls(tool_calls, llm_cfg)
             if results:
                 llm_logger.info("Tools: %s", [tc['function']['name'] for tc in tool_calls])
                 reply = call_llm_summary(latest_msg, "\n".join(results), llm_cfg)
@@ -138,7 +181,12 @@ def chat():
         reply = call_llm_chat(chat_history, llm_cfg, extra_system=profile_ctx)
 
     add_chat_message(g.user_id, "assistant", reply)
-    return jsonify({"reply": reply, "pending_records": pending_records})
+    return jsonify({
+        "reply": reply,
+        "pending_records": pending_records,
+        "pending_assets": pending_assets,
+        "pending_goals": pending_goals,
+    })
 
 
 @chat_bp.route("/api/chat/image", methods=["POST"])
@@ -183,13 +231,15 @@ def chat_image():
 
     reply = None
     pending_records = []
+    pending_assets = []
+    pending_goals = []
     tool_calls = None
     if response and "choices" in response:
         msg_obj = response["choices"][0].get("message", {})
         tool_calls = msg_obj.get("tool_calls")
 
         if tool_calls:
-            results, pending_records = _process_tool_calls(tool_calls, llm_cfg)
+            results, pending_records, pending_assets, pending_goals = _process_tool_calls(tool_calls, llm_cfg)
             if results:
                 llm_logger.info("[图片识别] Tools: %s", [tc['function']['name'] for tc in tool_calls])
                 reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
@@ -201,7 +251,12 @@ def chat_image():
         reply = call_llm_chat(chat_history, llm_cfg)
 
     add_chat_message(g.user_id, "assistant", reply)
-    return jsonify({"reply": reply, "pending_records": pending_records})
+    return jsonify({
+        "reply": reply,
+        "pending_records": pending_records,
+        "pending_assets": pending_assets,
+        "pending_goals": pending_goals,
+    })
 
 
 @chat_bp.route("/api/chat/history", methods=["GET"])

@@ -16,7 +16,7 @@
           <template v-if="msg.pending_records && msg.pending_records.length">
             <div
               v-for="(rec, ri) in msg.pending_records"
-              :key="ri"
+              :key="`r${ri}`"
               v-show="rec._state !== 'cancelled'"
               :class="['pending-card', rec.type === 'expense' ? 'card-expense' : 'card-income', rec._state === 'confirmed' ? 'card-confirmed' : '']"
             >
@@ -79,6 +79,28 @@
                 </div>
               </template>
             </div>
+          </template>
+
+          <!-- 资产待确认卡片 -->
+          <template v-if="msg.pending_assets && msg.pending_assets.length">
+            <PendingAssetCard
+              v-for="(rec, ai) in msg.pending_assets"
+              :key="`a${ai}`"
+              :rec="rec"
+              @cancel="rec._state = 'cancelled'"
+              @confirm="confirmAsset(rec)"
+            />
+          </template>
+
+          <!-- 理财目标待确认卡片 -->
+          <template v-if="msg.pending_goals && msg.pending_goals.length">
+            <PendingGoalCard
+              v-for="(rec, gi) in msg.pending_goals"
+              :key="`g${gi}`"
+              :rec="rec"
+              @cancel="rec._state = 'cancelled'"
+              @confirm="confirmGoal(rec)"
+            />
           </template>
         </div>
         <div v-if="msg.sender === 'user'" class="avatar user-avatar">
@@ -149,11 +171,15 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 import { useChatStore } from '@/stores/chat'
+import { useInvestmentStore } from '@/stores/investment'
 import VoiceInput from '@/components/VoiceInput.vue'
+import PendingAssetCard from '@/components/PendingAssetCard.vue'
+import PendingGoalCard from '@/components/PendingGoalCard.vue'
 
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
 const chatStore = useChatStore()
+const investmentStore = useInvestmentStore()
 
 const quickActions = [
   { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
@@ -199,19 +225,31 @@ async function sendMessage() {
     })
     const data = await res.json()
     const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
-    if (data.pending_records && data.pending_records.length > 0) {
-      assistantMsg.pending_records = data.pending_records.map(rec => ({
-        ...rec,
-        _state: 'pending',
-        _edit: { ...rec }
-      }))
-    }
+    decoratePending(data, assistantMsg)
     chatStore.pushMessage(assistantMsg)
   } catch {
     chatStore.pushMessage({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
   } finally {
     loading.value = false
     await scrollToBottom()
+  }
+}
+
+function decoratePending(data, assistantMsg) {
+  if (data.pending_records && data.pending_records.length > 0) {
+    assistantMsg.pending_records = data.pending_records.map(rec => ({
+      ...rec, _state: 'pending', _edit: { ...rec },
+    }))
+  }
+  if (data.pending_assets && data.pending_assets.length > 0) {
+    assistantMsg.pending_assets = data.pending_assets.map(rec => ({
+      ...rec, _state: 'pending', _edit: { ...rec },
+    }))
+  }
+  if (data.pending_goals && data.pending_goals.length > 0) {
+    assistantMsg.pending_goals = data.pending_goals.map(rec => ({
+      ...rec, _state: 'pending', _edit: { ...rec },
+    }))
   }
 }
 
@@ -243,13 +281,7 @@ async function sendImage(file) {
     })
     const data = await res.json()
     const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
-    if (data.pending_records && data.pending_records.length > 0) {
-      assistantMsg.pending_records = data.pending_records.map(rec => ({
-        ...rec,
-        _state: 'pending',
-        _edit: { ...rec }
-      }))
-    }
+    decoratePending(data, assistantMsg)
     chatStore.pushMessage(assistantMsg)
   } catch {
     chatStore.pushMessage({ sender: 'assistant', content: '❌ 图片识别失败，请重试或手动输入。' })
@@ -291,6 +323,42 @@ async function confirmRecord(rec) {
     }
   } catch {
     ElMessage.error('网络异常')
+  }
+}
+
+async function confirmAsset(rec) {
+  rec._state = 'saving'
+  rec._error = ''
+  try {
+    const res = await investmentStore.commitPendingAsset({ ...rec._edit })
+    if (res?.success) {
+      rec._state = 'confirmed'
+      ElMessage.success('已添加到投资理财')
+    } else {
+      rec._state = 'error'
+      rec._error = res?.message || '入库失败'
+    }
+  } catch (e) {
+    rec._state = 'error'
+    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
+  }
+}
+
+async function confirmGoal(rec) {
+  rec._state = 'saving'
+  rec._error = ''
+  try {
+    const res = await investmentStore.commitPendingGoal({ ...rec._edit })
+    if (res?.success) {
+      rec._state = 'confirmed'
+      ElMessage.success('已添加理财目标')
+    } else {
+      rec._state = 'error'
+      rec._error = res?.message || '入库失败'
+    }
+  } catch (e) {
+    rec._state = 'error'
+    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
   }
 }
 

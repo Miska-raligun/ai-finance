@@ -27,9 +27,38 @@
           <div class="col-left">
             <PortfolioPie :allocation="portfolio?.allocation" />
             <el-card v-if="portfolio && portfolio.drift?.length" class="mt">
-              <template #header>⚖️ 再平衡建议</template>
+              <template #header>
+                <div class="rebalance-header">
+                  <span>⚖️ 再平衡建议</span>
+                  <el-tooltip placement="top" effect="light">
+                    <template #content>
+                      <div class="rebalance-tooltip">
+                        <div class="tooltip-title">
+                          目标配比基于你的风险等级
+                          <b>{{ LEVEL_LABEL[portfolio.risk_level] || '未测评（用默认保守档）' }}</b>
+                        </div>
+                        <table class="tooltip-table">
+                          <thead>
+                            <tr><th>类型</th><th>目标占比</th></tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(v, k) in portfolio.target_allocation || {}" :key="k">
+                              <td>{{ TYPE_LABEL[k] || k }}</td>
+                              <td>{{ (v * 100).toFixed(0) }}%</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <div class="tooltip-note">
+                          drift = 当前占比 − 目标占比；|drift| &lt; 1% 建议"保持"，正值减仓、负值加仓。
+                        </div>
+                      </div>
+                    </template>
+                    <span class="help-icon" aria-label="计算说明">ℹ️</span>
+                  </el-tooltip>
+                </div>
+              </template>
               <div v-if="!portfolio.risk_level" class="hint">
-                先完成风险测评，建议会更贴合你的偏好。
+                <b>先完成风险测评</b>可得到贴合你的目标配比，否则按默认"保守"档位计算。
               </div>
               <el-table :data="portfolio.drift" size="small">
                 <el-table-column label="类型">
@@ -74,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useInvestmentStore } from '@/stores/investment'
@@ -89,7 +118,7 @@ import ExportMenu from '@/components/ExportMenu.vue'
 const router = useRouter()
 const userStore = useUserStore()
 const store = useInvestmentStore()
-const { assets, goals, portfolio } = storeToRefs(store)
+const { assets, goals, portfolio, refreshCounter } = storeToRefs(store)
 
 const activeTab = ref('overview')
 
@@ -115,6 +144,7 @@ onMounted(() => {
   refreshAll()
 })
 onActivated(refreshAll)
+watch(refreshCounter, refreshAll)
 </script>
 
 <style scoped>
@@ -184,6 +214,28 @@ onActivated(refreshAll)
 }
 .up { color: #EF4444; font-weight: 600; }
 .down { color: #22C55E; font-weight: 600; }
+
+.rebalance-header {
+  display: flex; align-items: center; gap: 8px;
+}
+.help-icon {
+  cursor: help;
+  font-size: 14px;
+  opacity: 0.7;
+}
+.help-icon:hover { opacity: 1; }
+:deep(.el-popper) .rebalance-tooltip { max-width: 280px; }
+.rebalance-tooltip .tooltip-title { font-size: 13px; margin-bottom: 8px; }
+.rebalance-tooltip .tooltip-table {
+  border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12px;
+}
+.rebalance-tooltip .tooltip-table th,
+.rebalance-tooltip .tooltip-table td {
+  border: 1px solid var(--color-border); padding: 3px 8px;
+}
+.rebalance-tooltip .tooltip-note {
+  font-size: 11px; color: var(--color-text-muted); margin-top: 6px; line-height: 1.5;
+}
 
 @media (max-width: 900px) {
   .invest-layout {

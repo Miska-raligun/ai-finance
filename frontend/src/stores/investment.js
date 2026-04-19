@@ -11,6 +11,7 @@ export const useInvestmentStore = defineStore('investment', {
     portfolio: null,
     riskProfile: null,
     loading: false,
+    refreshCounter: 0,
   }),
 
   getters: {
@@ -19,6 +20,32 @@ export const useInvestmentStore = defineStore('investment', {
   },
 
   actions: {
+    bumpRefresh() {
+      this.refreshCounter++
+    },
+
+    async refreshPrices() {
+      const res = await api.post('/api/investment/refresh-prices')
+      await this.fetchAssets()
+      await this.fetchPortfolio()
+      return res.data
+    },
+
+    async commitPendingAsset(payload) {
+      const res = await api.post('/api/investment/commit-asset', payload)
+      await this.fetchAssets()
+      await this.fetchPortfolio()
+      this.bumpRefresh()
+      return res.data
+    },
+
+    async commitPendingGoal(payload) {
+      const res = await api.post('/api/investment/commit-goal', payload)
+      await this.fetchGoals()
+      this.bumpRefresh()
+      return res.data
+    },
+
     async fetchAssets() {
       const res = await api.get('/api/investment/assets')
       this.assets = res.data || []

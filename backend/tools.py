@@ -7,6 +7,7 @@ from handlers import (
     delete_record, delete_income,
     invest_add_asset, invest_update_value, invest_add_goal,
     invest_portfolio_summary, invest_analyze_portfolio,
+    invest_refresh_prices,
 )
 
 handlers = {
@@ -30,6 +31,7 @@ handlers = {
     "invest_add_goal": invest_add_goal,
     "invest_portfolio_summary": invest_portfolio_summary,
     "invest_analyze_portfolio": invest_analyze_portfolio,
+    "invest_refresh_prices": invest_refresh_prices,
 }
 
 FINANCE_TOOLS = [
@@ -116,5 +118,7 @@ FINANCE_TOOLS = [
     {"type": "function", "function": {"name": "invest_portfolio_summary", "description": "查看当前投资组合总览（总市值、按类型的占比、累计回报率）",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "invest_analyze_portfolio", "description": "基于当前持仓与风险等级，生成投资组合诊断与再平衡建议（会调用 LLM）",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "invest_refresh_prices", "description": "刷新股票/基金最新行情并更新资产市值（忽略 10 分钟缓存）",
         "parameters": {"type": "object", "properties": {}}}},
 ]

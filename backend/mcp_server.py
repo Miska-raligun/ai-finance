@@ -191,6 +191,72 @@ def portfolio_summary() -> str:
 
 
 @mcp.tool()
+def refresh_portfolio_prices() -> str:
+    """强制刷新股票/基金行情并更新 current_value（忽略 10 分钟缓存）。"""
+    return handlers.invest_refresh_prices(uid())
+
+
+@mcp.tool()
+def quote_symbol(symbol: str, asset_type: str = "stock") -> str:
+    """按代码查询一次最新行情（不持久化）。asset_type 只支持 stock / fund。"""
+    from services.quotes import fetch_quote
+    q = fetch_quote(symbol, asset_type)
+    if q is None:
+        return f"❌ 未能获取 {symbol} 的 {asset_type} 行情（代码格式不对或数据源异常）"
+    name = q.name or symbol
+    return f"📈 {name}（{symbol}）最新价：¥{q.price:.4f}"
+
+
+@mcp.tool()
+def update_asset(asset_id: int, name: str = "", current_value: float = -1,
+                 holdings: float = -1, cost_basis: float = -1,
+                 symbol: str = "", notes: str = "") -> str:
+    """按 ID 更新资产字段。未提供的字段会被忽略（current_value/holdings/cost_basis 传 -1 表示不变）。"""
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM assets WHERE id=? AND user_id=?", (asset_id, uid()),
+    ).fetchone()
+    if not row:
+        return f"❌ 未找到 ID:{asset_id} 的资产"
+    updates = {}
+    if name: updates["name"] = name
+    if current_value >= 0: updates["current_value"] = current_value
+    if holdings >= 0: updates["holdings"] = holdings
+    if cost_basis >= 0: updates["cost_basis"] = cost_basis
+    if symbol: updates["symbol"] = symbol
+    if notes: updates["notes"] = notes
+    if not updates:
+        return "⚠️ 未提供任何要更新的字段"
+    sets = ", ".join(f"{k}=?" for k in updates) + ", updated_at=?"
+    values = list(updates.values()) + [datetime.now().isoformat(timespec="seconds"), asset_id, uid()]
+    try:
+        db.execute(f"UPDATE assets SET {sets} WHERE id=? AND user_id=?", values)
+        db.commit()
+    except Exception as e:
+        return f"⚠️ 更新失败：{e}"
+    from cache import invalidate_user
+    invalidate_user(uid())
+    return f"✅ 已更新资产 ID:{asset_id}"
+
+
+@mcp.tool()
+def delete_asset(asset_id: int) -> str:
+    """按 ID 删除一项资产（连带删除其交易流水）。"""
+    db = get_db()
+    row = db.execute(
+        "SELECT name FROM assets WHERE id=? AND user_id=?", (asset_id, uid()),
+    ).fetchone()
+    if not row:
+        return f"❌ 未找到 ID:{asset_id} 的资产"
+    db.execute("DELETE FROM assets WHERE id=? AND user_id=?", (asset_id, uid()))
+    db.execute("DELETE FROM asset_transactions WHERE asset_id=? AND user_id=?", (asset_id, uid()))
+    db.commit()
+    from cache import invalidate_user
+    invalidate_user(uid())
+    return f"✅ 已删除资产「{row['name']}」(ID:{asset_id})"
+
+
+@mcp.tool()
 def set_budget(category: str, amount: float, month: str = "") -> str:
     """设置或更新某分类的月预算。month:YYYY-MM(默认当月)。"""
     if not month: month = datetime.now().strftime("%Y-%m")

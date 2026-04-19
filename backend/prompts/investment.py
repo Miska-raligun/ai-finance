@@ -41,14 +41,27 @@ GOAL_COACH_SYSTEM = (
     "- 输出 Markdown：先用一句话点评目标的合理性，然后用表格列出三档方案，最后给出 2 条执行建议。\n"
     "- 月供数字直接引用输入数据，不要重新计算。\n"
     "- 如果某档月供超过用户的月净现金流，要明确指出'压力较大'并建议下调目标或延长期限。\n"
+    "- 关注目标的 priority（1=最高，5=最低）：\n"
+    "  · priority 1~2：强调时间紧迫与目标重要性，鼓励用户采用推荐档位（通常为激进档），并提醒挤压非必要开支。\n"
+    "  · priority 3：中性建议平衡档。\n"
+    "  · priority 4~5：可以采用保守档或灵活延期，强调留出应急资金。\n"
 )
 
 
 def build_goal_coach_prompt(goal: dict, plan: dict) -> str:
     import json
+    priority = goal.get("priority")
+    recommended = plan.get("recommended_level", "balanced")
+    priority_hint = ""
+    if priority is not None:
+        priority_hint = (
+            f"\n⚠️ 该目标 priority = {priority}，系统推荐档位：{recommended}。"
+            "请在建议中对应引导用户采取相应紧迫度。\n"
+        )
     return (
         f"目标信息：\n```json\n{json.dumps(goal, ensure_ascii=False, indent=2)}\n```\n\n"
-        f"系统已计算的三档方案：\n```json\n{json.dumps(plan, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"系统已计算的三档方案：\n```json\n{json.dumps(plan, ensure_ascii=False, indent=2)}\n```\n"
+        f"{priority_hint}\n"
         f"请按 system 指令输出表格与建议。"
     )
 
