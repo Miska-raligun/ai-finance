@@ -90,8 +90,9 @@ export const useInvestmentStore = defineStore('investment', {
       await this.fetchGoals()
     },
 
-    async fetchPortfolio() {
-      const res = await api.get('/api/investment/portfolio')
+    async fetchPortfolio({ refresh = false } = {}) {
+      const url = refresh ? '/api/investment/portfolio?refresh=1' : '/api/investment/portfolio'
+      const res = await api.get(url)
       this.portfolio = res.data
     },
 

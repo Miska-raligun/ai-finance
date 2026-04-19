@@ -215,7 +215,9 @@ def add_transaction():
 @login_required
 def portfolio_summary():
     db = get_db()
-    quote_stats = refresh_user_assets(db, g.user_id)
+    # 仅在显式要求时刷新行情；默认只读组合，避免删除/编辑等操作被网络延迟拖慢
+    want_refresh = request.args.get("refresh", "").lower() in {"1", "true", "yes"}
+    quote_stats = refresh_user_assets(db, g.user_id) if want_refresh else None
     assets = _fetch_assets()
     allocation = compute_allocation(assets)
     returns = compute_return(assets)

@@ -135,16 +135,20 @@ const pnlClass = computed(() => {
   return p > 0 ? 'up' : p < 0 ? 'down' : ''
 })
 
-async function refreshAll() {
-  await Promise.all([store.fetchAssets(), store.fetchGoals(), store.fetchPortfolio()])
+async function refreshAll({ quotes = false } = {}) {
+  await Promise.all([
+    store.fetchAssets(),
+    store.fetchGoals(),
+    store.fetchPortfolio({ refresh: quotes }),
+  ])
 }
 
 onMounted(() => {
   if (!userStore.username) { router.push('/login'); return }
-  refreshAll()
+  refreshAll({ quotes: true })  // 进页面时刷一次行情
 })
-onActivated(refreshAll)
-watch(refreshCounter, refreshAll)
+onActivated(() => refreshAll({ quotes: true }))  // 切回 tab 也刷
+watch(refreshCounter, () => refreshAll({ quotes: false }))  // 增删改后只重读数据
 </script>
 
 <style scoped>
