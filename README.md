@@ -7,25 +7,55 @@ AI Finance 是一个支持自然语言记账的个人财务助手，提供 Web �
 
 ## 功能特性
 
-- 自然语言记账（支出 / 收入）
-- 分类管理与月度预算设置
-- 消费统计与图表可视化
+### 智能记账
+- 自然语言记账（支出 / 收入），聊天或语音即可录入
+- 图片识别：上传账单 / 小票 / 发票截图自动提取金额、分类
+- 异常支出检测：偏离历史习惯的单笔消费会自动打上标记
+- 分类管理与月度预算设置，超支实时预警
+- 消费统计与图表可视化，支持月度趋势与分类排行
+- 服务端全局排序的账本表，大数据量下依然流畅
+
+### AI 月度报告
+- 一键生成当月 Markdown 报告（含 KPI 卡 + 分类表 + 异常提醒 + 建议）
+- 报告持久化到 `reports` 表，可回查历史；支持导出 CSV / PDF
+
+### 投资理财
+- 资产、持仓、理财目标多维管理，目标进度实时可视化
+- 股票 / 基金行情自动同步：输入代码即可，系统按 `持仓 × 最新价` 自动算市值与盈亏（新浪财经 / 天天基金源，10 分钟 TTL 缓存）
+- 风险测评问卷 → 对应目标配比 → 再平衡建议，悬停 ℹ️ 查看算法说明
+- 聊天 / 图片联动：截图持仓或对 Anon 说「我买了 100 股贵州茅台」，AI 识别后弹出**可编辑待确认卡片**，确认即入库（和记账体验一致）
+- 理财目标三色优先级徽章（高 红 / 中 橙 / 低 灰），影响 AI 方案推荐档位（激进 / 平衡 / 保守）
+- AI 投资顾问：一键诊断持仓、自定义问答、生成储蓄方案
+
+### 系统
 - LLM 配置（支持任意兼容 OpenAI 格式的接口，如 SiliconFlow、DeepSeek 等）
 - MCP Server（SSE 传输，Bearer 鉴权，供 AI Agent 直接调用）
+- 速率限制、图片大小校验、请求追踪 ID 等基础安全
 - 管理员用户管理
 
 ## 项目结构
 
 ```
-backend/          # Flask 后端 + SQLite 数据库
-  app.py          # REST API
-  mcp_server.py   # MCP Server（FastMCP + uvicorn）
-  .env.example    # 环境变量示例
-frontend/         # Vue 3 + Element Plus 前端
-skills/
-  ai-finance.md   # Agent Skill 文件（见下方说明）
-deploy.sh         # 一键启动脚本（Linux / macOS）
-deploy.ps1        # 一键启动脚本（Windows）
+backend/
+  app.py            # REST API 主入口
+  mcp_server.py     # MCP Server（FastMCP + uvicorn）
+  handlers.py       # LLM 工具调用落地函数（记账 / 投资 / 预算 / 报告）
+  tools.py          # FINANCE_TOOLS schema（LLM tool-calling）
+  routes/           # chat / investment / reports / export / admin 等蓝图
+  services/
+    quotes.py       # 股票 / 基金行情抓取 + 缓存
+    portfolio.py    # 持仓诊断、再平衡、目标方案
+    reports.py      # 月度报告聚合 + LLM 撰写
+    anomaly.py      # 异常消费检测
+  migrations/       # 按文件名顺序执行的 SQL 迁移
+  prompts/          # 各场景 LLM prompt 模板
+  .env.example
+frontend/
+  src/views/        # ChatView / LedgerView / InvestmentView / ReportsView / AdminView
+  src/components/   # RecordTable / AssetTable / GoalProgress / PendingAssetCard 等
+  src/stores/       # Pinia stores（user / categories / investment / reports / chat）
+skills/ai-finance.md  # Agent Skill 文件（见下方说明）
+deploy.sh / deploy.ps1  # 一键启动脚本
 ```
 
 ## 快速开始
@@ -133,6 +163,7 @@ MCP Server 使用 **SSE 传输**，供运行在**其他设备**上的 AI Agent �
 
 ## MCP 工具列表
 
+### 记账
 | 工具 | 说明 |
 |---|---|
 | `add_record` | 记录一笔支出 |
@@ -144,6 +175,18 @@ MCP Server 使用 **SSE 传输**，供运行在**其他设备**上的 AI Agent �
 | `set_budget` | 设置或更新月预算 |
 | `analyze_spend` | 生成月度消费/收入排行分析 |
 | `list_categories` | 获取所有分类列表 |
+
+### 投资理财
+| 工具 | 说明 |
+|---|---|
+| `add_asset` | 新增资产（同一用户下名称唯一，重复会拒绝） |
+| `update_asset_value` | 按名称更新资产当前市值（手动场景） |
+| `update_asset` | 按 ID 更新资产任意字段（名称 / 代码 / 持仓 / 成本 / 备注） |
+| `delete_asset` | 按 ID 删除资产（连带交易流水） |
+| `add_goal` | 新增理财目标（支持 priority 1~5） |
+| `portfolio_summary` | 查看持仓总览、分布、盈亏 Top3 |
+| `refresh_portfolio_prices` | 强制刷新股票/基金行情（忽略 10 分钟缓存） |
+| `quote_symbol` | 按代码查询最新行情（不持久化，纯查询） |
 
 详细参数说明见 `skills/ai-finance.md`。
 
