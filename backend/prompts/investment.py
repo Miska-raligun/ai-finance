@@ -15,23 +15,31 @@ DISCLAIMER = (
 
 PORTFOLIO_ANALYST_SYSTEM = (
     "你是一位严谨的个人投资组合分析师。\n"
-    "- 输入是用户的持仓 JSON 与漂移分析。\n"
-    "- 输出必须包含三段：①风险诊断（2-3句）②再平衡建议（按类型给出加/减仓百分点）③3条可执行行动项。\n"
-    "- 全部用中文，使用 Markdown 列表，禁止编造未提供的市场数据。\n"
-    "- 如果数据为空，直接告知用户先录入资产，不要凭空生成数字。\n"
+    "- 输入是用户的类型分布、每笔持仓明细、漂移分析与总体回报。\n"
+    "- 输出必须包含四段，使用 Markdown 二级标题：\n"
+    "  ## 风险诊断：2-3 句点明整体风险、集中度、回报水平。\n"
+    "  ## 类型再平衡：基于漂移表给出各类型加/减仓百分点，drift 绝对值 <1% 则写'保持'。\n"
+    "  ## 单品种点评：从持仓明细中挑出 2-4 只最值得关注的（最大亏损、涨幅异常、权重过高、成本倒挂等），\n"
+    "     每只写一行：`- 名称(代码)：现状 → 建议`（例：`- 贵州茅台(sh600519)：权重 45% 且浮亏 8%，建议分批减仓至 ≤25%`）。\n"
+    "  ## 3 条行动项：短期可立刻执行的具体动作，如定投金额、止损线、补仓条件等。\n"
+    "- 全部用中文，禁止编造未提供的市场数据或预测价格；涉及具体金额时引用输入 JSON。\n"
+    "- 如果持仓明细为空，直接提示用户先录入资产。\n"
 )
 
 
 def build_portfolio_analyst_prompt(allocation: dict, drift: list[dict], returns: dict,
-                                   risk_level: str | None = None) -> str:
+                                   risk_level: str | None = None,
+                                   holdings: list[dict] | None = None) -> str:
     import json
     risk_hint = f"用户风险等级：{risk_level}" if risk_level else "用户风险等级：未测评"
+    holdings = holdings or []
     return (
         f"{risk_hint}\n\n"
-        f"当前持仓概览（按类型）：\n```json\n{json.dumps(allocation.get('by_type', []), ensure_ascii=False, indent=2)}\n```\n\n"
+        f"类型分布：\n```json\n{json.dumps(allocation.get('by_type', []), ensure_ascii=False, indent=2)}\n```\n\n"
+        f"每笔持仓明细（按市值降序，含盈亏）：\n```json\n{json.dumps(holdings, ensure_ascii=False, indent=2)}\n```\n\n"
         f"漂移分析（current_pct - target_pct）：\n```json\n{json.dumps(drift, ensure_ascii=False, indent=2)}\n```\n\n"
         f"总体回报：\n```json\n{json.dumps(returns, ensure_ascii=False, indent=2)}\n```\n\n"
-        f"请按 system 指令输出诊断与建议。"
+        f"请按 system 指令输出四段式分析。"
     )
 
 

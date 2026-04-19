@@ -789,11 +789,13 @@ def invest_portfolio_summary(user_id: int, params: dict[str, Any] | None = None)
 
 def invest_analyze_portfolio(user_id: int, params: dict[str, Any] | None = None, llm: dict | None = None) -> str:
     """生成自然语言的投资组合诊断（调用 LLM）。"""
-    from services.portfolio import compute_allocation, compute_drift, compute_return
+    from services.portfolio import (
+        compute_allocation, compute_drift, compute_return, build_holding_details,
+    )
     from services.llm import call_llm_portfolio_advice
     db = get_db()
     rows = db.execute(
-        "SELECT name, type, current_value, cost_basis FROM assets WHERE user_id = ?",
+        "SELECT name, type, symbol, holdings, current_value, cost_basis FROM assets WHERE user_id = ?",
         (user_id,),
     ).fetchall()
     if not rows:
@@ -801,12 +803,13 @@ def invest_analyze_portfolio(user_id: int, params: dict[str, Any] | None = None,
     assets = [dict(r) for r in rows]
     allocation = compute_allocation(assets)
     returns = compute_return(assets)
+    holdings = build_holding_details(assets)
     risk_row = db.execute(
         "SELECT level FROM risk_profiles WHERE user_id = ?", (user_id,),
     ).fetchone()
     risk_level = risk_row["level"] if risk_row else None
     drift = compute_drift(allocation, risk_level=risk_level)
-    return call_llm_portfolio_advice(allocation, drift, returns, risk_level, llm=llm)
+    return call_llm_portfolio_advice(allocation, drift, returns, risk_level, llm=llm, holdings=holdings)
 
 
 def invest_refresh_prices(user_id: int, params: dict[str, Any] | None = None) -> str:

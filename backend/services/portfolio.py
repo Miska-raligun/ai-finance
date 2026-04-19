@@ -125,6 +125,31 @@ def compute_return(assets: Iterable) -> dict:
     }
 
 
+def build_holding_details(assets: Iterable) -> list[dict]:
+    """给 LLM 用的每笔持仓明细：含 symbol / holdings / 盈亏金额+百分比 / 市值占比。"""
+    items = _ensure_dict(assets)
+    total_value = float(sum((a.get("current_value") or 0) for a in items)) or 0.0
+    out = []
+    for a in items:
+        cost = float(a.get("cost_basis") or 0)
+        value = float(a.get("current_value") or 0)
+        pnl_val = value - cost
+        pnl_pct = (pnl_val / cost * 100) if cost > 0 else 0.0
+        out.append({
+            "name": a.get("name"),
+            "type": a.get("type"),
+            "symbol": a.get("symbol") or "",
+            "holdings": a.get("holdings") or 0,
+            "cost_basis": round(cost, 2),
+            "current_value": round(value, 2),
+            "pnl_value": round(pnl_val, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "weight_pct": round((value / total_value * 100) if total_value > 0 else 0.0, 2),
+        })
+    out.sort(key=lambda x: x["current_value"], reverse=True)
+    return out
+
+
 def compute_top_movers(assets: Iterable, top_n: int = 3) -> list[dict]:
     """按单品种盈亏百分比排序，返回涨/跌前 N 名。"""
     items = _ensure_dict(assets)

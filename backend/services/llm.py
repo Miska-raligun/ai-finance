@@ -187,14 +187,17 @@ def call_llm_budget_advice(prompt: str, llm: dict | None = None) -> str:
 # ===== 投资顾问相关 =====
 
 def call_llm_portfolio_advice(allocation: dict, drift: list[dict], returns: dict,
-                              risk_level: str | None = None, llm: dict | None = None) -> str:
-    """Portfolio Analyst：输入持仓 + 漂移 + 回报，输出诊断与行动项。"""
+                              risk_level: str | None = None, llm: dict | None = None,
+                              holdings: list[dict] | None = None) -> str:
+    """Portfolio Analyst：输入持仓 + 漂移 + 回报 + 单品种明细，输出诊断与行动项。"""
     from prompts.investment import (
         PORTFOLIO_ANALYST_SYSTEM, build_portfolio_analyst_prompt, DISCLAIMER,
     )
     messages = [
         {"role": "system", "content": PORTFOLIO_ANALYST_SYSTEM},
-        {"role": "user", "content": build_portfolio_analyst_prompt(allocation, drift, returns, risk_level)},
+        {"role": "user", "content": build_portfolio_analyst_prompt(
+            allocation, drift, returns, risk_level, holdings=holdings,
+        )},
     ]
     result = _call_llm(messages, llm=llm, temperature=0.4, timeout=60, endpoint="invest.portfolio_advice")
     if result and "choices" in result:

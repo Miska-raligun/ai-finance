@@ -11,8 +11,8 @@ from auth import login_required
 from cache import invalidate_user
 from db import get_db
 from services.portfolio import (
-    compute_allocation, compute_drift, compute_goal_plan, compute_return,
-    compute_top_movers,
+    build_holding_details, compute_allocation, compute_drift, compute_goal_plan,
+    compute_return, compute_top_movers,
 )
 from services.quotes import get_quote, refresh_user_assets
 
@@ -557,12 +557,15 @@ def advisor_chat():
             return jsonify({"reply": "请先在资产列表中添加持仓，再查看投资组合分析。"})
         allocation = compute_allocation(assets)
         returns = compute_return(assets)
+        holdings = build_holding_details(assets)
         risk_row = get_db().execute(
             "SELECT level FROM risk_profiles WHERE user_id = ?", (g.user_id,),
         ).fetchone()
         risk_level = risk_row["level"] if risk_row else None
         drift = compute_drift(allocation, risk_level=risk_level)
-        reply = call_llm_portfolio_advice(allocation, drift, returns, risk_level, llm=llm_cfg)
+        reply = call_llm_portfolio_advice(
+            allocation, drift, returns, risk_level, llm=llm_cfg, holdings=holdings,
+        )
         return jsonify({"reply": reply})
 
     if mode == "goal":
