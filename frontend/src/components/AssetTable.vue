@@ -30,7 +30,13 @@
       <el-table-column prop="holdings" label="数量" width="100" align="right">
         <template #default="{ row }">{{ row.holdings || '—' }}</template>
       </el-table-column>
-      <el-table-column prop="cost_basis" label="成本" width="110" align="right">
+      <el-table-column label="成本单价" width="110" align="right">
+        <template #default="{ row }">
+          <span v-if="unitCostStr(row) !== '—'">¥{{ unitCostStr(row) }}</span>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="cost_basis" label="总成本" width="110" align="right">
         <template #default="{ row }">¥{{ (row.cost_basis || 0).toFixed(2) }}</template>
       </el-table-column>
       <el-table-column prop="current_value" label="现值" width="130" align="right">

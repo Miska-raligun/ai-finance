@@ -8,9 +8,15 @@
           <span class="chip-value">¥{{ portfolio.total_value.toFixed(2) }}</span>
         </div>
         <div class="chip">
-          <span class="chip-label">累计回报</span>
+          <span class="chip-label">累计盈亏</span>
           <span class="chip-value" :class="pnlClass">
-            {{ portfolio.returns.return_pct >= 0 ? '+' : '' }}{{ portfolio.returns.return_pct.toFixed(2) }}%
+            {{ pnlSign }}¥{{ Math.abs(portfolio.returns.pnl || 0).toFixed(2) }}
+          </span>
+        </div>
+        <div class="chip">
+          <span class="chip-label">回报率</span>
+          <span class="chip-value" :class="pnlClass">
+            {{ pnlSign }}{{ Math.abs(portfolio.returns.return_pct || 0).toFixed(2) }}%
           </span>
         </div>
         <div class="chip">
@@ -131,8 +137,14 @@ const LEVEL_LABEL = {
 }
 
 const pnlClass = computed(() => {
-  const p = portfolio.value?.returns?.return_pct ?? 0
+  const p = portfolio.value?.returns?.pnl ?? 0
   return p > 0 ? 'up' : p < 0 ? 'down' : ''
+})
+const pnlSign = computed(() => {
+  const p = portfolio.value?.returns?.pnl ?? 0
+  if (p > 0) return '+'
+  if (p < 0) return '−'
+  return ''
 })
 
 async function refreshAll({ quotes = false } = {}) {

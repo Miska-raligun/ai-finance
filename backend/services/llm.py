@@ -87,15 +87,28 @@ def _call_llm(
 
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        data = res.json()
+        try:
+            data = res.json()
+        except ValueError:
+            logger.error("LLM 响应非 JSON（endpoint=%s status=%s）：%s",
+                         endpoint, res.status_code, (res.text or "")[:500])
+            return {"error": {"message": f"HTTP {res.status_code} 非 JSON 响应"}}
         if "error" in data:
-            logger.error("LLM API 错误：%s", data["error"])
-            return None
+            logger.error("LLM API 错误（endpoint=%s status=%s）：%s",
+                         endpoint, res.status_code, data["error"])
+            return data
+        if res.status_code >= 400:
+            logger.error("LLM HTTP %s（endpoint=%s）：%s",
+                         res.status_code, endpoint, str(data)[:500])
+            return {"error": {"message": f"HTTP {res.status_code}"}}
         _record_usage(endpoint, model, data)
         return data
+    except requests.exceptions.Timeout:
+        logger.error("LLM 调用超时（endpoint=%s timeout=%ss）", endpoint, timeout)
+        return {"error": {"message": f"请求超时（{timeout}s）"}}
     except Exception as e:
-        logger.error("LLM 调用失败: %s", e)
-        return None
+        logger.error("LLM 调用失败（endpoint=%s）: %s", endpoint, e)
+        return {"error": {"message": str(e) or "调用异常"}}
 
 
 def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list | None = None,
@@ -183,9 +196,11 @@ def call_llm_portfolio_advice(allocation: dict, drift: list[dict], returns: dict
         {"role": "system", "content": PORTFOLIO_ANALYST_SYSTEM},
         {"role": "user", "content": build_portfolio_analyst_prompt(allocation, drift, returns, risk_level)},
     ]
-    result = _call_llm(messages, llm=llm, temperature=0.4, timeout=30, endpoint="invest.portfolio_advice")
+    result = _call_llm(messages, llm=llm, temperature=0.4, timeout=60, endpoint="invest.portfolio_advice")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"] + DISCLAIMER
+    if result and "error" in result:
+        return f"⚠️ 投资分析失败：{result['error'].get('message', '未知错误')}" + DISCLAIMER
     return "⚠️ 暂时无法获取投资分析，请稍后再试。" + DISCLAIMER
 
 
@@ -196,9 +211,11 @@ def call_llm_goal_plan(goal: dict, plan: dict, llm: dict | None = None) -> str:
         {"role": "system", "content": GOAL_COACH_SYSTEM},
         {"role": "user", "content": build_goal_coach_prompt(goal, plan)},
     ]
-    result = _call_llm(messages, llm=llm, temperature=0.4, timeout=30, endpoint="invest.goal_plan")
+    result = _call_llm(messages, llm=llm, temperature=0.4, timeout=60, endpoint="invest.goal_plan")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"] + DISCLAIMER
+    if result and "error" in result:
+        return f"⚠️ 目标方案生成失败：{result['error'].get('message', '未知错误')}" + DISCLAIMER
     return "⚠️ 暂时无法生成目标方案，请稍后再试。" + DISCLAIMER
 
 
@@ -355,7 +372,9 @@ def call_llm_advisor_chat(history: list[dict], context: dict | None = None, llm:
     if context:
         ctx_msg = "\n\n当前用户数据摘要：\n```json\n" + _json.dumps(context, ensure_ascii=False) + "\n```"
     messages = [{"role": "system", "content": ADVISOR_CHAT_SYSTEM + ctx_msg}] + history[-10:]
-    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=20, endpoint="invest.advisor_chat")
+    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=30, endpoint="invest.advisor_chat")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"] + DISCLAIMER
+    if result and "error" in result:
+        return f"⚠️ 顾问服务失败：{result['error'].get('message', '未知错误')}" + DISCLAIMER
     return "⚠️ 暂时无法回复，请稍后再试。" + DISCLAIMER
