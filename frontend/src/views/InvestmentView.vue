@@ -148,11 +148,18 @@ const pnlSign = computed(() => {
 })
 
 async function refreshAll({ quotes = false } = {}) {
-  await Promise.all([
-    store.fetchAssets(),
-    store.fetchGoals(),
-    store.fetchPortfolio({ refresh: quotes }),
-  ])
+  // quotes=true 时，后端在 portfolio 接口里会把最新行情写回 assets 表，
+  // 必须先等它完成再拉 assets，否则表格读到的是旧值。
+  if (quotes) {
+    await store.fetchPortfolio({ refresh: true })
+    await Promise.all([store.fetchAssets(), store.fetchGoals()])
+  } else {
+    await Promise.all([
+      store.fetchAssets(),
+      store.fetchGoals(),
+      store.fetchPortfolio({ refresh: false }),
+    ])
+  }
 }
 
 onMounted(() => {
