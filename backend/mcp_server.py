@@ -191,6 +191,103 @@ def portfolio_summary() -> str:
 
 
 @mcp.tool()
+def query_assets(type: str = "", symbol: str = "", limit: int = 50) -> str:
+    """查询资产明细。type:按类型筛选(stock/fund/bond/cash/crypto/realestate/other),
+    symbol:按代码模糊匹配, limit:最多返回条数(默认50)。
+    返回每笔持仓的 ID/名称/代码/类型/持仓/成本/现值/盈亏金额+百分比。
+    """
+    db = get_db()
+    q = ("SELECT id, name, type, symbol, holdings, cost_basis, current_value, "
+         "currency, notes FROM assets WHERE user_id=?")
+    args: list = [uid()]
+    if type:
+        q += " AND type=?"; args.append(type)
+    if symbol:
+        q += " AND symbol LIKE ?"; args.append(f"%{symbol}%")
+    q += " ORDER BY current_value DESC LIMIT ?"; args.append(limit)
+    rows = db.execute(q, args).fetchall()
+    if not rows:
+        return "暂无符合条件的资产记录。"
+
+    total_value = sum(float(r["current_value"] or 0) for r in rows)
+    total_cost = sum(float(r["cost_basis"] or 0) for r in rows)
+    total_pnl = total_value - total_cost
+
+    lines = [f"📁 共 {len(rows)} 项资产，总市值 ¥{total_value:.2f}，"
+             f"总成本 ¥{total_cost:.2f}，累计盈亏 ¥{total_pnl:+.2f}："]
+    for r in rows:
+        cost = float(r["cost_basis"] or 0)
+        value = float(r["current_value"] or 0)
+        pnl = value - cost
+        pct = (pnl / cost * 100) if cost > 0 else 0.0
+        holding = r["holdings"] or 0
+        unit = (cost / holding) if holding > 0 else 0
+        sym = r["symbol"] or "—"
+        lines.append(
+            f"ID:{r['id']} | {r['name']}({sym}) | {r['type']} | "
+            f"持仓 {holding} | 成本价 ¥{unit:.4f} | 成本 ¥{cost:.2f} | "
+            f"现值 ¥{value:.2f} | 盈亏 ¥{pnl:+.2f} ({pct:+.2f}%)"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def query_goals(show_all: bool = True) -> str:
+    """查询理财目标列表。show_all=True 返回全部字段，否则只返回概要。"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, name, target_amount, current_progress, deadline, priority, "
+        "COALESCE(note, '') AS note FROM financial_goals WHERE user_id=? "
+        "ORDER BY priority ASC, deadline ASC",
+        (uid(),),
+    ).fetchall()
+    if not rows:
+        return "暂无理财目标。"
+    lines = [f"🎯 共 {len(rows)} 个目标："]
+    for r in rows:
+        target = float(r["target_amount"] or 0)
+        done = float(r["current_progress"] or 0)
+        pct = (done / target * 100) if target > 0 else 0.0
+        gap = max(0.0, target - done)
+        base = (f"ID:{r['id']} | {r['name']} | 目标 ¥{target:.2f} | "
+                f"已完成 ¥{done:.2f} ({pct:.1f}%) | 缺口 ¥{gap:.2f} | "
+                f"截止 {r['deadline'] or '未设'} | 优先级 {r['priority']}")
+        if show_all and r["note"]:
+            base += f" | 备注：{r['note']}"
+        lines.append(base)
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def query_asset_transactions(asset_id: int = 0, limit: int = 20) -> str:
+    """查询资产交易流水。asset_id=0 时返回所有资产的最近交易；指定则只看该资产。"""
+    db = get_db()
+    q = ("SELECT t.id, t.asset_id, a.name AS asset_name, t.kind, t.quantity, "
+         "t.price, t.fee, t.date, COALESCE(t.note, '') AS note "
+         "FROM asset_transactions t JOIN assets a ON t.asset_id=a.id "
+         "WHERE t.user_id=?")
+    args: list = [uid()]
+    if asset_id > 0:
+        q += " AND t.asset_id=?"; args.append(asset_id)
+    q += " ORDER BY t.date DESC, t.id DESC LIMIT ?"; args.append(limit)
+    rows = db.execute(q, args).fetchall()
+    if not rows:
+        return "暂无交易流水。"
+    lines = [f"📜 最近 {len(rows)} 条交易："]
+    for r in rows:
+        qty = float(r["quantity"] or 0)
+        price = float(r["price"] or 0)
+        fee = float(r["fee"] or 0)
+        amount = qty * price + fee
+        lines.append(
+            f"ID:{r['id']} | {r['date']} | {r['asset_name']}(资产#{r['asset_id']}) | "
+            f"{r['kind']} | 数量 {qty} | 价 ¥{price:.4f} | 费 ¥{fee:.2f} | "
+            f"合计 ¥{amount:.2f} | {r['note']}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def refresh_portfolio_prices() -> str:
     """强制刷新股票/基金行情并更新 current_value（忽略 10 分钟缓存）。"""
     return handlers.invest_refresh_prices(uid())
