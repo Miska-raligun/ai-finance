@@ -46,6 +46,57 @@ def _aggregate(user_id: int, period: str) -> dict:
         "by_category_income": income,
         "budgets": budgets,
         "anomalies": anomalies,
+        "portfolio": _aggregate_portfolio(user_id),
+    }
+
+
+def _aggregate_portfolio(user_id: int) -> dict:
+    """投资组合快照（报告生成时刻）：总市值 / 盈亏 / 类型分布 / 前 5 持仓 / 目标进度。"""
+    from services.portfolio import (
+        build_holding_details, compute_allocation, compute_return,
+    )
+    db = get_db()
+    asset_rows = db.execute(
+        "SELECT name, type, symbol, holdings, cost_basis, current_value "
+        "FROM assets WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
+    assets = [dict(r) for r in asset_rows]
+    has_portfolio = bool(assets)
+
+    goal_rows = db.execute(
+        "SELECT name, target_amount, current_progress, deadline, priority "
+        "FROM financial_goals WHERE user_id = ? ORDER BY priority ASC, deadline ASC",
+        (user_id,),
+    ).fetchall()
+    goals = []
+    for r in goal_rows:
+        target = float(r["target_amount"] or 0)
+        done = float(r["current_progress"] or 0)
+        goals.append({
+            "name": r["name"],
+            "target_amount": round(target, 2),
+            "current_progress": round(done, 2),
+            "progress_pct": round((done / target * 100) if target > 0 else 0.0, 2),
+            "deadline": r["deadline"],
+            "priority": r["priority"],
+        })
+
+    if not has_portfolio:
+        return {"has_portfolio": False, "goals": goals}
+
+    allocation = compute_allocation(assets)
+    returns = compute_return(assets)
+    holdings = build_holding_details(assets)
+    return {
+        "has_portfolio": True,
+        "total_value": returns["total_value"],
+        "total_cost": returns["total_cost"],
+        "pnl": returns["pnl"],
+        "return_pct": returns["return_pct"],
+        "by_type": allocation.get("by_type", []),
+        "top_holdings": holdings[:5],
+        "goals": goals,
     }
 
 
@@ -56,7 +107,9 @@ def generate_monthly_report(user_id: int, period: Optional[str] = None,
         period = datetime.now().strftime("%Y-%m")
 
     insights = _aggregate(user_id, period)
-    if not insights["by_category_spend"] and not insights["by_category_income"]:
+    has_activity = bool(insights["by_category_spend"] or insights["by_category_income"])
+    has_portfolio = bool(insights.get("portfolio", {}).get("has_portfolio"))
+    if not has_activity and not has_portfolio:
         return {
             "period": period,
             "content": f"# {period} 月度报告\n\n📭 该月无任何记录，无需生成报告。",
