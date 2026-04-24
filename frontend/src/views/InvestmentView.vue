@@ -27,17 +27,75 @@
       <ExportMenu scope="investment" />
     </div>
 
+    <el-alert
+      v-if="showOnboarding"
+      :closable="false"
+      type="info"
+      class="invest-onboarding"
+    >
+      <template #title>
+        <b>🎯 先在「资产明细」里设置类型</b>
+      </template>
+      还没有资产类型也没有持仓。去「资产明细」tab 点「⚙️ 类型管理」，按你自己的习惯创建几种类型（例如 A股 / 基金 / 活期存款），再开始录入资产。
+      <div class="onboarding-actions">
+        <el-button size="small" type="primary" @click="activeTab = 'assets'">去资产明细</el-button>
+      </div>
+    </el-alert>
+
     <el-tabs v-model="activeTab" class="invest-tabs">
       <el-tab-pane label="组合总览" name="overview">
         <div class="invest-layout">
           <div class="col-left">
             <PortfolioPie :allocation="portfolio?.allocation" />
-            <!-- Phase B 将补回再平衡建议卡片（按需向 LLM 请求） -->
             <el-card v-if="portfolio && portfolio.allocation?.by_type?.length" class="mt">
               <template #header>
-                <span>⚖️ 再平衡建议</span>
+                <div class="rebalance-header">
+                  <span>⚖️ 再平衡建议</span>
+                  <div class="rebalance-header-right">
+                    <span v-if="rebalance?.cached_at" class="cached-hint">
+                      {{ rebalanceSourceLabel }} · {{ formatCached(rebalance.cached_at) }}
+                    </span>
+                    <el-button size="small" :loading="rebalanceLoading" @click="requestRebalance(false)">
+                      {{ rebalance?.targets && Object.keys(rebalance.targets).length ? '🔄 刷新' : '🤖 让 AI 分析' }}
+                    </el-button>
+                    <el-button
+                      v-if="rebalance?.targets && Object.keys(rebalance.targets).length"
+                      size="small" plain
+                      :loading="rebalanceLoading"
+                      @click="requestRebalance(true)"
+                    >重新分析</el-button>
+                  </div>
+                </div>
               </template>
-              <el-empty description="AI 再平衡建议开发中…" :image-size="60" />
+
+              <div v-if="!rebalance" class="rebalance-empty">
+                点右上角「让 AI 分析」生成当前持仓对应的目标配比。
+              </div>
+              <template v-else-if="rebalance.drift?.length">
+                <div v-if="rebalance.rationale" class="rebalance-rationale">
+                  💡 {{ rebalance.rationale }}
+                </div>
+                <el-table :data="rebalance.drift" size="small">
+                  <el-table-column label="类型">
+                    <template #default="{ row }">{{ row.type }}</template>
+                  </el-table-column>
+                  <el-table-column prop="current_pct" label="当前" align="right">
+                    <template #default="{ row }">{{ row.current_pct.toFixed(1) }}%</template>
+                  </el-table-column>
+                  <el-table-column prop="target_pct" label="AI 建议" align="right">
+                    <template #default="{ row }">{{ row.target_pct.toFixed(1) }}%</template>
+                  </el-table-column>
+                  <el-table-column prop="drift_pct" label="漂移" align="right">
+                    <template #default="{ row }">
+                      <span :class="row.drift_pct > 0 ? 'up' : row.drift_pct < 0 ? 'down' : ''">
+                        {{ row.drift_pct > 0 ? '+' : '' }}{{ row.drift_pct.toFixed(1) }}%
+                      </span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="action" label="动作" />
+                </el-table>
+              </template>
+              <el-empty v-else :description="rebalance.rationale || '暂无可执行建议'" :image-size="60" />
             </el-card>
           </div>
           <div class="col-right">
@@ -67,6 +125,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
+import { useAssetTypesStore } from '@/stores/assetTypes'
 import PortfolioPie from '@/components/PortfolioPie.vue'
 import AssetTable from '@/components/AssetTable.vue'
 import GoalProgress from '@/components/GoalProgress.vue'
@@ -78,11 +137,49 @@ const router = useRouter()
 const userStore = useUserStore()
 const store = useInvestmentStore()
 const { assets, goals, portfolio, refreshCounter } = storeToRefs(store)
+const typesStore = useAssetTypesStore()
+const { types: assetTypes } = storeToRefs(typesStore)
+
+const showOnboarding = computed(() =>
+  assetTypes.value.length === 0 && assets.value.length === 0,
+)
 
 const activeTab = ref('overview')
 
 const LEVEL_LABEL = {
   conservative: '保守型', balanced: '平衡型', aggressive: '激进型',
+}
+
+const rebalance = ref(null)
+const rebalanceLoading = ref(false)
+
+const rebalanceSourceLabel = computed(() => {
+  if (!rebalance.value) return ''
+  return rebalance.value.source === 'llm' ? 'AI 刚出的建议' : '缓存结果'
+})
+
+function formatCached(ts) {
+  if (!ts) return ''
+  const d = new Date(ts * 1000)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  return sameDay
+    ? `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+    : `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+async function requestRebalance(force) {
+  rebalanceLoading.value = true
+  try {
+    rebalance.value = await store.fetchRebalance({
+      force,
+      llm: userStore.llmPayload,
+    })
+  } catch (e) {
+    rebalance.value = { targets: {}, drift: [], rationale: e?.response?.data?.error || '调用失败' }
+  } finally {
+    rebalanceLoading.value = false
+  }
 }
 
 const pnlClass = computed(() => {
@@ -97,6 +194,7 @@ const pnlSign = computed(() => {
 })
 
 async function refreshAll({ quotes = false } = {}) {
+  typesStore.fetchTypes()  // 异步启动，不阻塞下面
   // quotes=true 时，后端在 portfolio 接口里会把最新行情写回 assets 表，
   // 必须先等它完成再拉 assets，否则表格读到的是旧值。
   if (quotes) {
@@ -116,7 +214,10 @@ onMounted(() => {
   refreshAll({ quotes: true })  // 进页面时刷一次行情
 })
 onActivated(() => refreshAll({ quotes: true }))  // 切回 tab 也刷
-watch(refreshCounter, () => refreshAll({ quotes: false }))  // 增删改后只重读数据
+watch(refreshCounter, () => {
+  refreshAll({ quotes: false })
+  rebalance.value = null  // 组合变了，旧的再平衡分析作废
+})
 </script>
 
 <style scoped>
@@ -160,6 +261,12 @@ watch(refreshCounter, () => refreshAll({ quotes: false }))  // 增删改后只�
   color: var(--color-primary);
   font-variant-numeric: tabular-nums;
 }
+.invest-onboarding {
+  margin-bottom: 12px;
+}
+.onboarding-actions {
+  margin-top: 8px;
+}
 .invest-tabs {
   background: var(--color-surface);
   border-radius: var(--radius-card);
@@ -189,6 +296,22 @@ watch(refreshCounter, () => refreshAll({ quotes: false }))  // 增删改后只�
 
 .rebalance-header {
   display: flex; align-items: center; gap: 8px;
+  justify-content: space-between; width: 100%;
+}
+.rebalance-header-right {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.cached-hint {
+  font-size: 11px; color: var(--color-text-muted);
+}
+.rebalance-empty {
+  padding: 18px 8px; color: var(--color-text-muted);
+  font-size: 13px; text-align: center;
+}
+.rebalance-rationale {
+  background: #F0F7FF; color: var(--color-primary);
+  padding: 8px 12px; border-radius: 8px;
+  font-size: 12px; margin-bottom: 10px; line-height: 1.6;
 }
 .help-icon {
   cursor: help;

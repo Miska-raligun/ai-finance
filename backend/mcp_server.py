@@ -157,10 +157,77 @@ def delete_income(income_id: int) -> str:
     return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
+def list_asset_types() -> str:
+    """列出当前用户定义的资产类型（name + shape + quote_source）。"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT name, shape, quote_source FROM asset_types "
+        "WHERE user_id=? ORDER BY id ASC",
+        (uid(),),
+    ).fetchall()
+    if not rows:
+        return "暂无资产类型，先用 add_asset_type 创建。"
+    lines = ["📚 你的资产类型："]
+    for r in rows:
+        src = f" · 行情源={r['quote_source']}" if r["quote_source"] else ""
+        lines.append(f"- {r['name']}（{r['shape']}{src}）")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_asset_type(name: str, shape: str, quote_source: str = "") -> str:
+    """创建一个资产类型。
+    shape ∈ security_auto / security_manual / lump / cash；
+    quote_source 仅 shape=security_auto 时需填 stock 或 fund。
+    """
+    valid_shapes = {"security_auto", "security_manual", "lump", "cash"}
+    if shape not in valid_shapes:
+        return f"⚠️ 非法形态：{shape}，支持 {'/'.join(sorted(valid_shapes))}"
+    qs = (quote_source or "").strip() or None
+    if shape == "security_auto":
+        if qs not in ("stock", "fund"):
+            return "⚠️ security_auto 必须指定 quote_source=stock 或 fund"
+    else:
+        qs = None
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO asset_types (user_id, name, shape, quote_source, created_at) "
+            "VALUES (?, ?, ?, ?, datetime('now'))",
+            (uid(), name.strip(), shape, qs),
+        )
+        db.commit()
+    except Exception as e:
+        return f"⚠️ 创建失败：{e}"
+    return f"✅ 已创建类型「{name}」（{shape}{'·'+qs if qs else ''}）"
+
+
+@mcp.tool()
+def delete_asset_type(name: str) -> str:
+    """删除一个资产类型；仍被资产引用时会拒绝。"""
+    db = get_db()
+    in_use = db.execute(
+        "SELECT COUNT(*) AS c FROM assets WHERE user_id=? AND type=?",
+        (uid(), name),
+    ).fetchone()["c"]
+    if in_use > 0:
+        return f"⚠️ 类型「{name}」仍被 {in_use} 项资产引用，请先改类型或删除这些资产"
+    res = db.execute(
+        "DELETE FROM asset_types WHERE user_id=? AND name=?",
+        (uid(), name),
+    )
+    db.commit()
+    if res.rowcount == 0:
+        return f"❌ 类型「{name}」不存在"
+    return f"✅ 已删除类型「{name}」"
+
+
+@mcp.tool()
 def add_asset(name: str, type: str, current_value: float = 0,
               cost_basis: float = 0, holdings: float = 0,
               symbol: str = "", notes: str = "") -> str:
-    """登记一项投资资产。type 必须是 stock/fund/bond/cash/crypto/realestate/other 之一。"""
+    """登记一项投资资产。type 必须是该用户已在 asset_types 里创建的类型名；
+    可先用 list_asset_types 查看。"""
     return handlers.invest_add_asset(uid(), {
         "名称": name, "类型": type, "代码": symbol,
         "数量": holdings, "成本": cost_basis, "现值": current_value,
@@ -191,8 +258,46 @@ def portfolio_summary() -> str:
 
 
 @mcp.tool()
+def rebalance_suggest(force: bool = False) -> str:
+    """请 LLM 根据当前持仓 + 风险等级生成目标配比，返回各类型的 drift。"""
+    from services.rebalance import suggest_rebalance
+    from services.portfolio import compute_allocation
+    db = get_db()
+    rows = db.execute(
+        "SELECT name, type, symbol, holdings, cost_basis, current_value "
+        "FROM assets WHERE user_id = ?",
+        (uid(),),
+    ).fetchall()
+    if not rows:
+        return "📉 暂无资产，无法生成再平衡建议。"
+    assets = [dict(r) for r in rows]
+    allocation = compute_allocation(assets)
+    risk_row = db.execute(
+        "SELECT level FROM risk_profiles WHERE user_id = ?", (uid(),),
+    ).fetchone()
+    risk_level = risk_row["level"] if risk_row else None
+    types = [dict(r) for r in db.execute(
+        "SELECT name, shape, quote_source FROM asset_types WHERE user_id=?",
+        (uid(),),
+    ).fetchall()]
+    result = suggest_rebalance(db, uid(), allocation, risk_level, types, force=force)
+    if not result.get("drift"):
+        return result.get("rationale") or "⚠️ 未生成建议"
+    lines = [f"⚖️ 再平衡建议（{'刚生成' if result.get('source') == 'llm' else '缓存'}）："]
+    if result.get("rationale"):
+        lines.append(f"💡 {result['rationale']}")
+    for row in result["drift"]:
+        sign = "+" if row["drift_pct"] > 0 else ""
+        lines.append(
+            f"- {row['type']}：当前 {row['current_pct']:.1f}% / 建议 {row['target_pct']:.1f}% "
+            f"（漂移 {sign}{row['drift_pct']:.1f}% → {row['action']}）"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def query_assets(type: str = "", symbol: str = "", limit: int = 50) -> str:
-    """查询资产明细。type:按类型筛选(stock/fund/bond/cash/crypto/realestate/other),
+    """查询资产明细。type:按用户已定义的类型名筛选,
     symbol:按代码模糊匹配, limit:最多返回条数(默认50)。
     返回每笔持仓的 ID/名称/代码/类型/持仓/成本/现值/盈亏金额+百分比。
     """

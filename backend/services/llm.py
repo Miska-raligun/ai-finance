@@ -186,6 +186,55 @@ def call_llm_budget_advice(prompt: str, llm: dict | None = None) -> str:
 
 # ===== 投资顾问相关 =====
 
+def call_llm_rebalance_suggest(risk_level: str | None, types: list[dict],
+                                by_type: list[dict], llm: dict | None = None) -> dict | None:
+    """再平衡：LLM 根据当前持仓 + 风险等级生成每个类型的目标占比 + 一句理由。
+
+    返回 {"targets": {name: pct}, "rationale": str} 或 None（失败时）。
+    """
+    import json as _json
+    import re as _re
+    from prompts.investment import REBALANCE_SUGGEST_SYSTEM, build_rebalance_prompt
+
+    messages = [
+        {"role": "system", "content": REBALANCE_SUGGEST_SYSTEM},
+        {"role": "user", "content": build_rebalance_prompt(risk_level, types, by_type)},
+    ]
+    result = _call_llm(messages, llm=llm, temperature=0.3, timeout=30, endpoint="invest.rebalance")
+    if not result or "choices" not in result:
+        return None
+    content = (result["choices"][0]["message"]["content"] or "").strip()
+    parsed = None
+    try:
+        parsed = _json.loads(content)
+    except _json.JSONDecodeError:
+        m = _re.search(r"\{[\s\S]*\}", content)
+        if m:
+            try:
+                parsed = _json.loads(m.group(0))
+            except _json.JSONDecodeError:
+                parsed = None
+    if not isinstance(parsed, dict) or "targets" not in parsed:
+        return None
+    targets = parsed.get("targets") or {}
+    if not isinstance(targets, dict):
+        return None
+    clean: dict[str, float] = {}
+    for k, v in targets.items():
+        try:
+            clean[str(k)] = max(0.0, float(v))
+        except (TypeError, ValueError):
+            continue
+    # 归一化到总和 100
+    total = sum(clean.values())
+    if total > 0 and abs(total - 100) > 0.5:
+        clean = {k: round(v / total * 100, 1) for k, v in clean.items()}
+    return {
+        "targets": clean,
+        "rationale": str(parsed.get("rationale") or "").strip(),
+    }
+
+
 def call_llm_portfolio_advice(allocation: dict, drift: list[dict], returns: dict,
                               risk_level: str | None = None, llm: dict | None = None,
                               holdings: list[dict] | None = None) -> str:
@@ -222,8 +271,24 @@ def call_llm_goal_plan(goal: dict, plan: dict, llm: dict | None = None) -> str:
     return "⚠️ 暂时无法生成目标方案，请稍后再试。" + DISCLAIMER
 
 
+RISK_THRESHOLDS = {
+    "conservative": (5, 10),
+    "balanced":     (11, 18),
+    "aggressive":   (19, 25),
+}
+RISK_MAX_SCORE = 25
+
+
+def _level_from_score(score: int) -> str:
+    if score <= RISK_THRESHOLDS["conservative"][1]:
+        return "conservative"
+    if score <= RISK_THRESHOLDS["balanced"][1]:
+        return "balanced"
+    return "aggressive"
+
+
 def call_llm_risk_questionnaire(answers: dict, llm: dict | None = None) -> dict:
-    """Risk Questionnaire：输入答案，输出 {score, level, summary}。
+    """Risk Questionnaire：输入答案，输出 {score, level, summary, thresholds, max_score}。
 
     任何解析失败都会回退到本地打分，保证接口稳定。
     """
@@ -238,12 +303,7 @@ def call_llm_risk_questionnaire(answers: dict, llm: dict | None = None) -> dict:
         score = sum(int(answers.get(q["id"], 0)) for q in RISK_QUIZ_QUESTIONS)
     except (TypeError, ValueError):
         score = 0
-    if score <= 11:
-        fallback_level = "conservative"
-    elif score <= 18:
-        fallback_level = "balanced"
-    else:
-        fallback_level = "aggressive"
+    fallback_level = _level_from_score(score)
 
     messages = [
         {"role": "system", "content": RISK_QUIZ_SYSTEM},
@@ -266,17 +326,23 @@ def call_llm_risk_questionnaire(answers: dict, llm: dict | None = None) -> dict:
                 except _json.JSONDecodeError:
                     parsed = None
 
+    meta = {
+        "thresholds": {k: list(v) for k, v in RISK_THRESHOLDS.items()},
+        "max_score": RISK_MAX_SCORE,
+    }
     if isinstance(parsed, dict) and parsed.get("level") in {"conservative", "balanced", "aggressive"}:
         return {
             "score": int(parsed.get("score") or score),
             "level": parsed["level"],
             "summary": str(parsed.get("summary") or ""),
+            **meta,
         }
 
     return {
         "score": score,
         "level": fallback_level,
         "summary": "根据你的答题得分，我们给出了默认级别（LLM 解析失败时的本地兜底结果）。",
+        **meta,
     }
 
 

@@ -13,6 +13,34 @@ DISCLAIMER = (
     "投资有风险，请结合自身情况谨慎决策。"
 )
 
+REBALANCE_SUGGEST_SYSTEM = (
+    "你是一位稳健的资产配置顾问。\n"
+    "- 输入是用户当前的资产类型列表（每个类型含 name/shape）、当前各类型市值占比，以及风险等级。\n"
+    "- 输出必须是一个严格 JSON：\n"
+    '  {"targets": {"<类型名>": <target_pct 0~100>, ...}, "rationale": "一句 30~80 字的中文理由"}\n'
+    "- targets 的 key 必须一一对应输入的类型 name；所有 value 四舍五入保留一位小数，总和应等于 100。\n"
+    "- 风险等级对应的大致偏好：\n"
+    "  · conservative：现金 / 债券类占比更高（≥60%），股票/加密类 ≤ 25%\n"
+    "  · balanced：股债大致对半\n"
+    "  · aggressive：股票 / 证券类占比更高（≥55%），现金 ≤ 15%\n"
+    "- 尊重用户现有的类型结构：若用户没有债券类，不要硬塞占比给不存在的类型。\n"
+    "- 不输出除 JSON 以外的任何内容（不要代码块围栏、不要注释）。\n"
+)
+
+
+def build_rebalance_prompt(risk_level: str | None, types: list[dict], by_type: list[dict]) -> str:
+    import json
+    risk_hint = f"用户风险等级：{risk_level}" if risk_level else "用户风险等级：未测评，默认按 balanced 推荐"
+    return (
+        f"{risk_hint}\n\n"
+        f"用户的资产类型（name + shape）：\n```json\n"
+        f"{json.dumps(types, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"当前各类型的市值占比：\n```json\n"
+        f"{json.dumps(by_type, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"请输出严格 JSON。"
+    )
+
+
 PORTFOLIO_ANALYST_SYSTEM = (
     "你是一位严谨的个人投资组合分析师。\n"
     "- 输入是用户的类型分布、每笔持仓明细、漂移分析与总体回报。\n"
@@ -77,8 +105,9 @@ def build_goal_coach_prompt(goal: dict, plan: dict) -> str:
 RISK_QUIZ_SYSTEM = (
     "你是一名风险测评分析师。\n"
     "- 输入是用户的 5 题问卷答案（每题 1~5 分）。\n"
-    "- 计算总分并按区间分级：5-11 conservative / 12-18 balanced / 19-25 aggressive。\n"
-    "- 输出严格 JSON：{\"score\": int, \"level\": str, \"summary\": \"一段中文说明（30-60字）\"}。\n"
+    "- 计算总分并按区间分级：5-10 conservative / 11-18 balanced / 19-25 aggressive。\n"
+    "- 输出严格 JSON：{\"score\": int, \"level\": str, \"summary\": \"一段中文说明（40-80字），"
+    "必须点名影响最大的 1-2 道题（按得分高低挑选极端项）\"}。\n"
     "- 不要输出 JSON 以外的任何字符。\n"
 )
 

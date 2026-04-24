@@ -35,15 +35,16 @@ def test_return_pct():
     assert ret["return_pct"] == 0
 
 
-def test_drift_respects_risk_level():
-    # aggressive target: stock=45%, bond=10% → 一个持仓全是债券的人应被建议减债增股
+def test_drift_uses_explicit_target():
+    """compute_drift 现在需要显式传入 target dict；原 RISK_TARGET 已挪到 rebalance 服务。"""
     allo = {"by_type": [
-        {"type": "bond", "pct": 90},
-        {"type": "stock", "pct": 10},
+        {"type": "债券", "pct": 90},
+        {"type": "股票", "pct": 10},
     ]}
-    drift = compute_drift(allo, risk_level="aggressive")
-    bond_row = next(d for d in drift if d["type"] == "bond")
-    stock_row = next(d for d in drift if d["type"] == "stock")
+    target = {"股票": 0.45, "债券": 0.10}
+    drift = compute_drift(allo, target)
+    bond_row = next(d for d in drift if d["type"] == "债券")
+    stock_row = next(d for d in drift if d["type"] == "股票")
     assert bond_row["drift_pct"] > 0
     assert bond_row["action"] == "建议减仓"
     assert stock_row["action"] == "建议加仓"

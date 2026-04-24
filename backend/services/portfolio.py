@@ -1,26 +1,13 @@
-"""投资组合纯函数计算：分配、漂移、回报率，全部不依赖外部 API。"""
+"""投资组合纯函数计算：分配、漂移、回报率，全部不依赖外部 API。
+
+目标占比（RISK_TARGET_ALLOCATION / DEFAULT_TARGET_ALLOCATION）已移除；
+再平衡的目标配比现在由 services.rebalance.suggest_targets 交给 LLM 现场推荐。
+compute_drift 保留，但必须显式传入 target（字典 {type → 0~1 比例}）。
+"""
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Iterable
-
-# 资产类型 → 默认目标占比（保守组合，可被风险等级覆盖）
-DEFAULT_TARGET_ALLOCATION = {
-    "cash": 0.10,
-    "bond": 0.30,
-    "fund": 0.30,
-    "stock": 0.20,
-    "crypto": 0.05,
-    "realestate": 0.05,
-    "other": 0.0,
-}
-
-# 风险等级 → 目标占比（用于 compute_drift 的 target 默认值）
-RISK_TARGET_ALLOCATION = {
-    "conservative": {"cash": 0.20, "bond": 0.50, "fund": 0.20, "stock": 0.10},
-    "balanced":     {"cash": 0.10, "bond": 0.30, "fund": 0.35, "stock": 0.20, "crypto": 0.05},
-    "aggressive":   {"cash": 0.05, "bond": 0.10, "fund": 0.30, "stock": 0.45, "crypto": 0.10},
-}
 
 
 def _ensure_dict(rows: Iterable) -> list[dict]:
@@ -74,18 +61,14 @@ def compute_allocation(assets: Iterable) -> dict:
     }
 
 
-def compute_drift(allocation: dict, target: dict | None = None, risk_level: str | None = None) -> list[dict]:
+def compute_drift(allocation: dict, target: dict) -> list[dict]:
     """基于当前 allocation 与目标占比，计算各类型漂移百分比。
 
-    target 优先；否则按 risk_level 取预设；都没有则按 DEFAULT。
+    target 必须由调用方提供（字典 {type → 0~1 比例}）；由
+    services.rebalance.suggest_targets 或用户自定义生成。
     返回：[{type, current_pct, target_pct, drift_pct, action}]
     """
-    if not target:
-        if risk_level and risk_level in RISK_TARGET_ALLOCATION:
-            target = RISK_TARGET_ALLOCATION[risk_level]
-        else:
-            target = DEFAULT_TARGET_ALLOCATION
-
+    target = target or {}
     cur = {row["type"]: row["pct"] for row in allocation.get("by_type", [])}
     types = set(cur) | set(target.keys())
 

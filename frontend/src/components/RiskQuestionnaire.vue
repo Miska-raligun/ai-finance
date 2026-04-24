@@ -7,9 +7,48 @@
       </div>
     </template>
 
+    <el-alert
+      v-if="!editing"
+      :closable="false"
+      type="info"
+      class="rule-alert"
+    >
+      <template #title>评分规则</template>
+      5 题 × 每题 1-5 分 = 合计 {{ maxScore }} 分，得分越高风险承受力越高。<br />
+      <span v-for="(range, key) in thresholds" :key="key" class="threshold-pill">
+        {{ range[0] }}-{{ range[1] }} → {{ levelLabel(key) }}
+      </span>
+    </el-alert>
+
     <div v-if="profile && !editing" class="profile">
-      <div class="profile-row"><span>测评得分：</span><strong>{{ profile.score }}</strong></div>
-      <div class="profile-row"><span>风险等级：</span><strong>{{ levelLabel(profile.level) }}</strong></div>
+      <div class="score-display">
+        <div class="score-num">
+          <strong>{{ profile.score }}</strong>
+          <span class="score-denom">/ {{ maxScore }}</span>
+        </div>
+        <div class="score-level">
+          <span>风险等级：</span>
+          <strong :class="'level-' + profile.level">{{ levelLabel(profile.level) }}</strong>
+        </div>
+      </div>
+
+      <!-- 水平分档进度条 -->
+      <div class="band-wrapper">
+        <div class="band band-conservative" :style="{ flex: bandWeight('conservative') }">
+          <span class="band-label">保守型</span>
+        </div>
+        <div class="band band-balanced" :style="{ flex: bandWeight('balanced') }">
+          <span class="band-label">平衡型</span>
+        </div>
+        <div class="band band-aggressive" :style="{ flex: bandWeight('aggressive') }">
+          <span class="band-label">激进型</span>
+        </div>
+        <div class="marker" :style="{ left: markerPct + '%' }">
+          <div class="marker-dot"></div>
+          <div class="marker-num">{{ profile.score }}</div>
+        </div>
+      </div>
+
       <div v-if="profile.summary" class="summary">{{ profile.summary }}</div>
       <el-button size="small" @click="editing = true">重新测评</el-button>
     </div>
@@ -24,7 +63,7 @@
               :key="opt.value"
               :value="opt.value"
             >
-              {{ opt.label }}
+              {{ opt.label }} <span class="opt-score">({{ opt.value }} 分)</span>
             </el-radio>
           </el-radio-group>
         </el-form-item>
@@ -38,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
@@ -49,6 +88,12 @@ const userStore = useUserStore()
 const questions = ref([])
 const answers = reactive({})
 const profile = ref(null)
+const thresholds = ref({
+  conservative: [5, 10],
+  balanced: [11, 18],
+  aggressive: [19, 25],
+})
+const maxScore = ref(25)
 const loading = ref(false)
 const submitting = ref(false)
 const editing = ref(false)
@@ -61,12 +106,28 @@ function tagType(l) {
   return l === 'aggressive' ? 'danger' : l === 'balanced' ? 'warning' : 'success'
 }
 
+function bandWeight(level) {
+  const [lo, hi] = thresholds.value[level] || [0, 0]
+  return Math.max(1, hi - lo + 1)
+}
+
+const markerPct = computed(() => {
+  if (!profile.value) return 0
+  const min = thresholds.value.conservative?.[0] ?? 5
+  const max = thresholds.value.aggressive?.[1] ?? maxScore.value
+  const span = Math.max(1, max - min)
+  const pct = ((profile.value.score - min) / span) * 100
+  return Math.max(0, Math.min(100, pct))
+})
+
 async function load() {
   loading.value = true
   try {
     const data = await store.fetchRiskQuiz()
     questions.value = data.questions || []
     profile.value = data.profile || null
+    if (data.thresholds) thresholds.value = data.thresholds
+    if (data.max_score) maxScore.value = data.max_score
     editing.value = !profile.value
   } finally {
     loading.value = false
@@ -74,7 +135,6 @@ async function load() {
 }
 
 async function submit() {
-  // 必须五题都答
   for (const q of questions.value) {
     if (!answers[q.id]) {
       ElMessage.warning('请回答所有问题')
@@ -85,6 +145,8 @@ async function submit() {
   try {
     const result = await store.submitRiskQuiz({ ...answers }, userStore.llmPayload)
     profile.value = result
+    if (result?.thresholds) thresholds.value = result.thresholds
+    if (result?.max_score) maxScore.value = result.max_score
     editing.value = false
     ElMessage.success(`测评完成，你是「${levelLabel(result.level)}」`)
   } catch (e) {
@@ -101,15 +163,58 @@ onMounted(load)
 .header-row {
   display: flex; justify-content: space-between; align-items: center; width: 100%;
 }
-.profile {
-  display: flex; flex-direction: column; gap: 10px;
+.rule-alert { margin-bottom: 14px; }
+.threshold-pill {
+  display: inline-block; margin: 2px 8px 0 0;
+  font-size: 12px; color: var(--color-text-muted);
 }
-.profile-row {
-  font-size: 14px; color: var(--color-text);
+
+.profile { display: flex; flex-direction: column; gap: 14px; }
+
+.score-display {
+  display: flex; justify-content: space-between; align-items: baseline;
+  flex-wrap: wrap; gap: 12px;
 }
-.profile-row strong {
-  margin-left: 6px; color: var(--color-primary);
+.score-num strong {
+  font-size: 34px; color: var(--color-primary); font-weight: 700;
 }
+.score-denom { font-size: 15px; color: var(--color-text-muted); margin-left: 4px; }
+.score-level { font-size: 14px; }
+.score-level strong { margin-left: 6px; font-size: 16px; }
+.level-conservative { color: #22C55E; }
+.level-balanced { color: #F59E0B; }
+.level-aggressive { color: #EF4444; }
+
+.band-wrapper {
+  position: relative;
+  display: flex; height: 22px; border-radius: 11px;
+  overflow: visible;
+}
+.band {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: white; font-weight: 600;
+}
+.band-conservative { background: #22C55E; border-radius: 11px 0 0 11px; }
+.band-balanced     { background: #F59E0B; }
+.band-aggressive   { background: #EF4444; border-radius: 0 11px 11px 0; }
+.marker {
+  position: absolute; top: -6px; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center;
+  pointer-events: none;
+}
+.marker-dot {
+  width: 10px; height: 34px; background: var(--color-text);
+  border-radius: 3px; border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+.marker-num {
+  margin-top: 2px; font-size: 11px; font-weight: 700;
+  color: var(--color-text); background: var(--color-surface);
+  padding: 1px 5px; border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
 .summary {
   font-size: 13px;
   color: var(--color-text-muted);
@@ -118,13 +223,10 @@ onMounted(load)
   border-radius: 8px;
   line-height: 1.6;
 }
-.empty {
-  text-align: center; color: var(--color-text-muted); padding: 24px 0;
-}
-.form-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-}
+.empty { text-align: center; color: var(--color-text-muted); padding: 24px 0; }
+.form-footer { display: flex; justify-content: flex-end; gap: 8px; }
 .el-radio-group {
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
 }
+.opt-score { color: var(--color-text-muted); font-size: 12px; margin-left: 2px; }
 </style>

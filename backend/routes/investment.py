@@ -330,6 +330,35 @@ def portfolio_summary():
     })
 
 
+@investment_bp.route("/api/investment/rebalance", methods=["POST"])
+@login_required
+def rebalance():
+    """按需向 LLM 请求一次再平衡建议。
+
+    body: {"force": false}；force=true 时跳过缓存。
+    返回 {targets, rationale, drift, cached_at, source}。
+    """
+    from services.rebalance import suggest_rebalance
+    data = request.get_json(silent=True) or {}
+    force = bool(data.get("force"))
+    llm_cfg = _load_llm_cfg(data)
+
+    db = get_db()
+    assets = _fetch_assets()
+    allocation = compute_allocation(assets)
+    risk_row = db.execute(
+        "SELECT level FROM risk_profiles WHERE user_id = ?", (g.user_id,),
+    ).fetchone()
+    risk_level = risk_row["level"] if risk_row else None
+    types = _list_asset_types()
+
+    result = suggest_rebalance(
+        db, g.user_id, allocation, risk_level, types,
+        llm=llm_cfg, force=force,
+    )
+    return jsonify({**result, "risk_level": risk_level})
+
+
 @investment_bp.route("/api/investment/refresh-prices", methods=["POST"])
 @login_required
 def refresh_prices():
@@ -570,6 +599,7 @@ def delete_goal(goal_id: int):
 @login_required
 def get_risk_quiz():
     from prompts.investment import RISK_QUIZ_QUESTIONS
+    from services.llm import RISK_THRESHOLDS, RISK_MAX_SCORE
     row = get_db().execute(
         "SELECT level, score, summary, updated_at FROM risk_profiles WHERE user_id = ?",
         (g.user_id,),
@@ -577,6 +607,8 @@ def get_risk_quiz():
     return jsonify({
         "questions": RISK_QUIZ_QUESTIONS,
         "profile": dict(row) if row else None,
+        "thresholds": {k: list(v) for k, v in RISK_THRESHOLDS.items()},
+        "max_score": RISK_MAX_SCORE,
     })
 
 

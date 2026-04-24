@@ -108,6 +108,11 @@ export const useInvestmentStore = defineStore('investment', {
       return res.data
     },
 
+    async fetchRebalance({ force = false, llm = null } = {}) {
+      const res = await api.post('/api/investment/rebalance', { force, llm })
+      return res.data
+    },
+
     async askAdvisor({ mode = 'general', history = [], goal_id = null, monthly_net_cashflow = 0, llm = null } = {}) {
       const payload = { mode, history, llm }
       if (goal_id != null) payload.goal_id = goal_id
