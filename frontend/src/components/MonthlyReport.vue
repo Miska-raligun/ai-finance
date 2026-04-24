@@ -85,7 +85,10 @@ function renderMarkdown(md) {
       }
       const ths = header.map(c => `<th>${inline(c)}</th>`).join('')
       const trs = body.map(r => '<tr>' + r.map(c => `<td>${inline(c)}</td>`).join('') + '</tr>').join('')
-      out.push(`<table class="md-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`)
+      out.push(
+        `<div class="md-table-wrap"><table class="md-table">` +
+        `<thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`
+      )
       continue
     }
 
@@ -153,16 +156,35 @@ const rendered = computed(() => renderMarkdown(props.report?.content || ''))
 .markdown :deep(ul) { padding-left: 20px; margin: 6px 0; }
 .markdown :deep(li) { line-height: 1.7; }
 .markdown :deep(code) { background: #F1F5F9; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+.markdown :deep(.md-table-wrap) {
+  /* 窄屏时表格太宽自动允许横向滚动，不再被卡片裁掉 */
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 10px 0;
+  border-radius: 6px;
+}
 .markdown :deep(.md-table) {
-  border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px;
+  border-collapse: collapse;
+  min-width: 100%;       /* 宽屏撑满卡片 */
+  width: max-content;    /* 窄屏按内容展开，由外层 wrap 提供滚动 */
+  font-size: 13px;
 }
 .markdown :deep(.md-table th),
 .markdown :deep(.md-table td) {
   border: 1px solid var(--color-border, #E5E7EB);
   padding: 6px 10px;
   text-align: left;
+  white-space: nowrap;   /* 避免数字/百分比被折行挤出单元格 */
 }
 .markdown :deep(.md-table th) { background: #F8FAFC; }
+
+/* 手机端进一步收窄字号和内边距，给表格留更多横向空间 */
+@media (max-width: 768px) {
+  .markdown :deep(.md-table) { font-size: 12px; }
+  .markdown :deep(.md-table th),
+  .markdown :deep(.md-table td) { padding: 5px 8px; }
+}
 .markdown :deep(.md-hr) {
   border: none;
   border-top: 1px solid var(--color-border, #E5E7EB);
