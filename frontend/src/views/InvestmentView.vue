@@ -32,59 +32,12 @@
         <div class="invest-layout">
           <div class="col-left">
             <PortfolioPie :allocation="portfolio?.allocation" />
-            <el-card v-if="portfolio && portfolio.drift?.length" class="mt">
+            <!-- Phase B 将补回再平衡建议卡片（按需向 LLM 请求） -->
+            <el-card v-if="portfolio && portfolio.allocation?.by_type?.length" class="mt">
               <template #header>
-                <div class="rebalance-header">
-                  <span>⚖️ 再平衡建议</span>
-                  <el-tooltip placement="top" effect="light">
-                    <template #content>
-                      <div class="rebalance-tooltip">
-                        <div class="tooltip-title">
-                          目标配比基于你的风险等级
-                          <b>{{ LEVEL_LABEL[portfolio.risk_level] || '未测评（用默认保守档）' }}</b>
-                        </div>
-                        <table class="tooltip-table">
-                          <thead>
-                            <tr><th>类型</th><th>目标占比</th></tr>
-                          </thead>
-                          <tbody>
-                            <tr v-for="(v, k) in portfolio.target_allocation || {}" :key="k">
-                              <td>{{ TYPE_LABEL[k] || k }}</td>
-                              <td>{{ (v * 100).toFixed(0) }}%</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <div class="tooltip-note">
-                          drift = 当前占比 − 目标占比；|drift| &lt; 1% 建议"保持"，正值减仓、负值加仓。
-                        </div>
-                      </div>
-                    </template>
-                    <span class="help-icon" aria-label="计算说明">ℹ️</span>
-                  </el-tooltip>
-                </div>
+                <span>⚖️ 再平衡建议</span>
               </template>
-              <div v-if="!portfolio.risk_level" class="hint">
-                <b>先完成风险测评</b>可得到贴合你的目标配比，否则按默认"保守"档位计算。
-              </div>
-              <el-table :data="portfolio.drift" size="small">
-                <el-table-column label="类型">
-                  <template #default="{ row }">{{ TYPE_LABEL[row.type] || row.type }}</template>
-                </el-table-column>
-                <el-table-column prop="current_pct" label="当前" align="right">
-                  <template #default="{ row }">{{ row.current_pct.toFixed(1) }}%</template>
-                </el-table-column>
-                <el-table-column prop="target_pct" label="目标" align="right">
-                  <template #default="{ row }">{{ row.target_pct.toFixed(1) }}%</template>
-                </el-table-column>
-                <el-table-column prop="drift_pct" label="漂移" align="right">
-                  <template #default="{ row }">
-                    <span :class="row.drift_pct > 0 ? 'up' : row.drift_pct < 0 ? 'down' : ''">
-                      {{ row.drift_pct > 0 ? '+' : '' }}{{ row.drift_pct.toFixed(1) }}%
-                    </span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="action" label="动作" />
-              </el-table>
+              <el-empty description="AI 再平衡建议开发中…" :image-size="60" />
             </el-card>
           </div>
           <div class="col-right">
@@ -128,10 +81,6 @@ const { assets, goals, portfolio, refreshCounter } = storeToRefs(store)
 
 const activeTab = ref('overview')
 
-const TYPE_LABEL = {
-  stock: '股票', fund: '基金', bond: '债券', cash: '现金',
-  crypto: '加密货币', realestate: '房地产', other: '其他',
-}
 const LEVEL_LABEL = {
   conservative: '保守型', balanced: '平衡型', aggressive: '激进型',
 }

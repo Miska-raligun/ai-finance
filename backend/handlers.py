@@ -665,16 +665,31 @@ def query_income(user_id: int, params: dict[str, Any]) -> str:
 
 # ===== 投资模块（供 LLM 工具调用使用的中文键入口） =====
 
-_INVEST_TYPES = {"stock", "fund", "bond", "cash", "crypto", "realestate", "other"}
+
+def _resolve_asset_type(user_id: int, atype: str) -> dict | None:
+    """查询当前用户已登记的资产类型定义；返回 dict 或 None。"""
+    row = get_db().execute(
+        "SELECT name, shape, quote_source FROM asset_types "
+        "WHERE user_id = ? AND name = ?",
+        (user_id, atype),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def invest_add_asset(user_id: int, params: dict[str, Any]) -> str:
     name = (params.get("名称") or "").strip()
-    atype = (params.get("类型") or "other").strip()
+    atype = (params.get("类型") or "").strip()
     if not name:
         return "⚠️ 请提供资产名称"
-    if atype not in _INVEST_TYPES:
-        return f"⚠️ 资产类型「{atype}」无效，支持：{'/'.join(sorted(_INVEST_TYPES))}"
+    if not atype:
+        return "⚠️ 请提供资产类型"
+    type_def = _resolve_asset_type(user_id, atype)
+    if not type_def:
+        available = [r["name"] for r in get_db().execute(
+            "SELECT name FROM asset_types WHERE user_id = ? ORDER BY id", (user_id,),
+        ).fetchall()]
+        hint = "，你可创建的类型有：" + "、".join(available) if available else ""
+        return f"⚠️ 资产类型「{atype}」未定义，请先在投资页的「类型管理」中创建{hint}"
     try:
         holdings = float(params.get("数量", 0) or 0)
         cost_basis = float(params.get("成本", 0) or 0)
@@ -692,11 +707,12 @@ def invest_add_asset(user_id: int, params: dict[str, Any]) -> str:
 
     symbol = (params.get("代码") or "").strip() or None
 
-    # 股票/基金自动尝试拉行情，避免用户手填市值
-    if atype in ("stock", "fund") and symbol and holdings > 0 and current_value <= 0:
+    # security_auto：按 quote_source 尝试拉行情，避免用户手填市值
+    if (type_def["shape"] == "security_auto" and type_def["quote_source"]
+            and symbol and holdings > 0 and current_value <= 0):
         try:
             from services.quotes import get_quote
-            q = get_quote(db, symbol, atype, force=True)
+            q = get_quote(db, symbol, type_def["quote_source"], force=True)
             if q is not None:
                 current_value = round(q.price * holdings, 2)
         except (ImportError, RuntimeError) as e:

@@ -1,11 +1,24 @@
 """LLM 工具调用入口（handlers.invest_*）的单测。"""
 
 
+def _seed_fund_type(app):
+    from db import get_db
+    from datetime import datetime
+    db = get_db()
+    db.execute(
+        "INSERT OR IGNORE INTO asset_types (user_id, name, shape, quote_source, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (1, "基金", "security_auto", "fund", datetime.utcnow().isoformat(timespec="seconds")),
+    )
+    db.commit()
+
+
 def test_invest_add_asset_and_summary(app):
     from handlers import invest_add_asset, invest_portfolio_summary
     with app.app_context():
+        _seed_fund_type(app)
         msg = invest_add_asset(1, {
-            "名称": "科技ETF", "类型": "fund",
+            "名称": "科技ETF", "类型": "基金",
             "数量": 500, "成本": 1000, "现值": 1200,
         })
         assert msg.startswith("✅")

@@ -11,20 +11,40 @@ from auth import login_required
 from cache import invalidate_user
 from db import get_db
 from services.portfolio import (
-    build_holding_details, compute_allocation, compute_drift, compute_goal_plan,
+    build_holding_details, compute_allocation, compute_goal_plan,
     compute_return, compute_top_movers,
 )
 from services.quotes import get_quote, refresh_user_assets
 
 investment_bp = Blueprint("investment", __name__)
 
-ASSET_TYPES = {"stock", "fund", "bond", "cash", "crypto", "realestate", "other"}
-AUTO_PRICED_TYPES = {"stock", "fund"}
 TX_KINDS = {"buy", "sell", "dividend", "adjust"}
+VALID_SHAPES = {"security_auto", "security_manual", "lump", "cash"}
+AUTO_SHAPES = {"security_auto"}
+VALID_QUOTE_SOURCES = {"stock", "fund"}
 
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _load_asset_type(name: str) -> dict | None:
+    """取当前用户已登记的某资产类型定义；不存在返回 None。"""
+    row = get_db().execute(
+        "SELECT id, name, shape, quote_source FROM asset_types "
+        "WHERE user_id = ? AND name = ?",
+        (g.user_id, name),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _list_asset_types() -> list[dict]:
+    rows = get_db().execute(
+        "SELECT id, name, shape, quote_source, created_at FROM asset_types "
+        "WHERE user_id = ? ORDER BY created_at ASC, id ASC",
+        (g.user_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def _load_llm_cfg(data: dict) -> dict:
@@ -49,6 +69,71 @@ def _fetch_assets() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# ===== 资产类型管理（用户自管理，默认为空） =====
+
+@investment_bp.route("/api/investment/asset-types", methods=["GET"])
+@login_required
+def list_asset_types():
+    return jsonify(_list_asset_types())
+
+
+@investment_bp.route("/api/investment/asset-types", methods=["POST"])
+@login_required
+def create_asset_type():
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    shape = (data.get("shape") or "").strip()
+    quote_source = (data.get("quote_source") or "").strip() or None
+
+    if not name:
+        return jsonify({"error": "缺少类型名称"}), 400
+    if shape not in VALID_SHAPES:
+        return jsonify({"error": f"非法形态：{shape}"}), 400
+    if shape == "security_auto":
+        if quote_source not in VALID_QUOTE_SOURCES:
+            return jsonify({"error": "security_auto 必须指定 quote_source=stock|fund"}), 400
+    else:
+        quote_source = None
+
+    db = get_db()
+    try:
+        cur = db.execute(
+            "INSERT INTO asset_types (user_id, name, shape, quote_source, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (g.user_id, name, shape, quote_source, _now()),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": f"类型「{name}」已存在"}), 409
+    invalidate_user(g.user_id)
+    return jsonify({"id": cur.lastrowid, "success": True}), 201
+
+
+@investment_bp.route("/api/investment/asset-types/<name>", methods=["DELETE"])
+@login_required
+def delete_asset_type(name: str):
+    db = get_db()
+    t = _load_asset_type(name)
+    if not t:
+        return jsonify({"error": f"类型「{name}」不存在"}), 404
+    in_use = db.execute(
+        "SELECT COUNT(*) AS c FROM assets WHERE user_id = ? AND type = ?",
+        (g.user_id, name),
+    ).fetchone()["c"]
+    if in_use > 0:
+        return jsonify({
+            "error": f"类型「{name}」仍有 {in_use} 项资产在使用，请先改为其他类型或删除这些资产",
+            "in_use": in_use,
+        }), 409
+    db.execute(
+        "DELETE FROM asset_types WHERE user_id = ? AND name = ?",
+        (g.user_id, name),
+    )
+    db.commit()
+    invalidate_user(g.user_id)
+    return jsonify({"success": True})
+
+
 # ===== 资产 CRUD =====
 
 @investment_bp.route("/api/investment/assets", methods=["GET"])
@@ -62,11 +147,14 @@ def list_assets():
 def create_asset():
     data = request.get_json() or {}
     name = (data.get("name") or "").strip()
-    atype = (data.get("type") or "other").strip()
+    atype = (data.get("type") or "").strip()
     if not name:
         return jsonify({"error": "缺少资产名称"}), 400
-    if atype not in ASSET_TYPES:
-        return jsonify({"error": f"非法资产类型：{atype}"}), 400
+    if not atype:
+        return jsonify({"error": "缺少资产类型"}), 400
+    type_def = _load_asset_type(atype)
+    if not type_def:
+        return jsonify({"error": f"类型「{atype}」未定义，请先在类型管理中创建"}), 400
     try:
         holdings = float(data.get("holdings") or 0)
         cost_basis = float(data.get("cost_basis") or 0)
@@ -77,9 +165,10 @@ def create_asset():
     symbol = (data.get("symbol") or "").strip() or None
     db = get_db()
 
-    # 股票/基金：如果用户没填市值但给了代码+持仓，尝试自动拉行情
-    if atype in AUTO_PRICED_TYPES and symbol and holdings > 0 and current_value <= 0:
-        q = get_quote(db, symbol, atype, force=True)
+    # security_auto：如果用户没填市值但给了代码+持仓，按 quote_source 尝试自动拉行情
+    if (type_def["shape"] == "security_auto" and type_def["quote_source"]
+            and symbol and holdings > 0 and current_value <= 0):
+        q = get_quote(db, symbol, type_def["quote_source"], force=True)
         if q is not None:
             current_value = round(q.price * holdings, 2)
 
@@ -118,8 +207,8 @@ def update_asset(asset_id: int):
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return jsonify({"error": "无可更新字段"}), 400
-    if "type" in updates and updates["type"] not in ASSET_TYPES:
-        return jsonify({"error": "非法资产类型"}), 400
+    if "type" in updates and not _load_asset_type(updates["type"]):
+        return jsonify({"error": f"类型「{updates['type']}」未定义"}), 400
 
     sets = ", ".join(f"{k} = ?" for k in updates) + ", updated_at = ?"
     values = list(updates.values()) + [_now(), asset_id, g.user_id]
@@ -227,19 +316,15 @@ def portfolio_summary():
         "SELECT level FROM risk_profiles WHERE user_id = ?", (g.user_id,),
     ).fetchone()
     risk_level = risk_row["level"] if risk_row else None
-    drift = compute_drift(allocation, risk_level=risk_level)
 
-    from services.portfolio import RISK_TARGET_ALLOCATION, DEFAULT_TARGET_ALLOCATION
-    target_alloc = RISK_TARGET_ALLOCATION.get(risk_level, DEFAULT_TARGET_ALLOCATION)
-
+    # 再平衡的目标占比不再由固定表决定，改由 /api/investment/rebalance 端点现场向 LLM 请求。
+    # portfolio 概览只返回组合的静态事实，页面想看再平衡时再单独拉一次。
     return jsonify({
         "total_value": allocation["total_value"],
         "allocation": allocation,
-        "drift": drift,
         "returns": returns,
         "top_movers": movers,
         "risk_level": risk_level,
-        "target_allocation": target_alloc,
         "asset_count": len(assets),
         "quotes": quote_stats,
     })
@@ -562,9 +647,9 @@ def advisor_chat():
             "SELECT level FROM risk_profiles WHERE user_id = ?", (g.user_id,),
         ).fetchone()
         risk_level = risk_row["level"] if risk_row else None
-        drift = compute_drift(allocation, risk_level=risk_level)
+        # 再平衡漂移已剥离给独立端点；这里把类型分布 + 每笔持仓交给 LLM 自行点评即可。
         reply = call_llm_portfolio_advice(
-            allocation, drift, returns, risk_level, llm=llm_cfg, holdings=holdings,
+            allocation, [], returns, risk_level, llm=llm_cfg, holdings=holdings,
         )
         return jsonify({"reply": reply})
 

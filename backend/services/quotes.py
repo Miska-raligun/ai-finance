@@ -225,13 +225,16 @@ def get_quote(db, symbol: str, asset_type: str, *, force: bool = False) -> Quote
 
 
 def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
-    """遍历该用户的 stock/fund 资产，刷新 current_value = holdings * latest_price。
+    """遍历该用户 shape=security_auto 的资产，按 quote_source 刷新 current_value。
 
     返回 {"updated": N, "skipped": M, "stale": K, "last_refreshed_at": iso}
     """
     rows = db.execute(
-        "SELECT id, type, symbol, holdings FROM assets "
-        "WHERE user_id = ? AND type IN ('stock', 'fund')",
+        "SELECT a.id, a.symbol, a.holdings, t.quote_source "
+        "FROM assets a "
+        "JOIN asset_types t ON t.user_id = a.user_id AND t.name = a.type "
+        "WHERE a.user_id = ? AND t.shape = 'security_auto' "
+        "AND t.quote_source IS NOT NULL",
         (user_id,),
     ).fetchall()
 
@@ -242,13 +245,13 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
 
     for r in rows:
         asset_id = r["id"]
-        atype = r["type"]
+        quote_source = r["quote_source"]
         symbol = (r["symbol"] or "").strip()
         holdings = float(r["holdings"] or 0)
         if not symbol or holdings <= 0:
             skipped += 1
             continue
-        q = get_quote(db, symbol, atype, force=force)
+        q = get_quote(db, symbol, quote_source, force=force)
         if q is None:
             skipped += 1
             continue

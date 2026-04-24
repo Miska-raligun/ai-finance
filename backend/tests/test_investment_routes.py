@@ -1,17 +1,58 @@
 """投资模块 REST 路由集成测试。"""
 
 
+def _seed_types(auth_client):
+    """资产类型现已改为用户自管理，先注入常用两种再做 CRUD 测试。"""
+    auth_client.post("/api/investment/asset-types", json={
+        "name": "基金", "shape": "security_auto", "quote_source": "fund",
+    })
+    auth_client.post("/api/investment/asset-types", json={
+        "name": "现金", "shape": "cash",
+    })
+
+
+def test_asset_type_crud(auth_client):
+    r = auth_client.post("/api/investment/asset-types", json={
+        "name": "A股", "shape": "security_auto", "quote_source": "stock",
+    })
+    assert r.status_code == 201, r.data
+
+    # 重名应 409
+    r = auth_client.post("/api/investment/asset-types", json={
+        "name": "A股", "shape": "cash",
+    })
+    assert r.status_code == 409
+
+    # 未填 quote_source 的 security_auto 应拒绝
+    r = auth_client.post("/api/investment/asset-types", json={
+        "name": "B股", "shape": "security_auto",
+    })
+    assert r.status_code == 400
+
+    # 默认列表应至少包含刚建的
+    lst = auth_client.get("/api/investment/asset-types").get_json()
+    assert any(t["name"] == "A股" for t in lst)
+
+    # 引用中无法删除
+    auth_client.post("/api/investment/assets", json={
+        "name": "某只股票", "type": "A股", "holdings": 0, "cost_basis": 0, "current_value": 100,
+    })
+    r = auth_client.delete("/api/investment/asset-types/A股")
+    assert r.status_code == 409
+
+
 def test_assets_crud_and_portfolio(auth_client):
+    _seed_types(auth_client)
     # 新建资产
     r1 = auth_client.post("/api/investment/assets", json={
-        "name": "沪深300", "type": "fund", "holdings": 1000,
+        "name": "沪深300", "type": "基金", "holdings": 1000,
         "cost_basis": 1500, "current_value": 1800,
     })
     assert r1.status_code == 201, r1.data
     asset_id = r1.get_json()["id"]
 
     r2 = auth_client.post("/api/investment/assets", json={
-        "name": "活期存款", "type": "cash", "current_value": 2000,
+        "name": "活期存款", "type": "现金", "current_value": 2000,
     })
     assert r2.status_code == 201
 
@@ -35,7 +76,8 @@ def test_assets_crud_and_portfolio(auth_client):
     assert r4.status_code == 200
 
 
-def test_asset_invalid_type_rejected(auth_client):
+def test_asset_unknown_type_rejected(auth_client):
+    """类型在用户 asset_types 中未登记时应拒绝。"""
     r = auth_client.post("/api/investment/assets", json={"name": "X", "type": "bogus"})
     assert r.status_code == 400
 

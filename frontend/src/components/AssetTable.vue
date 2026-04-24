@@ -11,8 +11,9 @@
             placeholder="全部类型"
           >
             <el-option label="全部类型" value="" />
-            <el-option v-for="(label, key) in TYPE_LABEL" :key="key" :value="key" :label="label" />
+            <el-option v-for="t in assetTypes" :key="t.name" :value="t.name" :label="t.name" />
           </el-select>
+          <el-button size="small" @click="showTypeManager = true">⚙️ 类型管理</el-button>
           <el-button size="small" :loading="refreshing" @click="refreshPrices">
             🔄 刷新行情
           </el-button>
@@ -32,7 +33,7 @@
     >
       <el-table-column prop="name" label="名称" min-width="120" sortable />
       <el-table-column prop="type" label="类型" width="100" sortable>
-        <template #default="{ row }">{{ TYPE_LABEL[row.type] || row.type }}</template>
+        <template #default="{ row }">{{ row.type }}</template>
       </el-table-column>
       <el-table-column prop="symbol" label="代码" width="110" sortable>
         <template #default="{ row }">{{ row.symbol || '—' }}</template>
@@ -96,7 +97,7 @@
           </div>
           <div class="drawer-row">
             <span class="drawer-label">类型</span>
-            <span class="drawer-value">{{ TYPE_LABEL[popoverRow.type] || popoverRow.type }}</span>
+            <span class="drawer-value">{{ popoverRow.type }}</span>
           </div>
           <div v-if="schemaOf(popoverRow.type).showSymbol" class="drawer-row">
             <span class="drawer-label">代码</span>
@@ -159,9 +160,24 @@
             <el-input v-model="editingRow.name" :placeholder="namePlaceholder(editingRow.type)" />
           </div>
           <div class="drawer-edit-field">
-            <label class="drawer-edit-label">类型</label>
-            <el-select v-model="editingRow.type" style="width:100%">
-              <el-option v-for="(label, key) in TYPE_LABEL" :key="key" :value="key" :label="label" />
+            <label class="drawer-edit-label">
+              类型
+              <span v-if="!assetTypes.length" class="required-hint">
+                （还没有类型，请先点右上角「⚙️ 类型管理」创建一个）
+              </span>
+            </label>
+            <el-select
+              v-model="editingRow.type"
+              style="width:100%"
+              placeholder="选择类型"
+              :no-data-text="'暂无类型，去类型管理创建'"
+            >
+              <el-option
+                v-for="t in assetTypes"
+                :key="t.name"
+                :value="t.name"
+                :label="t.name"
+              />
             </el-select>
             <div class="type-hint">{{ typeHint(editingRow.type) }}</div>
           </div>
@@ -218,7 +234,7 @@
             <label class="drawer-edit-label">
               {{ valueLabel(editingRow.type) }}
               <span v-if="editingSchema.autoQuote" class="required-hint">
-                （股票/基金自动同步，无需填写）
+                （按行情源自动同步，无需填写）
               </span>
             </label>
             <el-input-number
@@ -245,6 +261,26 @@
         </div>
       </template>
     </el-drawer>
+
+    <!-- 类型管理抽屉 -->
+    <el-drawer
+      v-model="showTypeManager"
+      direction="btt"
+      :with-header="false"
+      size="420px"
+      class="asset-drawer"
+    >
+      <div class="drawer-handle-bar"></div>
+      <div class="drawer-edit-title">⚙️ 资产类型管理</div>
+      <div class="drawer-edit-form">
+        <AssetTypeManager />
+      </div>
+      <div class="drawer-footer">
+        <el-button class="drawer-action-btn" type="primary" @click="showTypeManager = false">
+          完成
+        </el-button>
+      </div>
+    </el-drawer>
   </el-card>
 </template>
 
@@ -253,69 +289,46 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import { useInvestmentStore } from '@/stores/investment'
+import { useAssetTypesStore } from '@/stores/assetTypes'
+import AssetTypeManager from '@/components/AssetTypeManager.vue'
 
 const props = defineProps({ assets: { type: Array, default: () => [] } })
 const store = useInvestmentStore()
 const { refreshCounter } = storeToRefs(store)
 
-const TYPE_LABEL = {
-  stock: '股票', fund: '基金', bond: '债券', cash: '现金',
-  crypto: '加密货币', realestate: '房地产', other: '其他',
+const typesStore = useAssetTypesStore()
+const { types: assetTypes } = storeToRefs(typesStore)
+
+function schemaOf(type) { return typesStore.schemaOf(type) }
+function shapeOf(type) { return typesStore.byName[type]?.shape }
+function isAutoPriced(row) {
+  const t = typesStore.byName[row?.type]
+  return !!(t && t.shape === 'security_auto' && row?.symbol)
 }
-
-// 每种资产类型的字段模式
-// - showSymbol / showHoldings / showUnitCost：是否出现在表单
-// - hasCost：是否有「成本」概念（现金没有 → PnL 无意义）
-// - autoQuote：后端是否支持按 symbol 拉行情（股票/基金）
-const TYPE_SCHEMA = {
-  stock:      { showSymbol: true,  showHoldings: true,  showUnitCost: true,  hasCost: true,  autoQuote: true  },
-  fund:       { showSymbol: true,  showHoldings: true,  showUnitCost: true,  hasCost: true,  autoQuote: true  },
-  crypto:     { showSymbol: true,  showHoldings: true,  showUnitCost: true,  hasCost: true,  autoQuote: false },
-  bond:       { showSymbol: true,  showHoldings: false, showUnitCost: false, hasCost: true,  autoQuote: false },
-  realestate: { showSymbol: false, showHoldings: false, showUnitCost: false, hasCost: true,  autoQuote: false },
-  other:      { showSymbol: false, showHoldings: false, showUnitCost: false, hasCost: true,  autoQuote: false },
-  cash:       { showSymbol: false, showHoldings: false, showUnitCost: false, hasCost: false, autoQuote: false },
-}
-
-const FALLBACK_SCHEMA = TYPE_SCHEMA.other
-function schemaOf(type) { return TYPE_SCHEMA[type] || FALLBACK_SCHEMA }
-
-const isAutoType = (t) => schemaOf(t).autoQuote
-const isAutoPriced = (row) => schemaOf(row?.type).autoQuote && !!row?.symbol
 
 function symbolPlaceholder(type) {
-  if (type === 'stock') return '如 sh600519 / sz000001（或 6 位 A 股代码）'
-  if (type === 'fund') return '如 510300（6 位基金代码）'
-  if (type === 'crypto') return '如 BTC / ETH'
-  if (type === 'bond') return '如 019666（可选）'
+  const t = typesStore.byName[type]
+  if (!t) return '可选'
+  if (t.quote_source === 'stock') return '如 sh600519 / sz000001（或 6 位 A 股代码）'
+  if (t.quote_source === 'fund') return '如 510300（6 位基金代码）'
+  if (t.shape === 'security_manual') return '如 BTC / ETH（任意字符串）'
   return '可选'
 }
 function namePlaceholder(type) {
-  if (type === 'stock') return '如 贵州茅台'
-  if (type === 'fund') return '如 沪深300指数基金'
-  if (type === 'crypto') return '如 Bitcoin'
-  if (type === 'bond') return '如 22国债01'
-  if (type === 'cash') return '如 招行活期 / 余额宝'
-  if (type === 'realestate') return '如 自住房'
-  return '如：其他资产'
+  return type ? `如：一笔${type}资产` : '请先选择类型'
 }
 function typeHint(type) {
-  if (type === 'stock' || type === 'fund') return '股票/基金：填持仓 + 成本价，总成本和最新市值由系统计算'
-  if (type === 'crypto') return '加密货币：填持仓 + 成本价，当前市值需手填（无自动行情源）'
-  if (type === 'bond') return '债券：直接填总成本和当前市值'
-  if (type === 'cash') return '现金：只需填余额，无成本和盈亏概念'
-  if (type === 'realestate') return '房地产：填买入成本和当前估值'
-  if (type === 'other') return '其他：自由填写成本和当前市值'
-  return ''
+  const t = typesStore.byName[type]
+  if (!t) return '请选择一个类型；没有就去「⚙️ 类型管理」建一个'
+  if (t.shape === 'security_auto') return `证券（自动行情·${t.quote_source}）：填代码+持仓+成本价，总成本和市值自动计算`
+  if (t.shape === 'security_manual') return '证券（手填市值）：填代码+持仓+成本价，市值需手填'
+  if (t.shape === 'cash') return '现金类：只需填余额，无成本和盈亏概念'
+  return '一次性资产：直接填总成本和当前市值'
 }
 function valueLabel(type) {
-  if (type === 'cash') return '当前余额'
-  return '当前市值'
+  return shapeOf(type) === 'cash' ? '当前余额' : '当前市值'
 }
-function costLabel(type) {
-  if (type === 'realestate') return '买入成本'
-  return '总成本'
-}
+function costLabel(_type) { return '总成本' }
 
 const filterType = ref('')
 const displayedAssets = computed(() => {
@@ -353,6 +366,12 @@ watch(refreshCounter, () => {
   store.fetchPortfolio()
 })
 
+// 初次挂载加载类型；类型被管理器增删后会触发 typesStore.refreshCounter，
+// 投资模块无需重复订阅——AssetTable 同样依赖其下拉列表，所以这里直接看 types 数组即可
+onMounted(() => typesStore.fetchTypes())
+
+const showTypeManager = ref(false)
+
 function handleRowClick(row, _col, event) {
   if (event?.target?.closest?.('.el-button, button, input, .el-select, .el-input, .el-date-editor')) return
   popoverRow.value = row
@@ -366,8 +385,13 @@ function onDrawerClose() {
 }
 
 function openCreate() {
+  if (!assetTypes.value.length) {
+    ElMessage.warning('还没有资产类型，请先点击「⚙️ 类型管理」创建')
+    showTypeManager.value = true
+    return
+  }
   editingRow.value = {
-    id: null, name: '', type: 'fund', symbol: '',
+    id: null, name: '', type: assetTypes.value[0].name, symbol: '',
     holdings: 0, cost_basis: 0, cost_price: 0, current_value: 0, notes: '',
   }
   popoverRow.value = null
@@ -412,7 +436,7 @@ async function saveDrawerEdit() {
   const s = schemaOf(r.type)
 
   if (s.autoQuote && r.holdings > 0 && !r.symbol) {
-    ElMessage.warning('股票/基金需填写代码，系统才能自动同步市值')
+    ElMessage.warning(`「${r.type}」需填写代码，系统才能按行情源自动同步市值`)
     return
   }
 

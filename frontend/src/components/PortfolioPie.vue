@@ -30,17 +30,16 @@ let chartInstance = null
 const byType = computed(() => props.allocation?.by_type || [])
 const hasData = computed(() => byType.value.length > 0 && byType.value.some(r => r.value > 0))
 
-const TYPE_LABELS = {
-  stock: '股票', fund: '基金', bond: '债券', cash: '现金',
-  crypto: '加密货币', realestate: '房地产', other: '其他',
-}
-function typeLabel(t) { return TYPE_LABELS[t] || t }
+// 类型现在由用户自管理，直接显示后端给的 type 字符串，颜色按名字 hash 分配
+function typeLabel(t) { return t || '未分类' }
 
 const PALETTE = ['#2563EB', '#60A5FA', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#14B8A6']
-function colorOf(t) {
-  const idx = Object.keys(TYPE_LABELS).indexOf(t)
-  return PALETTE[idx >= 0 ? idx % PALETTE.length : 0]
+function hashStr(s) {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff
+  return h
 }
+function colorOf(t) { return PALETTE[hashStr(String(t || '')) % PALETTE.length] }
 
 function draw() {
   if (!chartRef.value) return

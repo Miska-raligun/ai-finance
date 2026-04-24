@@ -6,7 +6,7 @@
     <template v-if="rec._state === 'confirmed'">
       <div class="card-confirmed-header">
         <span class="amount-asset">📊 {{ rec._edit.name }}</span>
-        <span class="card-category-text">{{ TYPE_LABEL[rec._edit.type] || rec._edit.type }}</span>
+        <span class="card-category-text">{{ rec._edit.type }}</span>
         <span class="card-confirmed-badge">✓ 已入库</span>
       </div>
     </template>
@@ -20,19 +20,24 @@
         </div>
         <div class="card-field">
           <label class="field-label">类型</label>
-          <el-select v-model="rec._edit.type" size="small" style="width:100%">
-            <el-option v-for="(label, key) in TYPE_LABEL" :key="key" :value="key" :label="label" />
+          <el-select
+            v-model="rec._edit.type"
+            size="small" style="width:100%"
+            placeholder="选择类型"
+            :no-data-text="'暂无类型，请去投资页创建'"
+          >
+            <el-option v-for="t in assetTypes" :key="t.name" :value="t.name" :label="t.name" />
           </el-select>
         </div>
-        <div class="card-field">
+        <div v-if="schema.showSymbol" class="card-field">
           <label class="field-label">代码</label>
           <el-input v-model="rec._edit.symbol" size="small" :placeholder="symbolPlaceholder(rec._edit.type)" />
         </div>
-        <div class="card-field">
+        <div v-if="schema.showHoldings" class="card-field">
           <label class="field-label">持仓</label>
           <el-input-number v-model="rec._edit.holdings" :min="0" size="small" style="width:100%" controls-position="right" />
         </div>
-        <div v-if="isAutoType(rec._edit.type)" class="card-field">
+        <div v-if="schema.showUnitCost" class="card-field">
           <label class="field-label">成本价（每股/每份）</label>
           <el-input-number
             v-model="rec._edit.cost_price"
@@ -40,12 +45,12 @@
             size="small" style="width:100%" controls-position="right"
           />
         </div>
-        <div v-else class="card-field">
+        <div v-else-if="schema.hasCost" class="card-field">
           <label class="field-label">总成本</label>
           <el-input-number v-model="rec._edit.cost_basis" :min="0" size="small" style="width:100%" controls-position="right" />
         </div>
-        <div v-if="!isAutoType(rec._edit.type)" class="card-field">
-          <label class="field-label">市值</label>
+        <div v-if="!schema.autoQuote" class="card-field">
+          <label class="field-label">{{ schema.hasCost ? '市值' : '当前余额' }}</label>
           <el-input-number v-model="rec._edit.current_value" :min="0" size="small" style="width:100%" controls-position="right" />
         </div>
         <div v-else class="card-field card-field-wide">
@@ -67,32 +72,35 @@
 </template>
 
 <script setup>
-import { computed, watch } from 'vue'
-
-const TYPE_LABEL = {
-  stock: '股票', fund: '基金', bond: '债券', cash: '现金',
-  crypto: '加密货币', realestate: '房地产', other: '其他',
-}
-
-const AUTO_TYPES = new Set(['stock', 'fund'])
-const isAutoType = (t) => AUTO_TYPES.has(t)
-
-function symbolPlaceholder(type) {
-  if (type === 'stock') return '如 sh600519 / 600519'
-  if (type === 'fund') return '如 510300（6位）'
-  return '可选'
-}
+import { computed, watch, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useAssetTypesStore } from '@/stores/assetTypes'
 
 const props = defineProps({
   rec: { type: Object, required: true },
 })
 defineEmits(['confirm', 'cancel'])
 
-// 若 LLM 只给了总成本 + 持仓，反推出成本价作为初始值，保持股票/基金 UX 一致
+const typesStore = useAssetTypesStore()
+const { types: assetTypes } = storeToRefs(typesStore)
+onMounted(() => typesStore.fetchTypes())
+
+const schema = computed(() => typesStore.schemaOf(props.rec._edit.type))
+const isAutoType = (t) => typesStore.schemaOf(t).autoQuote
+
+function symbolPlaceholder(type) {
+  const t = typesStore.byName[type]
+  if (!t) return '可选'
+  if (t.quote_source === 'stock') return '如 sh600519 / 600519'
+  if (t.quote_source === 'fund') return '如 510300（6位）'
+  return '可选'
+}
+
+// 若 LLM 只给了总成本 + 持仓，反推出成本价作为初始值，保持证券类 UX 一致
 watch(
   () => [props.rec._edit.type, props.rec._edit.holdings, props.rec._edit.cost_basis],
   ([type, holdings, basis]) => {
-    if (!isAutoType(type)) return
+    if (!typesStore.schemaOf(type).showUnitCost) return
     if (props.rec._edit.cost_price != null && props.rec._edit.cost_price > 0) return
     const h = Number(holdings) || 0
     const b = Number(basis) || 0
@@ -109,11 +117,11 @@ const computedCost = computed(() => {
   return h * cp
 })
 
-// 股票/基金类型：保持 cost_basis 与 持仓×成本价 同步，避免提交时漏算
+// 证券类型：保持 cost_basis 与 持仓×成本价 同步，避免提交时漏算
 watch(
   [() => props.rec._edit.type, () => props.rec._edit.holdings, () => props.rec._edit.cost_price],
   ([type]) => {
-    if (!isAutoType(type)) return
+    if (!typesStore.schemaOf(type).showUnitCost) return
     props.rec._edit.cost_basis = Number(computedCost.value.toFixed(2))
   },
 )
