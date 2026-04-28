@@ -15,6 +15,7 @@ from db import init_db, init_app, cleanup_all_empty_categories
 from llm_security_middleware import register_llm_security
 from errors import register_error_handlers
 from rate_limit import init_limiter, apply_endpoint_limits
+from csrf import register_csrf
 
 _logger = logging.getLogger(__name__)
 
@@ -50,9 +51,11 @@ app.config.update(
     # 单请求体上限（含 OCR 图片）。可通过环境变量按需放宽。
     MAX_CONTENT_LENGTH=int(os.getenv("MAX_CONTENT_LENGTH_MB", "8")) * 1024 * 1024,
 )
-CORS(app, supports_credentials=True, origins=_allowed_origins)
+CORS(app, supports_credentials=True, origins=_allowed_origins,
+     expose_headers=["X-Request-Id", "X-CSRF-Token"])
 init_app(app)
 init_limiter(app)
+register_csrf(app)
 
 
 # 统一注入安全响应头：浏览器默认即可加固大半 XSS / Clickjacking / MIME-sniff 风险。

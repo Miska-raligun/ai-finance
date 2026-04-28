@@ -3,6 +3,26 @@ import { ElMessage } from 'element-plus'
 
 const api = axios.create({ withCredentials: true })
 
+// 读取 cookie 中的 CSRF token，由后端 csrf.py 在首次 GET 时下发。
+function readCookie(name) {
+  if (typeof document === 'undefined') return ''
+  const m = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'))
+  return m ? decodeURIComponent(m[1]) : ''
+}
+
+// 状态变更请求自动带上 CSRF 头；登录前端点会被后端跳过校验。
+api.interceptors.request.use((config) => {
+  const method = (config.method || 'get').toUpperCase()
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const token = readCookie('csrf_token')
+    if (token) {
+      config.headers = config.headers || {}
+      config.headers['X-CSRF-Token'] = token
+    }
+  }
+  return config
+})
+
 // 全局响应拦截：把网络异常 / 鉴权过期 / 频率限制等统一成可读 toast，
 // 避免每个调用点都要 try/catch + 自己拼错误文案。
 let _redirecting = false

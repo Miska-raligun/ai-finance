@@ -17,6 +17,52 @@ if not llm_logger.handlers:
     llm_logger.setLevel(logging.INFO)
 
 
+# LLM 成本上限：避免被恶意/失控调用刷爆 API 账单。两道闸：
+#   1. 单次调用拒绝（429）：当 user 当日 total_tokens 超过阈值
+#   2. 看板可见：admin/llm-usage 仍能继续看到曾经累计
+# 阈值通过环境变量配置，0 / 未设置 = 关闭，便于本地调试。
+def _daily_token_limit() -> int:
+    import os as _os
+    try:
+        return max(0, int(_os.getenv("LLM_DAILY_TOKEN_LIMIT", "0")))
+    except ValueError:
+        return 0
+
+
+class LLMQuotaExceeded(RuntimeError):
+    """抛出后由 _call_llm 转成 {"error": ...}，路由层会回 429 类提示文案。"""
+
+
+def _check_user_quota() -> None:
+    """超额则抛 LLMQuotaExceeded。无 Flask 上下文（如 MCP 进程）时跳过。"""
+    limit = _daily_token_limit()
+    if limit <= 0:
+        return
+    try:
+        from db import get_db
+        from flask import g, has_request_context
+        if not has_request_context():
+            return
+        user_id = getattr(g, "user_id", None)
+        if not user_id:
+            return
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        row = get_db().execute(
+            "SELECT COALESCE(SUM(total_tokens),0) AS used "
+            "FROM llm_usage WHERE user_id = ? AND substr(created_at, 1, 10) = ?",
+            (user_id, today),
+        ).fetchone()
+        used = int(row["used"] or 0) if row else 0
+        if used >= limit:
+            raise LLMQuotaExceeded(
+                f"今日 LLM 调用已达上限（{used}/{limit} tokens），请明天再试或联系管理员调高额度"
+            )
+    except LLMQuotaExceeded:
+        raise
+    except Exception as _e:
+        logger.debug("LLM 配额检查失败（忽略）：%s", _e)
+
+
 def _record_usage(endpoint: str, model: str, data: dict | None) -> None:
     """把 LLM 返回的 token 用量写入 llm_usage 表，失败静默。"""
     if not data:
@@ -84,6 +130,12 @@ def _call_llm(
         payload["tools"] = tools
     if tool_choice:
         payload["tool_choice"] = tool_choice
+
+    try:
+        _check_user_quota()
+    except LLMQuotaExceeded as e:
+        logger.warning("LLM quota exceeded endpoint=%s err=%s", endpoint, e)
+        return {"error": {"message": str(e), "code": "quota_exceeded"}}
 
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=timeout)
