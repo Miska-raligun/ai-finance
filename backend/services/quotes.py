@@ -67,33 +67,12 @@ def _normalize_stock_symbol(symbol: str) -> str | None:
 
 # ---------- 外部数据源 ----------
 
-def _fetch_stock_quote(symbol: str) -> QuoteResult | None:
-    code = _normalize_stock_symbol(symbol)
-    if not code:
-        return None
-    try:
-        resp = requests.get(
-            _SINA_URL.format(codes=code),
-            headers=_SINA_HEADERS,
-            timeout=HTTP_TIMEOUT,
-        )
-        resp.encoding = "gbk"  # 新浪返回 gbk
-        text = resp.text
-    except (requests.RequestException, OSError) as e:
-        logger.warning("[quote] sina fetch failed symbol=%s err=%s", symbol, e)
-        return None
-
-    # 返回格式：var hq_str_sh600519="贵州茅台,...,1680.00,..."; (A 股)
-    m = re.search(r'="([^"]*)"', text)
-    if not m or not m.group(1):
-        logger.warning("[quote] sina empty response symbol=%s", symbol)
-        return None
-    parts = m.group(1).split(",")
+def _parse_sina_payload(code: str, payload: str) -> tuple[str | None, float | None]:
+    """从 sina 返回的单条 csv-like payload 中解析 (name, price)。"""
+    parts = payload.split(",")
     if len(parts) < 4:
-        return None
+        return None, None
     name = parts[0] or None
-
-    # A 股 parts[3] = 当前价；港股 parts[6]；美股 parts[1]
     price: float | None = None
     if code.startswith(("sh", "sz", "bj")):
         try:
@@ -110,10 +89,60 @@ def _fetch_stock_quote(symbol: str) -> QuoteResult | None:
             price = float(parts[1])
         except ValueError:
             price = None
-
     if not price or price <= 0:
-        return None
-    return QuoteResult(symbol=symbol, price=round(price, 4), name=name)
+        return name, None
+    return name, round(price, 4)
+
+
+def _fetch_stock_quote(symbol: str) -> QuoteResult | None:
+    """单条抓取：内部仅供 fetch_quote 使用，批量场景请走 _fetch_stock_quotes_batch。"""
+    res = _fetch_stock_quotes_batch([symbol])
+    return res.get(symbol)
+
+
+def _fetch_stock_quotes_batch(symbols: list[str]) -> dict[str, QuoteResult]:
+    """新浪行情接口支持以逗号拼接多个代码，单次请求即可拿全部价格。
+
+    返回 {原始 symbol: QuoteResult}；解析失败/代码非法的 symbol 不会出现在结果中。
+    """
+    pairs: list[tuple[str, str]] = []  # (原始 symbol, sina code)
+    for s in symbols:
+        code = _normalize_stock_symbol(s)
+        if code:
+            pairs.append((s, code))
+    if not pairs:
+        return {}
+
+    # 单次最多打包 50 个，避免 URL 过长
+    out: dict[str, QuoteResult] = {}
+    chunk = 50
+    for i in range(0, len(pairs), chunk):
+        batch = pairs[i:i + chunk]
+        codes = ",".join(c for _, c in batch)
+        try:
+            resp = requests.get(
+                _SINA_URL.format(codes=codes),
+                headers=_SINA_HEADERS,
+                timeout=HTTP_TIMEOUT,
+            )
+            resp.encoding = "gbk"
+            text = resp.text
+        except (requests.RequestException, OSError) as e:
+            logger.warning("[quote] sina batch fetch failed n=%d err=%s", len(batch), e)
+            continue
+
+        # 每行形如：var hq_str_sh600519="贵州茅台,...";
+        line_re = re.compile(r'hq_str_([^=]+)="([^"]*)"')
+        payloads = {m.group(1).strip(): m.group(2) for m in line_re.finditer(text)}
+        for orig, code in batch:
+            payload = payloads.get(code)
+            if not payload:
+                continue
+            name, price = _parse_sina_payload(code, payload)
+            if price is None:
+                continue
+            out[orig] = QuoteResult(symbol=orig, price=price, name=name)
+    return out
 
 
 def _fetch_fund_quote(symbol: str) -> QuoteResult | None:
@@ -227,8 +256,15 @@ def get_quote(db, symbol: str, asset_type: str, *, force: bool = False) -> Quote
 def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
     """遍历该用户 shape=security_auto 的资产，按 quote_source 刷新 current_value。
 
+    优化点：
+      * 股票走批量接口（一次 HTTP 拿到全部代码）
+      * 基金接口不支持批量，但用线程池并发 8 个连接
+      * 命中 TTL 缓存的资产先短路，仅未命中部分进入网络请求
+
     返回 {"updated": N, "skipped": M, "stale": K, "last_refreshed_at": iso}
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     rows = db.execute(
         "SELECT a.id, a.symbol, a.holdings, t.quote_source "
         "FROM assets a "
@@ -243,20 +279,66 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
     skipped = 0
     now = int(time.time())
 
+    # 第一遍：走缓存 + 收集需要联网的 symbol，按 quote_source 分桶
+    to_fetch: dict[str, list[tuple[int, str, float]]] = {"stock": [], "fund": []}
+    cached_apply: list[tuple[int, QuoteResult]] = []
     for r in rows:
         asset_id = r["id"]
         quote_source = r["quote_source"]
         symbol = (r["symbol"] or "").strip()
         holdings = float(r["holdings"] or 0)
-        if not symbol or holdings <= 0:
+        if not symbol or holdings <= 0 or quote_source not in _AUTO_REFRESH_TYPES:
             skipped += 1
             continue
-        q = get_quote(db, symbol, quote_source, force=force)
-        if q is None:
-            skipped += 1
-            continue
-        if q.stale:
-            stale += 1
+        if not force:
+            cached = _get_cached(db, symbol, QUOTE_TTL_SECONDS)
+            if cached is not None:
+                cached_apply.append((asset_id, cached))
+                continue
+        to_fetch[quote_source].append((asset_id, symbol, holdings))
+
+    # 第二遍：批量/并发拉行情
+    fresh_results: dict[tuple[str, str], QuoteResult] = {}  # (source, symbol) -> result
+
+    if to_fetch["stock"]:
+        symbols = [s for _, s, _ in to_fetch["stock"]]
+        for sym, q in _fetch_stock_quotes_batch(symbols).items():
+            fresh_results[("stock", sym)] = q
+
+    if to_fetch["fund"]:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            fund_symbols = [s for _, s, _ in to_fetch["fund"]]
+            for sym, q in zip(fund_symbols, ex.map(_fetch_fund_quote, fund_symbols)):
+                if q is not None:
+                    fresh_results[("fund", sym)] = q
+
+    # 第三遍：写缓存 + 更新资产 current_value
+    for source, items in to_fetch.items():
+        for asset_id, symbol, holdings in items:
+            q = fresh_results.get((source, symbol))
+            if q is None:
+                # 外部失败时退到旧缓存（含过期），标记 stale
+                cached = _get_cached(db, symbol, max_age=10**9)
+                if cached is None:
+                    skipped += 1
+                    continue
+                cached.stale = True
+                q = cached
+            else:
+                _put_cache(db, q, source)
+            if q.stale:
+                stale += 1
+            new_value = round(q.price * holdings, 2)
+            db.execute(
+                "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
+                (new_value, _iso_now(), asset_id),
+            )
+            updated += 1
+
+    for asset_id, q in cached_apply:
+        # 这些资产 holdings 必然 > 0（前面已过滤），重新查一次以拿到 holdings
+        holdings_row = db.execute("SELECT holdings FROM assets WHERE id = ?", (asset_id,)).fetchone()
+        holdings = float(holdings_row["holdings"] or 0) if holdings_row else 0.0
         new_value = round(q.price * holdings, 2)
         db.execute(
             "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",

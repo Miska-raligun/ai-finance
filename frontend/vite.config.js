@@ -16,6 +16,20 @@ export default defineConfig({
     alias: {
       '@': '/src'
     }
+  },
+  build: {
+    // 把重型库拆到独立 chunk，避免登录/聊天页也下载图表代码。
+    // 各 chunk 由对应路由的 dynamic import 触发加载。
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-element': ['element-plus'],
+          'vendor-echarts': ['echarts', 'vue-echarts'],
+          'vendor-chartjs': ['chart.js']
+        }
+      }
+    }
   }
 })
 

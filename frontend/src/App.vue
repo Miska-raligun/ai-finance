@@ -156,11 +156,21 @@ const showDrawer = ref(false)
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
+// 防抖：resize 触发频率极高，原始监听会让 ECharts 等组件被反复 resize。
+// 拖动窗口时延迟 150ms 仅响应最后一次。
+let _resizeTimer = null
+function onResize() {
+  if (_resizeTimer) clearTimeout(_resizeTimer)
+  _resizeTimer = setTimeout(updateIsMobile, 150)
+}
 onMounted(() => {
   updateIsMobile()
-  window.addEventListener('resize', updateIsMobile)
+  window.addEventListener('resize', onResize)
 })
-onBeforeUnmount(() => window.removeEventListener('resize', updateIsMobile))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  if (_resizeTimer) clearTimeout(_resizeTimer)
+})
 
 watchEffect(() => { active.value = route.path })
 

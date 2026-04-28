@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import io
 
-from flask import Blueprint, Response, abort, g, request
+from flask import Blueprint, Response, abort, g, request, stream_with_context
 
 from auth import login_required
 from db import get_db
@@ -41,17 +41,34 @@ def export_csv():
         abort(400, description=f"不支持的导出类型：{kind}")
 
     sql, headers = _KIND_QUERIES[kind]
-    rows = get_db().execute(sql, (g.user_id,)).fetchall()
+    user_id = g.user_id
 
-    buf = io.StringIO()
-    buf.write(_UTF8_BOM)
-    writer = csv.writer(buf)
-    writer.writerow(headers)
-    for r in rows:
-        writer.writerow([r[k] if r[k] is not None else "" for k in r.keys()])
+    # 流式生成：行游标按需迭代，单行写一次 buffer 后立即 yield，
+    # 避免在用户记录数 ↑↑ 时把整张表读进内存。
+    def _generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+
+        def _flush():
+            data = buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+            return data
+
+        buf.write(_UTF8_BOM)
+        writer.writerow(headers)
+        yield _flush()
+
+        cursor = get_db().execute(sql, (user_id,))
+        try:
+            for r in cursor:
+                writer.writerow([r[k] if r[k] is not None else "" for k in r.keys()])
+                yield _flush()
+        finally:
+            cursor.close()
 
     return Response(
-        buf.getvalue(),
+        stream_with_context(_generate()),
         mimetype="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="{kind}.csv"',
