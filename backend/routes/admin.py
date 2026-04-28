@@ -1,9 +1,12 @@
 """管理员路由"""
+import logging
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import generate_password_hash
-from db import get_db
+from db import get_db, purge_user_data
 from auth import admin_required
+
+logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -47,26 +50,23 @@ def admin_change_password(user_id):
 @admin_bp.route("/api/users/batch_delete", methods=["POST"])
 @admin_required
 def admin_batch_delete():
+    """级联删除用户及其所有业务数据。改用 db.purge_user_data 统一入口，
+    新增 investment / reports / risk_profiles 等历史散落的表，避免「删了用户但
+    遗留 assets / financial_goals 等孤儿记录」。"""
     data = request.get_json() or {}
     ids = data.get("user_ids") or []
     if not isinstance(ids, list):
         return jsonify({"error": "user_ids 必须是列表"}), 400
 
+    ids = [int(i) for i in ids if isinstance(i, (int, str)) and str(i).isdigit()]
     ids = [i for i in ids if i != session.get("user_id")]
     if not ids:
-        return jsonify({"success": True})
+        return jsonify({"success": True, "purged": {}})
 
-    placeholders = ",".join(["?"] * len(ids))
-    db = get_db()
-    with db:
-        db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
-        db.execute(f"DELETE FROM records WHERE user_id IN ({placeholders})", ids)
-        db.execute(f"DELETE FROM income WHERE user_id IN ({placeholders})", ids)
-        db.execute(f"DELETE FROM categories WHERE user_id IN ({placeholders})", ids)
-        db.execute(f"DELETE FROM budgets WHERE user_id IN ({placeholders})", ids)
-        db.execute(f"DELETE FROM llm_config WHERE user_id IN ({placeholders})", ids)
-        db.execute(f"DELETE FROM chat_history WHERE user_id IN ({placeholders})", ids)
-    return jsonify({"success": True})
+    counts = purge_user_data(ids)
+    logger.warning("admin batch_delete by user=%s ids=%s purged=%s",
+                   session.get("user_id"), ids, counts)
+    return jsonify({"success": True, "purged": counts})
 
 
 @admin_bp.route("/api/admin/llm-usage", methods=["GET"])

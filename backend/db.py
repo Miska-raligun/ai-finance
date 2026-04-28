@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import logging
+from datetime import datetime
 
 DB_FILE = os.getenv('DB_FILE', 'records.db')
 logger = logging.getLogger(__name__)
@@ -229,8 +230,39 @@ def init_db():
         apply_migrations(conn)
     except Exception as e:
         logger.error("迁移执行失败：%s", e)
+
+    # 启动后回填：把历史明文存储的 llm_config.apikey 升级为加密格式。
+    # 完全幂等——已加密的行（带 enc:v1: 前缀）会被 crypto.encrypt_secret 自动跳过。
+    try:
+        _backfill_encrypt_llm_keys(conn)
+    except Exception as e:
+        logger.error("LLM key 加密回填失败（不影响启动）：%s", e)
     finally:
         conn.close()
+
+
+def _backfill_encrypt_llm_keys(conn) -> None:
+    """把 llm_config.apikey 中的历史明文逐条加密回写。"""
+    rows = conn.execute("SELECT user_id, apikey FROM llm_config").fetchall()
+    if not rows:
+        return
+    from crypto import encrypt_secret
+    upgraded = 0
+    for r in rows:
+        key = r["apikey"] if isinstance(r, sqlite3.Row) else r[1]
+        uid = r["user_id"] if isinstance(r, sqlite3.Row) else r[0]
+        if not key:
+            continue
+        if str(key).startswith("enc:v1:"):
+            continue
+        conn.execute(
+            "UPDATE llm_config SET apikey = ? WHERE user_id = ?",
+            (encrypt_secret(str(key)), uid),
+        )
+        upgraded += 1
+    if upgraded:
+        conn.commit()
+        logger.warning("LLM key 加密回填：升级了 %d 条历史明文记录", upgraded)
 
 
 def add_chat_message(user_id: int, role: str, content: str):
@@ -304,4 +336,68 @@ def cleanup_all_empty_categories():
         )
     """)
     db.commit()
+
+
+# 外键 / 级联清理 ------------------------------------------------------------
+# SQLite 默认 PRAGMA foreign_keys = OFF，且历史 schema 也没声明 FK。直接给所有
+# 表加 FK 需要重建表，风险大；改为提供单点入口，让 admin/账号注销/合规请求都
+# 走同一份级联逻辑，避免散落各处的"忘了删 X 表"。
+_USER_DATA_TABLES = (
+    "records",
+    "income",
+    "categories",
+    "budgets",
+    "llm_config",
+    "chat_history",
+    "assets",
+    "asset_transactions",
+    "asset_types",
+    "financial_goals",
+    "risk_profiles",
+    "monthly_reports",
+    "user_profiles",
+    "rebalance_cache",
+    "llm_usage",
+)
+
+
+def purge_user_data(user_ids: list[int]) -> dict[str, int]:
+    """物理删除指定用户在所有业务表里的痕迹。返回 {table: rowcount}。
+
+    仅在以下场景使用：管理员批量删除用户、用户主动注销账号、GDPR 删除请求。
+    业务路由的 DELETE 应改用软删，不要直接调用此函数。
+    """
+    if not user_ids:
+        return {}
+    placeholders = ",".join(["?"] * len(user_ids))
+    db = get_db()
+    counts: dict[str, int] = {}
+    for tbl in _USER_DATA_TABLES + ("users",):
+        try:
+            cur = db.execute(
+                f"DELETE FROM {tbl} WHERE user_id IN ({placeholders})"
+                if tbl != "users"
+                else f"DELETE FROM users WHERE id IN ({placeholders})",
+                user_ids,
+            )
+            counts[tbl] = cur.rowcount
+        except sqlite3.OperationalError:
+            # 表可能在该环境下尚未通过迁移创建——忽略
+            counts[tbl] = 0
+    db.commit()
+    return counts
+
+
+def soft_delete(table: str, *, user_id: int, row_id: int) -> bool:
+    """把指定用户的某条记录标记为已删除（不真正 DELETE）。返回是否命中。"""
+    if table not in {"records", "income", "assets", "financial_goals"}:
+        raise ValueError(f"软删未覆盖此表：{table}")
+    db = get_db()
+    cur = db.execute(
+        f"UPDATE {table} SET deleted_at = ? "
+        f"WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+        (datetime.utcnow().isoformat(timespec="seconds"), row_id, user_id),
+    )
+    db.commit()
+    return cur.rowcount > 0
 
