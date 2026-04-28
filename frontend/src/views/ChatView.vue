@@ -6,6 +6,22 @@
         <span>💬 智能记账助手Anon</span>
       </div>
 
+      <!-- 首次进入聊天页时的骨架屏：避免历史消息抓回前的空白闪烁 -->
+      <div v-if="chatStore.historyLoading && messages.length === 0" class="chat-skeleton">
+        <div class="skel-row left">
+          <div class="skel-avatar"></div>
+          <div class="skel-bubble" style="width: 60%"></div>
+        </div>
+        <div class="skel-row right">
+          <div class="skel-bubble" style="width: 40%"></div>
+          <div class="skel-avatar"></div>
+        </div>
+        <div class="skel-row left">
+          <div class="skel-avatar"></div>
+          <div class="skel-bubble" style="width: 70%"></div>
+        </div>
+      </div>
+
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
         <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="msg-body">
@@ -632,6 +648,40 @@ onActivated(() => {
   flex-shrink: 0;
   min-width: 72px;
   font-weight: 600;
+}
+
+/* 首次加载骨架屏 */
+.chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 0;
+}
+.skel-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.skel-row.right { justify-content: flex-end; }
+.skel-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s infinite;
+  flex-shrink: 0;
+}
+.skel-bubble {
+  height: 36px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s infinite;
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* 移动端适配 */

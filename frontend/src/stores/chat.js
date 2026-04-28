@@ -13,11 +13,13 @@ export const useChatStore = defineStore('chat', {
   state: () => ({
     messages: [],
     _loaded: false,
+    historyLoading: false,
   }),
 
   actions: {
     async loadHistory() {
       if (this._loaded) return
+      this.historyLoading = true
       try {
         const res = await api.get('/api/chat/history')
         if (res.data && res.data.length) {
@@ -28,8 +30,10 @@ export const useChatStore = defineStore('chat', {
         }
       } catch {
         // 首次加载失败不影响使用
+      } finally {
+        this.historyLoading = false
+        this._loaded = true
       }
-      this._loaded = true
     },
 
     pushMessage(msg) {
