@@ -49,14 +49,21 @@ async def _recognize_image_async(image_b64: str, mime_type: str) -> str:
 
 
 def recognize_image(image_b64: str, mime_type: str) -> str | None:
-    """同步包装：使用全局事件循环调用 MiniMax MCP"""
+    """同步包装：使用全局事件循环调用 MiniMax MCP。
+
+    任何异常都被吞成 None 返回到上游，但必须把 traceback 留在日志里——
+    否则 MCP 端口未启动 / 网络异常等部署问题会被静默掩盖。
+    """
     try:
         future = asyncio.run_coroutine_threadsafe(
             _recognize_image_async(image_b64, mime_type), _loop
         )
         return future.result(timeout=30)
-    except Exception as e:
-        logger.error("图片识别失败: %s", e)
+    except TimeoutError:
+        logger.warning("图片识别超时（>30s），可能 MiniMax MCP 服务无响应")
+        return None
+    except Exception:
+        logger.exception("图片识别失败（mime=%s）", mime_type)
         return None
 
 

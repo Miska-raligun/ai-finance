@@ -1,6 +1,7 @@
 """统计数据路由"""
+import re
 from datetime import datetime
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, abort
 from db import get_db
 from auth import login_required
 from constants import CATEGORY_EXPENSE, CATEGORY_INCOME
@@ -8,14 +9,44 @@ from cache import make_key, get_or_compute
 
 stats_bp = Blueprint('stats', __name__)
 
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+_YEAR_RE = re.compile(r"^\d{4}$")
+
+
+def _validate_month(value: str | None, *, required: bool = False) -> str | None:
+    """规范化 YYYY-MM 参数。无效输入直接 400，避免后续 int(month[:4]) 在异常输入上崩。"""
+    if not value:
+        if required:
+            abort(400, description="缺少参数 month")
+        return None
+    v = value.strip()
+    if not _MONTH_RE.match(v):
+        abort(400, description=f"month 参数格式应为 YYYY-MM：{value!r}")
+    yr = int(v[:4])
+    if yr < 1970 or yr > 2999:
+        abort(400, description=f"month 年份越界：{value!r}")
+    return v
+
+
+def _validate_year(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = value.strip()
+    if not _YEAR_RE.match(v):
+        abort(400, description=f"year 参数格式应为 YYYY：{value!r}")
+    yr = int(v)
+    if yr < 1970 or yr > 2999:
+        abort(400, description=f"year 越界：{value!r}")
+    return v
+
 
 @stats_bp.route("/api/stats/comparison", methods=["GET"])
 @login_required
 def comparison_stats():
     """月度环比 / 年度同比对比（优化：2 条 SQL）"""
     db = get_db()
-    month = request.args.get("month")
-    year = request.args.get("year")
+    month = _validate_month(request.args.get("month"))
+    year = _validate_year(request.args.get("year"))
 
     if year:
         # 年度同比
@@ -77,7 +108,7 @@ def comparison_stats():
 @stats_bp.route("/api/stats/monthly", methods=["GET"])
 @login_required
 def monthly_stats():
-    year = request.args.get("year")
+    year = _validate_year(request.args.get("year"))
     cache_key = make_key(g.user_id, "monthly", year=year or "all")
     return jsonify(get_or_compute(cache_key, lambda: _monthly_stats_compute(year)))
 
@@ -166,8 +197,8 @@ def yearly_stats():
 @stats_bp.route("/api/stats/by-category", methods=["GET"])
 @login_required
 def category_stats():
-    month = request.args.get("month")
-    year = request.args.get("year")
+    month = _validate_month(request.args.get("month"))
+    year = _validate_year(request.args.get("year"))
     cache_key = make_key(g.user_id, "by_category", month=month, year=year)
     return jsonify(get_or_compute(cache_key, lambda: _category_stats_compute(month, year)))
 
@@ -217,7 +248,7 @@ def _category_stats_compute(month, year):
 @login_required
 def summary_stats():
     db = get_db()
-    month = request.args.get("month") or datetime.now().strftime("%Y-%m")
+    month = _validate_month(request.args.get("month")) or datetime.now().strftime("%Y-%m")
 
     spend_cursor = db.execute(
         """
@@ -252,9 +283,7 @@ def summary_stats():
 @stats_bp.route("/api/stats/daily")
 @login_required
 def daily_stats():
-    month = request.args.get("month")
-    if not month:
-        return jsonify({"error": "缺少参数 month"}), 400
+    month = _validate_month(request.args.get("month"), required=True)
     cache_key = make_key(g.user_id, "daily", month=month)
     return jsonify(get_or_compute(cache_key, lambda: _daily_stats_compute(month)))
 

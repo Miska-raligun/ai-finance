@@ -182,6 +182,13 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_income_user_cat ON income(user_id, category)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_budgets_user_month ON budgets(user_id, month)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_budgets_user_month_cat ON budgets(user_id, month, category)")
+    # 累计支出窗口函数 SUM() OVER (PARTITION BY user_id, category ORDER BY date, id) 的覆盖索引
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_records_user_cat_date_id ON records(user_id, category, date, id)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id, id)"
+    )
 
     admin_row = cur.execute(
         "SELECT id FROM users WHERE username = ? AND is_admin = 1", ("admin",)

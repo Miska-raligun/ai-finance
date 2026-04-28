@@ -1,4 +1,5 @@
 """认证装饰器、验证码管理（DB 持久化）、登录频率限制"""
+import logging
 import time
 import uuid
 import random
@@ -6,6 +7,8 @@ from functools import wraps
 from collections import defaultdict
 from io import BytesIO
 from flask import abort, request, jsonify, g, session
+
+logger = logging.getLogger(__name__)
 
 try:
     from captcha.image import ImageCaptcha
@@ -24,13 +27,17 @@ def _captcha_db():
 
 
 def clean_expired_captchas():
-    """清理过期记录。可定期调用，但 generate/validate 也会自动 piggyback。"""
+    """清理过期记录。可定期调用，但 generate/validate 也会自动 piggyback。
+
+    DB 错误不应阻断登录流程（generate/validate 自身仍能工作），但必须留下日志，
+    否则连接池/盘满之类的隐患会被一直藏住。
+    """
     try:
         db = _captcha_db()
         db.execute("DELETE FROM captcha_store WHERE expires_at < ?", (int(time.time()),))
         db.commit()
     except Exception:
-        pass
+        logger.exception("清理过期验证码失败（不阻断当前请求）")
 
 
 def generate_captcha() -> tuple[str, str, str]:
