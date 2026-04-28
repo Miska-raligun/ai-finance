@@ -6,7 +6,8 @@ from logging_config import setup_logging
 setup_logging()
 
 import os
-import secrets
+import sys
+import logging
 from datetime import timedelta
 from flask import Flask
 from flask_cors import CORS
@@ -15,17 +16,70 @@ from llm_security_middleware import register_llm_security
 from errors import register_error_handlers
 from rate_limit import init_limiter, apply_endpoint_limits
 
+_logger = logging.getLogger(__name__)
+
+# SECRET_KEY 必须通过环境变量提供：临时随机值会让所有 session 在重启后失效，
+# 也无法在多进程间共享，对生产环境是隐形的可用性 / 安全风险。
+_secret = os.getenv("SECRET_KEY", "").strip()
+if not _secret:
+    _logger.critical(
+        "SECRET_KEY 未配置：请在 backend/.env 中设置（建议 `openssl rand -hex 32`）。"
+        " 出于安全考虑拒绝启动。"
+    )
+    sys.exit(1)
+if len(_secret) < 32:
+    _logger.warning("SECRET_KEY 长度过短（<32 字符），建议使用 `openssl rand -hex 32` 重新生成。")
+
+# 仅允许显式配置过的来源跨域携带 cookie。开发环境可通过 .env 覆盖。
+_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+_allowed_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+_cookie_secure = os.getenv("SESSION_COOKIE_SECURE", "0") not in ("0", "false", "False", "")
+
 init_db()
 cleanup_all_empty_categories()
 
 app = Flask(__name__)
 register_llm_security(app)
 register_error_handlers(app)
-app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
-CORS(app, supports_credentials=True)
+app.secret_key = _secret
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=_cookie_secure,
+    # 单请求体上限（含 OCR 图片）。可通过环境变量按需放宽。
+    MAX_CONTENT_LENGTH=int(os.getenv("MAX_CONTENT_LENGTH_MB", "8")) * 1024 * 1024,
+)
+CORS(app, supports_credentials=True, origins=_allowed_origins)
 init_app(app)
 init_limiter(app)
+
+
+# 统一注入安全响应头：浏览器默认即可加固大半 XSS / Clickjacking / MIME-sniff 风险。
+_csp_default = (
+    "default-src 'self'; "
+    "img-src 'self' data: blob:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; "  # Element Plus 等内联样式/脚本兼容
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
+_csp = os.getenv("CONTENT_SECURITY_POLICY", _csp_default)
+
+
+@app.after_request
+def _set_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Content-Security-Policy", _csp)
+    if _cookie_secure:
+        resp.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return resp
 
 # 注册 Blueprints
 from routes.auth import auth_bp

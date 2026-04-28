@@ -48,14 +48,11 @@ def _list_asset_types() -> list[dict]:
 
 
 def _load_llm_cfg(data: dict) -> dict:
+    from services.llm_config import get_llm_config
     cfg = dict(data.get("llm") or {})
-    row = get_db().execute(
-        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
-        (g.user_id,),
-    ).fetchone()
-    if row:
-        for k, v in dict(row).items():
-            cfg.setdefault(k, v)
+    stored = get_llm_config(g.user_id) or {}
+    for k, v in stored.items():
+        cfg.setdefault(k, v)
     return cfg
 
 

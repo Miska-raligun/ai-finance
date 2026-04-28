@@ -37,6 +37,26 @@ def init_app(app):
     """注册 teardown 回调，在 app.py 中调用"""
     app.teardown_appcontext(close_db)
 
+
+def _persist_initial_admin_password(password: str) -> None:
+    """把首启随机管理员密码写入 logs/initial_admin.txt（0600）。"""
+    try:
+        log_dir = os.path.join(os.path.dirname(__file__), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, "initial_admin.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(
+                "默认管理员账号 admin 的初始密码（首次登录后请立即修改并删除本文件）：\n"
+                f"{password}\n"
+            )
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception as e:
+        logger.error("写入初始管理员密码文件失败：%s（请查看 stderr 中的随机密码）", e)
+        logger.error("INITIAL ADMIN PASSWORD: %s", password)
+
 def column_exists(cur, table, column):
     """Check if a column exists in a SQLite table."""
     cur.execute(f"PRAGMA table_info({table})")
@@ -169,6 +189,7 @@ def init_db():
 
     if not admin_row:
         from werkzeug.security import generate_password_hash
+        import secrets as _secrets
 
         # ⚠️ 确保不会因为已有非管理员 admin 用户而报错
         cur.execute("SELECT id FROM users WHERE username = ?", ("admin",))
@@ -177,9 +198,19 @@ def init_db():
         if existing_user:
             logger.warning("已存在名为 admin 的用户，无法创建默认管理员，请手动检查权限。")
         else:
+            # 安全：不再使用固定的 admin/admin。允许通过 INITIAL_ADMIN_PASSWORD
+            # 显式指定，否则随机生成 16 字节密码并写入 logs/initial_admin.txt（0600）。
+            initial_pw = os.getenv("INITIAL_ADMIN_PASSWORD", "").strip()
+            if not initial_pw:
+                initial_pw = _secrets.token_urlsafe(16)
+                _persist_initial_admin_password(initial_pw)
             cur.execute(
                 "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)",
-                ("admin", generate_password_hash("admin")),
+                ("admin", generate_password_hash(initial_pw)),
+            )
+            logger.warning(
+                "已创建默认管理员 admin。初始密码已写入 logs/initial_admin.txt，"
+                "请尽快登录并修改后删除该文件。"
             )
 
 

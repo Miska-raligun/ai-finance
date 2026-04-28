@@ -140,14 +140,9 @@ def _process_tool_calls(tool_calls: list, llm_cfg: dict) -> tuple[list[str], lis
 def chat():
     data = request.get_json()
     llm_cfg = data.get("llm") or {}
-    db = get_db()
-    row = db.execute(
-        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
-        (g.user_id,),
-    ).fetchone()
-    if row:
-        for k, v in dict(row).items():
-            llm_cfg.setdefault(k, v)
+    from services.llm_config import get_llm_config
+    for k, v in (get_llm_config(g.user_id) or {}).items():
+        llm_cfg.setdefault(k, v)
 
     user_msg = data.get("message", "")
     latest_msg = user_msg.strip().split("\n")[-1] if isinstance(user_msg, str) else user_msg
@@ -214,15 +209,8 @@ def chat_image():
     if not recognized_text:
         return jsonify({"reply": "图片识别失败，请重试或手动输入记账信息。", "pending_records": []})
 
-    db = get_db()
-    llm_cfg = {}
-    row = db.execute(
-        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
-        (g.user_id,),
-    ).fetchone()
-    if row:
-        for k, v in dict(row).items():
-            llm_cfg.setdefault(k, v)
+    from services.llm_config import get_llm_config
+    llm_cfg = get_llm_config(g.user_id) or {}
 
     user_msg = f"[图片识别结果] {recognized_text}"
     add_chat_message(g.user_id, "user", "[用户上传了一张图片]")
@@ -278,12 +266,8 @@ def get_user_profile():
 @login_required
 def refresh_user_profile():
     from services.profile import refresh_profile
-    db = get_db()
-    row = db.execute(
-        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
-        (g.user_id,),
-    ).fetchone()
-    llm_cfg = dict(row) if row else {}
+    from services.llm_config import get_llm_config
+    llm_cfg = get_llm_config(g.user_id) or {}
     return jsonify(refresh_profile(g.user_id, llm=llm_cfg))
 
 

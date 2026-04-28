@@ -9,11 +9,8 @@ records_bp = Blueprint('records', __name__)
 
 
 def _load_llm_cfg() -> dict:
-    row = get_db().execute(
-        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
-        (g.user_id,),
-    ).fetchone()
-    return dict(row) if row else {}
+    from services.llm_config import get_llm_config
+    return get_llm_config(g.user_id) or {}
 
 
 @records_bp.route('/api/records')

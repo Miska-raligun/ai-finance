@@ -24,3 +24,6 @@ cachetools>=5.3.0
 flask-limiter>=3.5.0
 pytest>=7.4.0
 pytest-cov>=4.1.0
+
+# 用户 LLM API key 加密存储（Fernet）
+cryptography>=42.0.0

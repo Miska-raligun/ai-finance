@@ -95,32 +95,19 @@ def get_me():
 @auth_bp.route("/api/llm_config", methods=["GET", "POST"])
 @login_required
 def llm_config_api():
-    db = get_db()
+    from services.llm_config import get_llm_config, save_llm_config, public_view
     if request.method == "GET":
-        row = db.execute(
-            "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
-            (g.user_id,),
-        ).fetchone()
-        return jsonify(dict(row)) if row else jsonify({})
+        # 对外只下发掩码后的 apikey，避免明文泄漏
+        return jsonify(public_view(get_llm_config(g.user_id)))
 
     data = request.get_json() or {}
-    url = data.get("url", "").strip()
-    apikey = data.get("apikey", "").strip()
-    model = data.get("model", "").strip()
-    persona = data.get("persona", "").strip()
-    db.execute(
-        """
-        INSERT INTO llm_config (user_id, url, apikey, model, persona)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            url=excluded.url,
-            apikey=excluded.apikey,
-            model=excluded.model,
-            persona=excluded.persona
-        """,
-        (g.user_id, url, apikey, model, persona),
+    save_llm_config(
+        g.user_id,
+        url=data.get("url", ""),
+        apikey=data.get("apikey", ""),
+        model=data.get("model", ""),
+        persona=data.get("persona", ""),
     )
-    db.commit()
     return jsonify({"success": True})
 
 
