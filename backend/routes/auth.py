@@ -118,3 +118,43 @@ def llm_config_reset():
     db.execute("DELETE FROM llm_config WHERE user_id = ?", (g.user_id,))
     db.commit()
     return jsonify({"success": True})
+
+
+@auth_bp.route("/api/me/delete", methods=["POST"])
+@login_required
+def delete_self():
+    """GDPR / 账号注销：删除当前用户全部数据并清 session。
+
+    需要二次确认：请求体必须 {"confirm": "DELETE"}。
+    管理员账号需要先把 admin 权限交给别人，否则拒绝以避免锁死后台。
+    """
+    import logging
+    from db import purge_user_data
+
+    data = request.get_json(silent=True) or {}
+    if data.get("confirm") != "DELETE":
+        return jsonify({
+            "error": "需要确认",
+            "message": "请在请求体中提供 {\"confirm\": \"DELETE\"} 以确认注销",
+        }), 400
+
+    uid = g.user_id
+    if session.get("is_admin"):
+        # 管理员注销前必须确保还有别的管理员，避免无人能进 admin 后台
+        db = get_db()
+        other = db.execute(
+            "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND id != ?",
+            (uid,),
+        ).fetchone()[0]
+        if other == 0:
+            return jsonify({
+                "error": "最后一个管理员",
+                "message": "你是当前唯一的管理员，请先把 admin 权限交给其他用户后再注销",
+            }), 409
+
+    counts = purge_user_data([uid])
+    logging.getLogger(__name__).warning(
+        "user self-deletion uid=%s purged=%s", uid, counts
+    )
+    session.clear()
+    return jsonify({"success": True, "purged": counts})
