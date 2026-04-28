@@ -123,8 +123,9 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount, onErrorCaptured } from 'vue'
 import { storeToRefs } from 'pinia'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -204,6 +205,29 @@ async function logout() {
 }
 function openConfigPanel() {
   showConfig.value = true
+}
+
+// 全局错误边界：捕获子组件渲染/生命周期里未处理的异常，转 toast。
+// 避免页面整块白屏。仅 dev 时弹出详情，线上只露简短提示并打 console。
+onErrorCaptured((err, _instance, info) => {
+  // eslint-disable-next-line no-console
+  console.error('[Vue ErrorBoundary]', info, err)
+  const msg = (err && err.message) || '页面出现了一个错误，请刷新或重新登录'
+  try { ElMessage.error(msg.length > 120 ? msg.slice(0, 120) + '…' : msg) } catch {}
+  // 返回 false 阻止继续向上传播，避免被 unhandledrejection 重复提示
+  return false
+})
+
+if (typeof window !== 'undefined') {
+  // Promise 链中未 catch 的错误（比如 axios reject 没处理）兜底
+  window.addEventListener('unhandledrejection', (e) => {
+    const reason = e?.reason
+    // axios 失败已经走 api.js 拦截器 toast 过；这里只对未捕获的纯错误做兜底
+    if (reason && !reason.config) {
+      // eslint-disable-next-line no-console
+      console.warn('[unhandledrejection]', reason)
+    }
+  })
 }
 </script>
 

@@ -292,6 +292,9 @@ async function sendImage(file) {
 }
 
 async function confirmRecord(rec) {
+  // 乐观 UI：先把卡片切到"已确认"避免用户继续等转圈，请求失败再回滚到 pending。
+  const _prevState = rec._state
+  rec._state = 'confirmed'
   try {
     const res = await fetch('/api/commit_record', {
       method: 'POST',
@@ -305,24 +308,24 @@ async function confirmRecord(rec) {
         note: rec._edit.note,
       })
     })
-    const data = await res.json()
-    if (data.success) {
-      rec._state = 'confirmed'
-      categoryStore.bumpRefresh()
-      // 预算预警提示
-      if (data.budget_warning) {
-        const w = data.budget_warning
-        const warnMsg = w.level === 'over'
-          ? `⚠️ 「${w.category}」本月已超预算！预算 ¥${w.budget}，已花 ¥${w.spent.toFixed(2)}，超支 ¥${Math.abs(w.remaining).toFixed(2)}`
-          : `⚠️ 「${w.category}」本月预算已用 ${(w.spent / w.budget * 100).toFixed(0)}%，剩余 ¥${w.remaining.toFixed(2)}`
-        chatStore.pushMessage({ sender: 'assistant', content: warnMsg })
-        await scrollToBottom()
-      }
-    } else {
-      ElMessage.error(data.message || '记录失败')
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.success) {
+      rec._state = _prevState  // 回滚
+      ElMessage.error(data.message || `记录失败 (${res.status})`)
+      return
+    }
+    categoryStore.bumpRefresh()
+    if (data.budget_warning) {
+      const w = data.budget_warning
+      const warnMsg = w.level === 'over'
+        ? `⚠️ 「${w.category}」本月已超预算！预算 ¥${w.budget}，已花 ¥${w.spent.toFixed(2)}，超支 ¥${Math.abs(w.remaining).toFixed(2)}`
+        : `⚠️ 「${w.category}」本月预算已用 ${(w.spent / w.budget * 100).toFixed(0)}%，剩余 ¥${w.remaining.toFixed(2)}`
+      chatStore.pushMessage({ sender: 'assistant', content: warnMsg })
+      await scrollToBottom()
     }
   } catch {
-    ElMessage.error('网络异常')
+    rec._state = _prevState
+    ElMessage.error('网络异常，请重试')
   }
 }
 
