@@ -77,14 +77,15 @@ function formatTime(iso) {
 
 async function onGenerate() {
   try {
+    ElMessage.info('生成中…LLM 写整月报告通常需要 1-3 分钟，可继续浏览其他页面')
     const data = await store.generate(month.value, userStore.llmPayload)
-    if (data?.stored === false) {
-      ElMessage.warning(data.content?.includes('无任何记录') ? '该月暂无记账数据' : '生成完成')
+    if (data?.content?.includes('无任何记录')) {
+      ElMessage.warning('该月暂无记账数据')
     } else {
-      ElMessage.success(`已生成 ${data.period} 月度报告`)
+      ElMessage.success(`已生成 ${data?.period || month.value} 月度报告`)
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.error || '生成失败，请稍后重试')
+    ElMessage.error(e.message || e.response?.data?.error || '生成失败，请稍后重试')
   }
 }
 

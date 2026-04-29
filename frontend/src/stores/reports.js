@@ -3,6 +3,11 @@ import api from '@/api'
 
 /**
  * 月度报告 Pinia store。
+ *
+ * 报告生成是异步任务（LLM 经常 90~180s）：
+ *   1. POST /api/reports/generate 立即返回 status: pending
+ *   2. 轮询 GET /api/reports/<period>/status
+ *   3. status=done 后拉详情；status=failed 抛错
  */
 export const useReportsStore = defineStore('reports', {
   state: () => ({
@@ -10,6 +15,9 @@ export const useReportsStore = defineStore('reports', {
     current: null,
     loading: false,
     generating: false,
+    /** 'pending' | 'running' | 'done' | 'failed' | '' */
+    genStatus: '',
+    genError: '',
   }),
 
   actions: {
@@ -29,14 +37,57 @@ export const useReportsStore = defineStore('reports', {
       }
     },
 
+    async _pollStatus(period, { intervalMs = 3000, timeoutMs = 5 * 60 * 1000 } = {}) {
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        await new Promise(r => setTimeout(r, intervalMs))
+        try {
+          const res = await api.get(`/api/reports/${period}/status`, { silent: true })
+          this.genStatus = res.data?.status || ''
+          if (this.genStatus === 'done') return 'done'
+          if (this.genStatus === 'failed') {
+            this.genError = res.data?.error_message || '生成失败'
+            return 'failed'
+          }
+        } catch {
+          // 状态拉失败不打断轮询，下一轮再试
+        }
+      }
+      this.genError = '生成超时（>5 分钟），请稍后回到本页查看结果'
+      return 'timeout'
+    },
+
     async generate(month, llm = null) {
       this.generating = true
+      this.genStatus = ''
+      this.genError = ''
       try {
         const url = month ? `/api/reports/generate?month=${month}` : '/api/reports/generate'
         const res = await api.post(url, { llm })
-        this.current = res.data
+        const data = res.data || {}
+        const period = data.period || month
+
+        // 后端返回 done 表示无数据 / 已即时完成；否则进入轮询
+        if (data.status === 'done' && data.content) {
+          this.current = data
+          this.genStatus = 'done'
+          await this.fetchList()
+          return data
+        }
+
+        this.genStatus = data.status || 'pending'
+        const final = await this._pollStatus(period)
+        if (final === 'done') {
+          await this.fetchOne(period)
+          await this.fetchList()
+          return this.current
+        }
+        if (final === 'failed') {
+          throw new Error(this.genError || '生成失败')
+        }
+        // timeout：仍刷一次 list，让历史记录里能看到 pending/running 行
         await this.fetchList()
-        return res.data
+        throw new Error(this.genError)
       } finally {
         this.generating = false
       }

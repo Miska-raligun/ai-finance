@@ -1,14 +1,35 @@
-"""月度报告生成：聚合数据 → LLM 写 Markdown → 持久化到 reports 表。"""
+"""月度报告生成：聚合数据 → LLM 写 Markdown → 持久化到 reports 表。
+
+异步设计：LLM 写 7 个章节 + 表格的 Markdown 经常 > 60s，同步会被 nginx /
+Waitress / 前端 timeout 砍掉。改为：
+  * POST 立即在 reports 表写 status='pending' 行 + 启动后台线程
+  * 后台线程切 status='running' → 调 LLM → 写 content + status='done'
+  * 失败写 status='failed' + error_message
+  * 前端轮询 GET /api/reports/<period>/status
+"""
 from __future__ import annotations
 
 import json
 import logging
+import os
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
-from db import get_db
+from db import get_db, DB_FILE
 
 logger = logging.getLogger(__name__)
+
+# 单 worker 串行：避免一个用户连点 N 次重复跑 LLM；多个用户并发由 ThreadPool
+# 自动排队。LLM 本身有每用户每日 token 配额做兜底。
+_REPORT_EXECUTOR = ThreadPoolExecutor(
+    max_workers=int(os.getenv("REPORT_WORKERS", "2")),
+    thread_name_prefix="report-gen",
+)
+_inflight: dict[tuple[int, str], threading.Event] = {}
+_inflight_lock = threading.Lock()
 
 
 def _aggregate(user_id: int, period: str) -> dict:
@@ -102,47 +123,146 @@ def _aggregate_portfolio(user_id: int) -> dict:
 
 def generate_monthly_report(user_id: int, period: Optional[str] = None,
                             llm: Optional[dict] = None) -> dict:
-    """生成（或覆盖）某月报告。返回 {period, content, insights, created_at}。"""
+    """启动异步生成。立即返回 {period, status: 'pending'|'running'|'done', ...}。
+
+    历史路径调用方仍可拿到 content（当无 LLM 调用时直接返回静态内容）；
+    需要走 LLM 的场景会立即返回 pending，前端通过 status 端点轮询。
+    """
     if not period:
         period = datetime.now().strftime("%Y-%m")
 
     insights = _aggregate(user_id, period)
     has_activity = bool(insights["by_category_spend"] or insights["by_category_income"])
     has_portfolio = bool(insights.get("portfolio", {}).get("has_portfolio"))
+    now = datetime.now().isoformat(timespec="seconds")
+
     if not has_activity and not has_portfolio:
+        # 无数据时直接落库为 done，跳过 LLM
+        empty_content = f"# {period} 月度报告\n\n📭 该月无任何记录，无需生成报告。"
+        _upsert_report(user_id, period, empty_content, insights, status="done", now=now)
         return {
             "period": period,
-            "content": f"# {period} 月度报告\n\n📭 该月无任何记录，无需生成报告。",
+            "status": "done",
+            "content": empty_content,
             "insights": insights,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "stored": False,
+            "created_at": now,
+            "stored": True,
         }
 
-    from services.llm import call_llm_monthly_report
-    content = call_llm_monthly_report(insights, llm=llm)
+    # 已有 running/pending 任务则不重复启动
+    key = (user_id, period)
+    with _inflight_lock:
+        if key in _inflight:
+            return {
+                "period": period,
+                "status": "running",
+                "message": "已有报告生成任务在跑，请稍候并轮询 status 端点",
+            }
+        _inflight[key] = threading.Event()
 
-    now = datetime.now().isoformat(timespec="seconds")
-    db = get_db()
-    db.execute(
-        """
-        INSERT INTO reports (user_id, period, format, content, insights_json, created_at)
-        VALUES (?, ?, 'markdown', ?, ?, ?)
-        ON CONFLICT(user_id, period) DO UPDATE SET
-            content = excluded.content,
-            insights_json = excluded.insights_json,
-            created_at = excluded.created_at
-        """,
-        (user_id, period, content, json.dumps(insights, ensure_ascii=False), now),
-    )
-    db.commit()
+    # 占位行：让前端立即能看到 status=pending
+    _upsert_report(user_id, period, content=None, insights=insights,
+                   status="pending", now=now)
+
+    _REPORT_EXECUTOR.submit(_run_async, user_id, period, insights, llm)
 
     return {
         "period": period,
-        "content": content,
-        "insights": insights,
+        "status": "pending",
+        "message": "报告生成已开始，请轮询 status 端点（一般 1-3 分钟内完成）",
         "created_at": now,
-        "stored": True,
     }
+
+
+def _run_async(user_id: int, period: str, insights: dict, llm: Optional[dict]) -> None:
+    """后台线程入口：独立 sqlite 连接，避免与 Flask 请求线程的 g.db 冲突。"""
+    key = (user_id, period)
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 切到 running，给前端"已经在跑"信号
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            "UPDATE reports SET status = 'running', updated_at = ? "
+            "WHERE user_id = ? AND period = ?",
+            (now, user_id, period),
+        )
+        conn.commit()
+
+        from services.llm import call_llm_monthly_report
+        content = call_llm_monthly_report(insights, llm=llm)
+        # 简单失败检测：LLM 返回的"⚠️ 生成失败"开头视为 failed
+        if isinstance(content, str) and content.lstrip().startswith("⚠️"):
+            raise RuntimeError(content[:200])
+
+        finished = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            """
+            UPDATE reports SET
+                content = ?,
+                insights_json = ?,
+                status = 'done',
+                error_message = NULL,
+                created_at = ?,
+                updated_at = ?
+            WHERE user_id = ? AND period = ?
+            """,
+            (content, json.dumps(insights, ensure_ascii=False), finished, finished,
+             user_id, period),
+        )
+        conn.commit()
+        logger.info("monthly_report done user=%s period=%s", user_id, period)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("monthly_report failed user=%s period=%s", user_id, period)
+        try:
+            conn.execute(
+                "UPDATE reports SET status = 'failed', error_message = ?, "
+                "updated_at = ? WHERE user_id = ? AND period = ?",
+                (str(e)[:500], datetime.now().isoformat(timespec="seconds"),
+                 user_id, period),
+            )
+            conn.commit()
+        except sqlite3.Error:
+            pass
+    finally:
+        conn.close()
+        with _inflight_lock:
+            ev = _inflight.pop(key, None)
+        if ev is not None:
+            ev.set()
+
+
+def _upsert_report(user_id: int, period: str, content: Optional[str],
+                   insights: dict, *, status: str, now: str) -> None:
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO reports (user_id, period, format, content, insights_json,
+                             status, error_message, created_at, updated_at)
+        VALUES (?, ?, 'markdown', ?, ?, ?, NULL, ?, ?)
+        ON CONFLICT(user_id, period) DO UPDATE SET
+            content = COALESCE(excluded.content, reports.content),
+            insights_json = excluded.insights_json,
+            status = excluded.status,
+            error_message = NULL,
+            updated_at = excluded.updated_at
+        """,
+        (user_id, period, content, json.dumps(insights, ensure_ascii=False),
+         status, now, now),
+    )
+    db.commit()
+
+
+def get_report_status(user_id: int, period: str) -> dict | None:
+    """轻量查询：仅返回状态字段，不带 content/insights，避免轮询时反复传大体积。"""
+    row = get_db().execute(
+        "SELECT period, status, error_message, created_at, updated_at "
+        "FROM reports WHERE user_id = ? AND period = ?",
+        (user_id, period),
+    ).fetchone()
+    if not row:
+        return None
+    return dict(row)
 
 
 def list_reports(user_id: int) -> list[dict]:

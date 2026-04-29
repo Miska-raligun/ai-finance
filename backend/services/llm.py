@@ -453,7 +453,16 @@ def call_llm_monthly_report(insights: dict, llm: dict | None = None) -> str:
         {"role": "system", "content": system},
         {"role": "user", "content": user_msg},
     ]
-    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=60, endpoint="smart.monthly_report")
+    # 月报 LLM 输出量大（7 章节 + 表格 + 列表），DeepSeek/SiliconFlow 经常 90~150s。
+    # 异步路径下不会阻塞 worker，单次给到 180s；超时后再延长重试一次。
+    result = _call_llm(messages, llm=llm, temperature=0.5, timeout=180,
+                       endpoint="smart.monthly_report")
+    if not result or (isinstance(result, dict) and "error" in result):
+        err_msg = (result or {}).get("error", {}).get("message", "")
+        if "超时" in err_msg or "timeout" in err_msg.lower():
+            logger.warning("monthly_report 首次超时，延长 timeout 重试一次")
+            result = _call_llm(messages, llm=llm, temperature=0.5, timeout=240,
+                               endpoint="smart.monthly_report")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"]
     return f"# {period} 月度报告\n\n⚠️ 生成失败，请稍后重试。"

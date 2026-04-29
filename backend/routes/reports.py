@@ -5,7 +5,9 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
 from db import get_db
-from services.reports import generate_monthly_report, get_report, list_reports
+from services.reports import (
+    generate_monthly_report, get_report, get_report_status, list_reports,
+)
 
 reports_bp = Blueprint("reports", __name__)
 
@@ -36,6 +38,19 @@ def api_generate_report():
     llm_cfg = _load_llm_cfg(data)
     result = generate_monthly_report(g.user_id, period=period, llm=llm_cfg)
     return jsonify(result)
+
+
+@reports_bp.route("/api/reports/<period>/status", methods=["GET"])
+@login_required
+def api_report_status(period: str):
+    """异步生成的轻量轮询端点：只返回 status / error_message。"""
+    period = period.strip()
+    if len(period) != 7:
+        return jsonify({"error": "period 格式应为 YYYY-MM"}), 400
+    info = get_report_status(g.user_id, period)
+    if not info:
+        return jsonify({"error": "报告不存在"}), 404
+    return jsonify(info)
 
 
 @reports_bp.route("/api/reports/<period>", methods=["GET"])
