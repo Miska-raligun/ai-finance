@@ -79,15 +79,23 @@ def register_csrf(app: Flask) -> None:
 
     @app.after_request
     def _set_csrf_cookie(resp):
-        # 仅在 cookie 缺失时下发，避免每次响应都改写浏览器 cookie。
+        # Token 来源：优先复用本次请求带的 cookie；首次访问则新发一个。
+        token = request.cookies.get(_COOKIE_NAME) or _new_token()
+
+        # 双通道下发：
+        #   1. 设置 cookie（仅在缺失时下发，避免重复 Set-Cookie 头）
+        #   2. 始终通过响应头镜像一份。原因：vite dev server 在部分版本下
+        #      不会把后端 Set-Cookie 转给浏览器，导致 document.cookie 里
+        #      永远没有 csrf_token。响应头则是必定透传的 HTTP 首部。
         if not request.cookies.get(_COOKIE_NAME):
             resp.set_cookie(
                 _COOKIE_NAME,
-                _new_token(),
+                token,
                 max_age=60 * 60 * 24 * 30,
                 samesite="Lax",
                 secure=cookie_secure,
                 httponly=False,  # 前端需要 JS 读取
                 path="/",
             )
+        resp.headers[_HEADER_NAME] = token
         return resp
