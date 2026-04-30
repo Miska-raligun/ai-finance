@@ -54,7 +54,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onActivated, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReportsStore } from '@/stores/reports'
 import { useUserStore } from '@/stores/user'
@@ -114,6 +114,12 @@ onMounted(async () => {
   if (store.list.length) {
     await select(store.list[0].period)
   }
+})
+
+// keep-alive 下切回本页时刷新列表，避免在别处生成 / 删除报告后回来看到陈旧
+// 数据。轻量请求（仅 period + created_at），不刷详情。
+onActivated(() => {
+  store.fetchList()
 })
 </script>
 

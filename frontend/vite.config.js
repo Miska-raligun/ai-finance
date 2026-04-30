@@ -18,13 +18,12 @@ export default defineConfig({
     }
   },
   build: {
-    // 把重型库拆到独立 chunk，避免登录/聊天页也下载图表代码。
-    // 各 chunk 由对应路由的 dynamic import 触发加载。
+    // 只把真正大的图表库拆出来按需加载（仅在 Reports / Investment / Ledger
+    // 等用到 chart 的 view 才需要拉）。view 代码本身回归主 bundle，
+    // 避免每次切路由都从网络拉 chunk 造成感知卡顿。
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-vue': ['vue', 'vue-router', 'pinia'],
-          'vendor-element': ['element-plus'],
           'vendor-echarts': ['echarts', 'vue-echarts'],
           'vendor-chartjs': ['chart.js']
         }
