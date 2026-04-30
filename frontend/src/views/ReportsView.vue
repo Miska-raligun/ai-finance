@@ -117,8 +117,12 @@ onMounted(async () => {
 })
 
 // keep-alive 下切回本页时刷新列表，避免在别处生成 / 删除报告后回来看到陈旧
-// 数据。轻量请求（仅 period + created_at），不刷详情。
+// 数据。10 秒节流，避免来回切页造成无谓请求。
+let _lastFetchAt = 0
 onActivated(() => {
+  const now = Date.now()
+  if (now - _lastFetchAt < 10_000) return
+  _lastFetchAt = now
   store.fetchList()
 })
 </script>

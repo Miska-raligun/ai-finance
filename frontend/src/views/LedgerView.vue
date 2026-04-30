@@ -52,11 +52,22 @@ const router = useRouter()
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
 
-onActivated(() => { categoryStore.bumpRefresh() })
+// 切回账本时刷新数据（refreshCounter 变化驱动 RecordTable / ChartPanel /
+// BudgetAndCategoryPanel 重拉）。但 keep-alive 下用户来回切页面会反复触发，
+// 导致卡顿——10 秒内只触发一次，避免无谓的并发请求。
+let _lastBumpAt = 0
+function bumpThrottled() {
+  const now = Date.now()
+  if (now - _lastBumpAt < 10_000) return
+  _lastBumpAt = now
+  categoryStore.bumpRefresh()
+}
+
+onActivated(bumpThrottled)
 
 function onVisibilityChange() {
   if (document.visibilityState === 'visible') {
-    categoryStore.bumpRefresh()
+    bumpThrottled()
   }
 }
 

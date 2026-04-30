@@ -211,12 +211,9 @@ async function refreshAll({ quotes = false } = {}) {
 
 onMounted(() => {
   if (!userStore.username) { router.push('/login'); return }
-  refreshAll({ quotes: true })  // 首次进页面时刷一次行情
+  refreshAll({ quotes: true })  // 进页面时刷一次行情
 })
-// 切回 tab 时只读本地缓存（reads from quote_cache TTL=10min），不触发外部
-// 行情 API。避免每次切到投资页都并发拉 N 个外部接口造成感知卡顿。需要最新
-// 价格时用户可点页面上的「刷新行情」按钮主动触发。
-onActivated(() => refreshAll({ quotes: false }))
+onActivated(() => refreshAll({ quotes: true }))  // 切回 tab 也刷
 watch(refreshCounter, () => {
   refreshAll({ quotes: false })
   rebalance.value = null  // 组合变了，旧的再平衡分析作废
