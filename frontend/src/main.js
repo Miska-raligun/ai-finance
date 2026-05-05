@@ -10,6 +10,18 @@ import 'element-plus/dist/index.css'
 import { getCsrfToken, rememberCsrfToken, CSRF_HEADER } from '@/api'
 
 const _origFetch = window.fetch.bind(window)
+
+async function _doFetch(input, init) {
+  const resp = await _origFetch(input, init)
+  // 抓 X-CSRF-Token 头同步内存 token。即使 vite dev proxy 不透传 Set-Cookie，
+  // header 也一定能传过来，确保后续 POST 不会因 cookie 缺失被 CSRF 拦截。
+  try {
+    const t = resp.headers && resp.headers.get(CSRF_HEADER)
+    if (t) rememberCsrfToken(t)
+  } catch { /* opaque response */ }
+  return resp
+}
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url
   if (url && url.startsWith('/api/')) {
@@ -23,15 +35,18 @@ window.fetch = async (input, init = {}) => {
         init.headers = headers
       }
     }
+    // 切回前台 / wifi 抖动时一次 TCP 失败就静默重试一次，避免页面 toast 风暴
+    try {
+      return await _doFetch(input, init)
+    } catch (e) {
+      if (e instanceof TypeError) {
+        await new Promise(r => setTimeout(r, 800))
+        return await _doFetch(input, init)
+      }
+      throw e
+    }
   }
-  const resp = await _origFetch(input, init)
-  // 抓 X-CSRF-Token 头同步内存 token。即使 vite dev proxy 不透传 Set-Cookie，
-  // header 也一定能传过来，确保后续 POST 不会因 cookie 缺失被 CSRF 拦截。
-  try {
-    const t = resp.headers && resp.headers.get(CSRF_HEADER)
-    if (t) rememberCsrfToken(t)
-  } catch { /* opaque response */ }
-  return resp
+  return _doFetch(input, init)
 }
 
 const app = createApp(App)

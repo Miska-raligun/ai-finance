@@ -67,7 +67,9 @@ onActivated(bumpThrottled)
 
 function onVisibilityChange() {
   if (document.visibilityState === 'visible') {
-    bumpThrottled()
+    // 切回前台时浏览器网络栈 / TCP 复用层可能仍在恢复，延迟 800ms 再发请求，
+    // 避免和 onActivated 同瞬触发的并发请求一起被 abort 弹"network error"。
+    setTimeout(bumpThrottled, 800)
   }
 }
 

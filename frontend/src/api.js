@@ -50,7 +50,37 @@ api.interceptors.request.use((config) => {
 //   - 抓取 X-CSRF-Token 头，刷新内存中的 token
 //   - 把网络异常 / 鉴权过期 / 频率限制等统一成可读 toast，
 //     避免每个调用点都要 try/catch + 自己拼错误文案。
+//   - 网络瞬断（浏览器从 background 切回 / wifi 抖动 / 服务端 keep-alive
+//     超时关连接）时静默重试一次，避免一次切回吐出一堆 "Network Error" toast。
 let _redirecting = false
+
+// 同类 toast 1 秒去重——切回前台并发触发 N 个请求时，只展示一次错误。
+const _toastDedup = new Map()
+function _toastOnce(level, msg) {
+  const key = level + ':' + msg
+  const now = Date.now()
+  if ((_toastDedup.get(key) || 0) > now - 1000) return
+  _toastDedup.set(key, now)
+  ElMessage[level](msg)
+}
+
+function _isNetworkError(err) {
+  return err?.code === 'ERR_NETWORK' || err?.message === 'Network Error'
+      || err?.code === 'ECONNABORTED'
+}
+
+async function _retryOnce(err) {
+  const cfg = err?.config
+  if (!cfg || cfg.__retried) return null
+  cfg.__retried = true
+  // 等浏览器网络栈稳定再重试；800ms 在主观上仍接近"瞬时"。
+  await new Promise(r => setTimeout(r, 800))
+  try {
+    return await api.request(cfg)
+  } catch (e) {
+    return Promise.reject(e)
+  }
+}
 
 api.interceptors.response.use(
   (resp) => {
@@ -58,11 +88,21 @@ api.interceptors.response.use(
     if (t) rememberCsrfToken(t)
     return resp
   },
-  (err) => {
+  async (err) => {
     // 即便是错误响应也可能带新 token（CSRF reject 后下发）
     const t = err?.response?.headers?.[CSRF_HEADER.toLowerCase()]
             || err?.response?.headers?.[CSRF_HEADER]
     if (t) rememberCsrfToken(t)
+
+    // 1) 网络瞬断：静默重试一次。多发于切回前台 / wifi 短抖
+    if (_isNetworkError(err) && !err?.config?.__retried) {
+      try {
+        const retried = await _retryOnce(err)
+        if (retried) return retried
+      } catch (e) {
+        err = e  // 用重试后的错误继续走下面的提示分支
+      }
+    }
 
     const status = err?.response?.status
     const data = err?.response?.data
@@ -79,16 +119,17 @@ api.interceptors.response.use(
         }
       }
     } else if (status === 429) {
-      ElMessage.warning(serverMsg || '请求过于频繁，请稍后再试')
+      _toastOnce('warning', serverMsg || '请求过于频繁，请稍后再试')
     } else if (status >= 500) {
-      ElMessage.error(serverMsg || '服务器异常，请稍后重试')
+      _toastOnce('error', serverMsg || '服务器异常，请稍后重试')
     } else if (status >= 400) {
       // 4xx 业务错误：默认 toast，但允许调用方通过 { silent: true } 自行处理
       if (!err?.config?.silent) {
-        ElMessage.error(serverMsg || `请求失败 (${status})`)
+        _toastOnce('error', serverMsg || `请求失败 (${status})`)
       }
-    } else if (err?.code === 'ERR_NETWORK' || err?.message === 'Network Error') {
-      ElMessage.error('网络异常，请检查后端是否启动')
+    } else if (_isNetworkError(err)) {
+      // 重试后仍失败才提示，避免一次抖动多个 toast
+      _toastOnce('error', '网络异常，请检查后端是否启动')
     }
 
     return Promise.reject(err)
