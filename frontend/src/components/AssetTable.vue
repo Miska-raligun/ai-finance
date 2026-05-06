@@ -2,7 +2,7 @@
   <el-card>
     <template #header>
       <div class="header-row">
-        <span>📁 我的资产</span>
+        <span class="header-title">📁 我的资产</span>
         <div class="header-actions">
           <el-select
             v-model="filterType"
@@ -13,11 +13,17 @@
             <el-option label="全部类型" value="" />
             <el-option v-for="t in assetTypes" :key="t.name" :value="t.name" :label="t.name" />
           </el-select>
-          <el-button size="small" @click="showTypeManager = true">⚙️ 类型管理</el-button>
-          <el-button size="small" :loading="refreshing" @click="refreshPrices">
-            🔄 刷新行情
-          </el-button>
-          <el-button size="small" type="primary" @click="openCreate">新增资产</el-button>
+          <div class="header-buttons">
+            <el-button size="small" class="header-btn" @click="showTypeManager = true">
+              <span class="btn-emoji">⚙️</span><span class="btn-label">类型管理</span>
+            </el-button>
+            <el-button size="small" class="header-btn" :loading="refreshing" @click="refreshPrices">
+              <span class="btn-emoji">🔄</span><span class="btn-label">刷新行情</span>
+            </el-button>
+            <el-button size="small" class="header-btn" type="primary" @click="openCreate">
+              <span class="btn-emoji">＋</span><span class="btn-label">新增资产</span>
+            </el-button>
+          </div>
         </div>
       </div>
     </template>
@@ -836,9 +842,14 @@ function formatTime(iso) {
 <style scoped>
 .header-row {
   display: flex; justify-content: space-between; align-items: center; width: 100%;
+  gap: 12px;
 }
-.header-actions { display: flex; gap: 8px; align-items: center; }
+.header-title { font-weight: 600; flex-shrink: 0; }
+.header-actions { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.header-buttons { display: flex; gap: 8px; align-items: center; }
 .type-filter { width: 140px; }
+.header-btn { white-space: nowrap; }
+.btn-emoji { margin-right: 4px; }
 .up { color: #EF4444; font-weight: 600; }
 .down { color: #22C55E; font-weight: 600; }
 
@@ -897,14 +908,23 @@ function formatTime(iso) {
 }
 .drawer-action-btn { flex: 1; }
 
-/* 抽屉 footer 容纳 4 个动作按钮时换行 + 缩窄 padding */
+/* 抽屉 footer 4 个动作按钮：PC 一行平分；窄屏 2×2 网格保证对齐
+   不依赖 flex-wrap 防止 element-plus button 间不一致 margin 导致错位 */
 .drawer-footer-actions {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 .drawer-footer-actions .drawer-action-btn {
-  flex: 1 1 calc(50% - 4px);
+  width: 100%;
+  margin: 0 !important;  /* 覆盖 element-plus 默认 button + button margin-left:12px */
+  padding: 0 8px;
   min-width: 0;
+}
+@media (max-width: 540px) {
+  .drawer-footer-actions {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 /* 卖出对话框 */
@@ -1024,8 +1044,42 @@ function formatTime(iso) {
   font-size: 13px;
 }
 
+/* 移动端 header：标题独占一行；类型筛选独占一行；3 个动作按钮一行平分 */
 @media (max-width: 768px) {
-  .header-actions { flex-wrap: wrap; }
+  .header-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .header-title { font-size: 14px; }
+  .header-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+  }
   .type-filter { width: 100%; }
+  .header-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .header-btn {
+    /* 让 3 个按钮等宽，emoji + 文字均居中显示 */
+    width: 100%;
+    padding: 0 4px;
+    min-width: 0;
+  }
+  .btn-label {
+    /* 极窄屏（< 360px）只剩 emoji 也能识别功能 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* 极窄机型再压一压字号 */
+@media (max-width: 360px) {
+  .header-btn .btn-label { font-size: 12px; }
 }
 </style>
