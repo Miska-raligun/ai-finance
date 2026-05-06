@@ -70,6 +70,30 @@ export const useInvestmentStore = defineStore('investment', {
       await this.fetchPortfolio()
     },
 
+    /**
+     * 卖出资产：部分或全部。盈亏自动写入收入/支出。
+     * payload: { price, quantity?, fee?, date?, note? }
+     */
+    async sellAsset(id, payload) {
+      const res = await api.post(`/api/investment/assets/${id}/sell`, payload)
+      await this.fetchAssets()
+      await this.fetchPortfolio()
+      this.bumpRefresh()
+      return res.data
+    },
+
+    /**
+     * 归档资产：按当前市值结算并删除资产。盈亏自动写入收入/支出。
+     * payload: { date?, note? }
+     */
+    async archiveAsset(id, payload = {}) {
+      const res = await api.post(`/api/investment/assets/${id}/archive`, payload)
+      await this.fetchAssets()
+      await this.fetchPortfolio()
+      this.bumpRefresh()
+      return res.data
+    },
+
     async fetchGoals() {
       const res = await api.get('/api/investment/goals')
       this.goals = res.data || []

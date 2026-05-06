@@ -141,9 +141,18 @@
             <span class="drawer-value text-muted">{{ formatTime(popoverRow.updated_at) }}</span>
           </div>
         </div>
-        <div class="drawer-footer">
+        <div class="drawer-footer drawer-footer-actions">
           <el-button class="drawer-action-btn" plain type="danger" @click="deleteFromDrawer">
             🗑️ 删除
+          </el-button>
+          <el-button
+            v-if="canSell(popoverRow)"
+            class="drawer-action-btn"
+            plain
+            @click="openSellDialog"
+          >💰 卖出</el-button>
+          <el-button class="drawer-action-btn" plain @click="archiveFromDrawer">
+            📦 归档
           </el-button>
           <el-button class="drawer-action-btn" type="primary" @click="startDrawerEdit">
             ✏️ 编辑
@@ -281,6 +290,93 @@
         </el-button>
       </div>
     </el-drawer>
+
+    <!-- 卖出对话框 -->
+    <el-dialog
+      v-model="showSellDialog"
+      title="💰 卖出资产"
+      width="420px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="sellTarget" class="sell-form">
+        <div class="sell-info">
+          <div><strong>{{ sellTarget.name }}</strong>（{{ sellTarget.type }}）</div>
+          <div class="sell-info-line">
+            当前持仓 {{ sellTarget.holdings }}，
+            成本单价 ¥{{ sellUnitCost.toFixed(4) }}，
+            最新市价
+            <template v-if="sellLatestPrice > 0">¥{{ sellLatestPrice.toFixed(4) }}</template>
+            <template v-else>—</template>
+          </div>
+        </div>
+        <el-form label-width="84px" size="default">
+          <el-form-item label="卖出价">
+            <el-input-number
+              v-model="sellForm.price"
+              :min="0"
+              :step="0.01"
+              :precision="4"
+              controls-position="right"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="数量">
+            <el-input-number
+              v-model="sellForm.quantity"
+              :min="0"
+              :max="sellTarget.holdings"
+              :step="1"
+              :precision="4"
+              controls-position="right"
+              style="width: 100%"
+            />
+            <div class="form-hint">
+              留空或填 0 = 全部卖出（{{ sellTarget.holdings }}）
+            </div>
+          </el-form-item>
+          <el-form-item label="手续费">
+            <el-input-number
+              v-model="sellForm.fee"
+              :min="0"
+              :step="0.01"
+              :precision="2"
+              controls-position="right"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="日期">
+            <el-date-picker
+              v-model="sellForm.date"
+              type="date"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="sellForm.note" type="textarea" :rows="2" placeholder="可选" />
+          </el-form-item>
+        </el-form>
+        <div class="sell-preview" v-if="sellPreview">
+          <div class="sell-preview-row">
+            <span>预计回款</span><span>¥{{ sellPreview.proceeds.toFixed(2) }}</span>
+          </div>
+          <div class="sell-preview-row">
+            <span>摊销成本</span><span>¥{{ sellPreview.cost.toFixed(2) }}</span>
+          </div>
+          <div class="sell-preview-row" :class="sellPreview.pnl >= 0 ? 'pnl-up' : 'pnl-down'">
+            <span>盈亏 → {{ sellPreview.pnl >= 0 ? '收入「投资盈利」' : '支出「投资亏损」' }}</span>
+            <span>{{ sellPreview.pnl >= 0 ? '+' : '' }}{{ sellPreview.pnl.toFixed(2) }}</span>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showSellDialog = false">取消</el-button>
+        <el-button type="primary" :loading="selling" @click="confirmSell">
+          确认卖出
+        </el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -489,6 +585,121 @@ async function deleteFromDrawer() {
   } catch { /* 取消 */ }
 }
 
+// ===== 卖出 / 归档 =====
+
+function canSell(row) {
+  if (!row) return false
+  const s = schemaOf(row.type)
+  // 只对有"持仓 + 成本"概念的资产开放卖出（cash / lump 一次性资产走"归档"）
+  return s.showHoldings && s.hasCost && (row.holdings || 0) > 0
+}
+
+const showSellDialog = ref(false)
+const sellTarget = ref(null)
+const selling = ref(false)
+const sellForm = ref({ price: 0, quantity: 0, fee: 0, date: '', note: '' })
+
+const sellUnitCost = computed(() => {
+  const r = sellTarget.value
+  if (!r) return 0
+  const h = Number(r.holdings) || 0
+  if (h <= 0) return 0
+  return (Number(r.cost_basis) || 0) / h
+})
+const sellLatestPrice = computed(() => {
+  const r = sellTarget.value
+  if (!r) return 0
+  const h = Number(r.holdings) || 0
+  if (h <= 0) return 0
+  return (Number(r.current_value) || 0) / h
+})
+
+const sellPreview = computed(() => {
+  const r = sellTarget.value
+  if (!r) return null
+  const price = Number(sellForm.value.price) || 0
+  const fee = Number(sellForm.value.fee) || 0
+  const requested = Number(sellForm.value.quantity) || 0
+  const qty = requested > 0 ? requested : (Number(r.holdings) || 0)
+  if (qty <= 0 || price <= 0) return null
+  const proceeds = price * qty - fee
+  const cost = (Number(r.cost_basis) || 0) * qty / (Number(r.holdings) || 1)
+  return { proceeds, cost, pnl: proceeds - cost }
+})
+
+function openSellDialog() {
+  const r = popoverRow.value
+  if (!canSell(r)) {
+    ElMessage.warning('该资产类型不支持卖出，请使用「归档」')
+    return
+  }
+  sellTarget.value = r
+  // 默认价格用最新市价（若有），数量留空 = 全部
+  sellForm.value = {
+    price: sellLatestPrice.value || 0,
+    quantity: 0,
+    fee: 0,
+    date: new Date().toISOString().slice(0, 10),
+    note: '',
+  }
+  showSellDialog.value = true
+}
+
+async function confirmSell() {
+  if (!sellTarget.value) return
+  if (!(Number(sellForm.value.price) > 0)) {
+    ElMessage.warning('请填写卖出价')
+    return
+  }
+  selling.value = true
+  try {
+    const res = await store.sellAsset(sellTarget.value.id, {
+      price: Number(sellForm.value.price),
+      quantity: Number(sellForm.value.quantity) || 0,
+      fee: Number(sellForm.value.fee) || 0,
+      date: sellForm.value.date,
+      note: sellForm.value.note,
+    })
+    showSellDialog.value = false
+    showDrawer.value = false
+    if (res.ledger === 'income') {
+      ElMessage.success(`已卖出，盈利 +¥${res.pnl.toFixed(2)} 计入收入`)
+    } else if (res.ledger === 'expense') {
+      ElMessage.warning(`已卖出，亏损 ¥${Math.abs(res.pnl).toFixed(2)} 计入支出`)
+    } else {
+      ElMessage.success('已卖出，本次盈亏为 0')
+    }
+    store.bumpRefresh()
+  } catch (e) {
+    const msg = e?.response?.data?.error || e?.response?.data?.message || '卖出失败'
+    ElMessage.error(msg)
+  } finally {
+    selling.value = false
+  }
+}
+
+async function archiveFromDrawer() {
+  const r = popoverRow.value
+  if (!r) return
+  try {
+    await ElMessageBox.confirm(
+      `按当前市值 ¥${(r.current_value || 0).toFixed(2)} 一次性结算「${r.name}」？资产将从列表移除，` +
+      `盈亏会计入「投资盈利/亏损」分类。`,
+      '确认归档', { type: 'info' },
+    )
+    const res = await store.archiveAsset(r.id, {})
+    showDrawer.value = false
+    if (res.ledger === 'income') {
+      ElMessage.success(`已归档，盈利 +¥${res.pnl.toFixed(2)} 计入收入`)
+    } else if (res.ledger === 'expense') {
+      ElMessage.warning(`已归档，亏损 ¥${Math.abs(res.pnl).toFixed(2)} 计入支出`)
+    } else {
+      ElMessage.success('已归档，本次盈亏为 0')
+    }
+    store.bumpRefresh()
+  } catch { /* 取消 */ }
+}
+
 async function refreshPrices() {
   refreshing.value = true
   try {
@@ -617,6 +828,39 @@ function formatTime(iso) {
   border-top: 1px solid var(--el-border-color-lighter); flex-shrink: 0;
 }
 .drawer-action-btn { flex: 1; }
+
+/* 抽屉 footer 容纳 4 个动作按钮时换行 + 缩窄 padding */
+.drawer-footer-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.drawer-footer-actions .drawer-action-btn {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+}
+
+/* 卖出对话框 */
+.sell-form { display: flex; flex-direction: column; gap: 8px; }
+.sell-info {
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.sell-info-line { color: var(--color-text-muted); font-size: 12px; margin-top: 4px; }
+.form-hint { font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
+.sell-preview {
+  background: #F8FAFC;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sell-preview-row { display: flex; justify-content: space-between; }
+.sell-preview-row.pnl-up { color: #EF4444; font-weight: 600; }
+.sell-preview-row.pnl-down { color: #22C55E; font-weight: 600; }
 
 @media (max-width: 768px) {
   .header-actions { flex-wrap: wrap; }

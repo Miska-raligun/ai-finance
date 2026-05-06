@@ -1,7 +1,8 @@
-"""资产 CRUD + 行情刷新。"""
+"""资产 CRUD + 行情刷新 + 卖出 / 归档结算。"""
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from flask import g, jsonify, request
 
 from auth import login_required
@@ -125,3 +126,219 @@ def refresh_prices():
     stats = refresh_user_assets(db, g.user_id, force=True)
     invalidate_user(g.user_id)
     return jsonify(stats)
+
+
+# ===== 卖出 / 归档：自动把盈亏结算到 income / records =====
+
+# 自动建分类时使用的中文名称。与 constants.CATEGORY_INCOME / CATEGORY_EXPENSE 配合。
+_PNL_INCOME_CATEGORY = "投资盈利"
+_PNL_EXPENSE_CATEGORY = "投资亏损"
+
+
+def _settle_pnl(db, user_id: int, *, asset_name: str, atype: str,
+                sold_qty: float, proceeds: float, cost: float,
+                fee: float, date: str, action: str, extra_note: str = "") -> tuple[float, str]:
+    """把一次出场的盈亏写到收入或支出表，自动建分类。
+
+    返回 (pnl, ledger_kind)。ledger_kind ∈ {"income", "expense", "none"}。
+    备注里把成本 / 出场金额 / 手续费 / 数量都拼出来，方便日后回看时定位资产。
+    """
+    pnl = round(proceeds - cost, 2)
+    parts = [
+        f"{action}「{asset_name}」（{atype}）",
+        f"数量 {_fmt_qty(sold_qty)}",
+        f"成本 ¥{cost:.2f}",
+        f"出场金额 ¥{proceeds:.2f}",
+    ]
+    if fee > 0:
+        parts.append(f"费用 ¥{fee:.2f}")
+    if extra_note:
+        parts.append(extra_note)
+    note = " · ".join(parts)
+
+    # 盈亏小于 1 分钱视为持平，不写记录避免噪音
+    if abs(pnl) < 0.005:
+        return 0.0, "none"
+
+    if pnl > 0:
+        db.execute(
+            "INSERT OR IGNORE INTO categories (user_id, name, type) VALUES (?, ?, '收入')",
+            (user_id, _PNL_INCOME_CATEGORY),
+        )
+        db.execute(
+            "INSERT INTO income (user_id, category, amount, note, date) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, _PNL_INCOME_CATEGORY, pnl, note, date),
+        )
+        return pnl, "income"
+
+    db.execute(
+        "INSERT OR IGNORE INTO categories (user_id, name, type) VALUES (?, ?, '支出')",
+        (user_id, _PNL_EXPENSE_CATEGORY),
+    )
+    db.execute(
+        "INSERT INTO records (user_id, category, amount, note, date) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, _PNL_EXPENSE_CATEGORY, abs(pnl), note, date),
+    )
+    return pnl, "expense"
+
+
+def _fmt_qty(q: float) -> str:
+    """股票/基金/份额数量去掉冗余 0；整数则不显示小数。"""
+    if abs(q - round(q)) < 1e-6:
+        return str(int(round(q)))
+    return f"{q:.4f}".rstrip("0").rstrip(".")
+
+
+@investment_bp.route("/api/investment/assets/<int:asset_id>/sell", methods=["POST"])
+@login_required
+def sell_asset(asset_id: int):
+    """部分或全部卖出：按摊销成本计算盈亏，写入 income / records，更新持仓。"""
+    data = request.get_json() or {}
+    db = get_db()
+    row = db.execute(
+        "SELECT id, name, type, holdings, cost_basis, current_value "
+        "FROM assets WHERE id = ? AND user_id = ?",
+        (asset_id, g.user_id),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "资产不存在"}), 404
+    asset = dict(row)
+    holdings = float(asset["holdings"] or 0)
+    cost_basis = float(asset["cost_basis"] or 0)
+    cur_value = float(asset["current_value"] or 0)
+    if holdings <= 0:
+        return jsonify({"error": "该资产无持仓，请改用「归档」直接结算"}), 400
+
+    try:
+        price = float(data.get("price") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "卖出价必须是数字"}), 400
+    if price <= 0:
+        return jsonify({"error": "卖出价必须大于 0"}), 400
+
+    qty_input = data.get("quantity")
+    if qty_input in (None, "", 0, "0"):
+        sold_qty = holdings
+    else:
+        try:
+            sold_qty = float(qty_input)
+        except (TypeError, ValueError):
+            return jsonify({"error": "数量必须是数字"}), 400
+    if sold_qty <= 0 or sold_qty > holdings + 1e-6:
+        return jsonify({"error": f"数量必须在 (0, {holdings}] 之间"}), 400
+
+    try:
+        fee = max(0.0, float(data.get("fee") or 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "手续费必须是数字"}), 400
+
+    date = (data.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
+    user_note = (data.get("note") or "").strip()
+
+    proceeds = round(price * sold_qty - fee, 2)
+    prorata_cost = round(cost_basis * sold_qty / holdings, 2)
+
+    extra = f"卖出价 ¥{price:.4f}/股"
+    if user_note:
+        extra += " · " + user_note
+
+    pnl, ledger_kind = _settle_pnl(
+        db, g.user_id,
+        asset_name=asset["name"], atype=asset["type"],
+        sold_qty=sold_qty, proceeds=proceeds, cost=prorata_cost,
+        fee=fee, date=date, action="卖出", extra_note=extra,
+    )
+
+    # 写交易流水（保留即便资产被删，便于审计）
+    db.execute(
+        "INSERT INTO asset_transactions "
+        "(user_id, asset_id, kind, quantity, price, fee, date, note, created_at) "
+        "VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?)",
+        (g.user_id, asset_id, sold_qty, price, fee, date,
+         user_note or None, now_iso()),
+    )
+
+    # 更新持仓 / 成本 / 现值
+    new_holdings = round(holdings - sold_qty, 6)
+    if new_holdings <= 1e-6:
+        db.execute(
+            "DELETE FROM assets WHERE id = ? AND user_id = ?",
+            (asset_id, g.user_id),
+        )
+        new_holdings = 0
+    else:
+        new_cost = round(cost_basis - prorata_cost, 2)
+        # 现值按比例缩减；自动行情类下次刷新会被覆盖，没影响
+        new_value = round(cur_value * new_holdings / holdings, 2) if holdings > 0 else 0
+        db.execute(
+            "UPDATE assets SET holdings = ?, cost_basis = ?, current_value = ?, "
+            "updated_at = ? WHERE id = ? AND user_id = ?",
+            (new_holdings, new_cost, new_value, now_iso(), asset_id, g.user_id),
+        )
+
+    db.commit()
+    invalidate_user(g.user_id)
+    return jsonify({
+        "success": True,
+        "pnl": pnl,
+        "ledger": ledger_kind,
+        "remaining_holdings": new_holdings,
+        "proceeds": proceeds,
+        "cost": prorata_cost,
+    })
+
+
+@investment_bp.route("/api/investment/assets/<int:asset_id>/archive", methods=["POST"])
+@login_required
+def archive_asset(asset_id: int):
+    """归档：以当前 current_value 作为出场金额一次性结算盈亏，资产删除。
+
+    用于现金类 / 不打算细记录卖出价的整笔资产，或者用户想把停止追踪的资产
+    一次性平掉。
+    """
+    data = request.get_json() or {}
+    db = get_db()
+    row = db.execute(
+        "SELECT id, name, type, holdings, cost_basis, current_value "
+        "FROM assets WHERE id = ? AND user_id = ?",
+        (asset_id, g.user_id),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "资产不存在"}), 404
+    asset = dict(row)
+    holdings = float(asset["holdings"] or 0)
+    cost_basis = float(asset["cost_basis"] or 0)
+    proceeds = float(asset["current_value"] or 0)
+    date = (data.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
+    user_note = (data.get("note") or "").strip()
+    extra = "按归档时市值 ¥{:.2f} 结算".format(proceeds)
+    if user_note:
+        extra += " · " + user_note
+
+    pnl, ledger_kind = _settle_pnl(
+        db, g.user_id,
+        asset_name=asset["name"], atype=asset["type"],
+        sold_qty=holdings if holdings > 0 else 1,  # 现金类不显示数量也无所谓
+        proceeds=proceeds, cost=cost_basis,
+        fee=0, date=date, action="归档", extra_note=extra,
+    )
+
+    db.execute(
+        "DELETE FROM assets WHERE id = ? AND user_id = ?",
+        (asset_id, g.user_id),
+    )
+    db.execute(
+        "DELETE FROM asset_transactions WHERE asset_id = ? AND user_id = ?",
+        (asset_id, g.user_id),
+    )
+    db.commit()
+    invalidate_user(g.user_id)
+    return jsonify({
+        "success": True,
+        "pnl": pnl,
+        "ledger": ledger_kind,
+        "proceeds": proceeds,
+        "cost": cost_basis,
+    })
