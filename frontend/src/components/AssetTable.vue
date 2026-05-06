@@ -22,7 +22,9 @@
       </div>
     </template>
 
+    <!-- 桌面：信息密度高的表格 -->
     <el-table
+      v-if="!isMobile"
       :data="displayedAssets"
       size="small"
       empty-text="还没有符合条件的资产"
@@ -76,6 +78,53 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 移动端：卡片列表，避免 8 列硬塞造成横向溢出 / 文字挤压 -->
+    <div v-else class="mobile-asset-list">
+      <div
+        v-for="row in sortedMobileAssets"
+        :key="row.id"
+        class="mobile-asset-card"
+        @click="handleRowClick(row, null, $event)"
+      >
+        <div class="mobile-card-row mobile-card-head">
+          <div class="mobile-card-title">
+            <span class="mobile-asset-name">{{ row.name }}</span>
+            <el-tag size="small" effect="plain" class="mobile-type-tag">{{ row.type }}</el-tag>
+          </div>
+          <div class="mobile-card-pnl" :class="pnlClass(row)">
+            {{ pnlStr(row) }}
+          </div>
+        </div>
+
+        <div class="mobile-card-row">
+          <span class="mobile-card-label">现值</span>
+          <span class="mobile-card-value">
+            ¥{{ (row.current_value || 0).toFixed(2) }}
+            <el-tag
+              v-if="isAutoPriced(row)"
+              size="small"
+              type="success"
+              effect="plain"
+              class="auto-tag"
+            >自动</el-tag>
+          </span>
+        </div>
+
+        <div v-if="schemaOf(row.type).showHoldings || schemaOf(row.type).showSymbol" class="mobile-card-row mobile-card-meta">
+          <template v-if="schemaOf(row.type).showSymbol && row.symbol">
+            <span class="mobile-meta-pill">{{ row.symbol }}</span>
+          </template>
+          <template v-if="schemaOf(row.type).showHoldings && row.holdings">
+            <span class="mobile-meta-pill">持仓 {{ row.holdings }}</span>
+          </template>
+          <template v-if="schemaOf(row.type).showUnitCost && unitCostStr(row) !== '—'">
+            <span class="mobile-meta-pill">成本 ¥{{ unitCostStr(row) }}</span>
+          </template>
+        </div>
+      </div>
+      <div v-if="!sortedMobileAssets.length" class="mobile-empty">还没有符合条件的资产</div>
+    </div>
 
     <!-- 行详情 / 编辑抽屉，和账本记录一致的 view + edit 双模式 -->
     <el-drawer
@@ -454,8 +503,27 @@ const touchQuery = window.matchMedia('(hover: none) and (pointer: coarse)')
 const isTouch = ref(touchQuery.matches)
 function onTouchChange(e) { isTouch.value = e.matches }
 
-onMounted(() => touchQuery.addEventListener('change', onTouchChange))
-onUnmounted(() => touchQuery.removeEventListener('change', onTouchChange))
+// 移动端切换断点。桌面用 el-table，<= 768px 切换到卡片列表，
+// 避免 8 列硬塞造成的横向溢出与文字挤压。
+const mobileQuery = window.matchMedia('(max-width: 768px)')
+const isMobile = ref(mobileQuery.matches)
+function onMobileChange(e) { isMobile.value = e.matches }
+
+onMounted(() => {
+  touchQuery.addEventListener('change', onTouchChange)
+  mobileQuery.addEventListener('change', onMobileChange)
+})
+onUnmounted(() => {
+  touchQuery.removeEventListener('change', onTouchChange)
+  mobileQuery.removeEventListener('change', onMobileChange)
+})
+
+// 移动端默认按现值降序，与桌面 el-table 默认排序一致
+const sortedMobileAssets = computed(() => {
+  return [...displayedAssets.value].sort(
+    (a, b) => (b.current_value || 0) - (a.current_value || 0),
+  )
+})
 
 watch(refreshCounter, () => {
   store.fetchAssets()
@@ -861,6 +929,100 @@ function formatTime(iso) {
 .sell-preview-row { display: flex; justify-content: space-between; }
 .sell-preview-row.pnl-up { color: #EF4444; font-weight: 600; }
 .sell-preview-row.pnl-down { color: #22C55E; font-weight: 600; }
+
+/* 移动端卡片列表 */
+.mobile-asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mobile-asset-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.mobile-asset-card:active {
+  background: #F1F5F9;
+  border-color: var(--color-primary, #2563EB);
+}
+
+.mobile-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  gap: 8px;
+}
+.mobile-card-head {
+  /* 第一行加大字号、靠上拉一点 */
+  margin-bottom: 2px;
+}
+.mobile-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.mobile-asset-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-type-tag {
+  flex-shrink: 0;
+  font-size: 11px !important;
+  height: 20px !important;
+  line-height: 18px !important;
+  padding: 0 6px !important;
+}
+
+.mobile-card-pnl {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mobile-card-label { color: var(--color-text-muted); font-size: 12px; }
+.mobile-card-value {
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mobile-card-meta {
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
+}
+.mobile-meta-pill {
+  background: var(--color-bg, #EFF6FF);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.mobile-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 32px 12px;
+  font-size: 13px;
+}
 
 @media (max-width: 768px) {
   .header-actions { flex-wrap: wrap; }

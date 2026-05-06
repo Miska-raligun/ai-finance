@@ -66,6 +66,23 @@ If your agent runtime supports the MCP protocol natively, call the tools directl
 **`delete_income`** — Delete an income record by ID.
 - `收入ID` (int, required): ID from `query_income`
 
+**`sell_asset`** — Sell part or all of an asset; auto-records P&L into income/expense.
+- `asset_id` (int, required): from `query_assets`
+- `price` (float, required): sell price per unit
+- `quantity` (float, optional): default 0 = sell entire holding; otherwise partial
+- `fee` (float, optional): trading fee
+- `date` (str, optional): YYYY-MM-DD, defaults to today
+- `note` (str, optional): user memo (auto-generated note already includes cost / proceeds / sell price)
+
+Profit goes to income category 「投资盈利」, loss goes to expense category 「投资亏损」 (auto-created). Holding fully sold → asset deleted; partial → holdings/cost reduced pro-rata.
+
+**`archive_asset`** — Settle an asset at its current `current_value` and remove it (use for assets you stop tracking, or cash/lump-sum settlements).
+- `asset_id` (int, required): from `query_assets`
+- `date` (str, optional): YYYY-MM-DD
+- `note` (str, optional): memo appended after the auto-generated "按归档时市值 ¥X 结算"
+
+Both tools persist a `sell` row in `asset_transactions` for audit (sell_asset only). Both write to income/expense based on P&L sign; if |P&L| < ¥0.01 nothing is written.
+
 ---
 
 ## Method B: Non-MCP agents (subprocess or Python import)

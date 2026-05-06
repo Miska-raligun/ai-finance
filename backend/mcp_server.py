@@ -459,6 +459,58 @@ def delete_asset(asset_id: int) -> str:
 
 
 @mcp.tool()
+def sell_asset(asset_id: int, price: float, quantity: float = 0,
+               fee: float = 0, date: str = "", note: str = "") -> str:
+    """卖出资产并自动把盈亏结算到收入或支出。
+
+    quantity=0 表示全部卖出。盈利 → 收入分类「投资盈利」；亏损 → 支出分类
+    「投资亏损」（自动建分类）。备注会自动拼接成本/出场金额/卖出价等。
+    持仓清零则资产被删除；部分卖出则按比例减 holdings / cost_basis。
+    可先用 query_assets 拿 ID。
+    """
+    from services.asset_settle import sell_asset as _sell, SettleError
+    from cache import invalidate_user
+    try:
+        r = _sell(get_db(), uid(), asset_id,
+                  price=price, quantity=quantity if quantity > 0 else None,
+                  fee=fee, date=date or None, note=note)
+    except SettleError as e:
+        return f"⚠️ 卖出失败：{e}"
+    invalidate_user(uid())
+    pnl = r["pnl"]
+    pnl_str = f"+¥{pnl:.2f}" if pnl > 0 else f"-¥{abs(pnl):.2f}" if pnl < 0 else "¥0.00"
+    ledger = {"income": "已计入收入「投资盈利」", "expense": "已计入支出「投资亏损」",
+              "none": "盈亏接近 0，未写入收支表"}.get(r["ledger"], "")
+    suffix = "已删除资产" if r["remaining_holdings"] == 0 else f"剩余持仓 {r['remaining_holdings']}"
+    return (f"✅ 已卖出「{r['asset_name']}」{r['sold_qty']} 份 @ ¥{r['price']:.4f}\n"
+            f"   回款 ¥{r['proceeds']:.2f} / 摊销成本 ¥{r['cost']:.2f} / 盈亏 {pnl_str}\n"
+            f"   {ledger}；{suffix}")
+
+
+@mcp.tool()
+def archive_asset(asset_id: int, date: str = "", note: str = "") -> str:
+    """归档资产：按当前 current_value 一次性结算盈亏并删除资产。
+
+    用于停止追踪某项资产、或现金类 / 一次性资产平账。盈亏写入收入/支出，
+    备注会标注"按归档时市值 ¥X 结算"。可先用 query_assets 拿 ID。
+    """
+    from services.asset_settle import archive_asset as _archive, SettleError
+    from cache import invalidate_user
+    try:
+        r = _archive(get_db(), uid(), asset_id, date=date or None, note=note)
+    except SettleError as e:
+        return f"⚠️ 归档失败：{e}"
+    invalidate_user(uid())
+    pnl = r["pnl"]
+    pnl_str = f"+¥{pnl:.2f}" if pnl > 0 else f"-¥{abs(pnl):.2f}" if pnl < 0 else "¥0.00"
+    ledger = {"income": "已计入收入「投资盈利」", "expense": "已计入支出「投资亏损」",
+              "none": "盈亏接近 0，未写入收支表"}.get(r["ledger"], "")
+    return (f"📦 已归档「{r['asset_name']}」（{r['asset_type']}）\n"
+            f"   出场金额 ¥{r['proceeds']:.2f} / 成本 ¥{r['cost']:.2f} / 盈亏 {pnl_str}\n"
+            f"   {ledger}")
+
+
+@mcp.tool()
 def set_budget(category: str, amount: float, month: str = "") -> str:
     """设置或更新某分类的月预算。month:YYYY-MM(默认当月)。"""
     if not month: month = datetime.now().strftime("%Y-%m")
