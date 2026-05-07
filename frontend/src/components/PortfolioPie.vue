@@ -2,7 +2,7 @@
   <el-card>
     <template #header>🥧 资产配置</template>
     <div v-if="!hasData" class="empty">暂无持仓数据，先添加几项资产吧。</div>
-    <div v-else class="chart-wrapper" style="height: 320px;">
+    <div v-else class="chart-wrapper">
       <canvas ref="chartRef"></canvas>
     </div>
     <div v-if="hasData" class="legend">
@@ -80,6 +80,9 @@ onBeforeUnmount(() => { if (chartInstance) chartInstance.destroy() })
   color: var(--color-text-muted);
   padding: 40px 0;
 }
+.chart-wrapper {
+  height: 320px;
+}
 .legend {
   margin-top: 14px;
   display: flex;
@@ -96,7 +99,13 @@ onBeforeUnmount(() => { if (chartInstance) chartInstance.destroy() })
 .dot {
   width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
 }
-.label { flex: 1; }
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .value { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .pct {
   width: 54px;
@@ -104,5 +113,26 @@ onBeforeUnmount(() => { if (chartInstance) chartInstance.destroy() })
   color: var(--color-primary);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/* 移动端：饼图缩小到 220px；legend 第一行 [dot · label · pct]，第二行金额缩进
+   让数字不挤、长类型名也能折下而不破排版。 */
+@media (max-width: 768px) {
+  .chart-wrapper { height: 220px; }
+  .legend-item {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    column-gap: 8px;
+    padding: 4px 0;
+  }
+  .legend-item .dot { order: 0; }
+  .legend-item .label { order: 1; }
+  .legend-item .pct  { order: 2; width: auto; margin-left: auto; }
+  .legend-item .value {
+    order: 3;
+    flex: 1 1 100%;
+    padding-left: 18px;
+    text-align: left;
+  }
 }
 </style>

@@ -75,7 +75,9 @@
                 <div v-if="rebalance.rationale" class="rebalance-rationale">
                   💡 {{ rebalance.rationale }}
                 </div>
-                <el-table :data="rebalance.drift" size="small">
+
+                <!-- 桌面：5 列表格信息密度高 -->
+                <el-table v-if="!isMobile" :data="rebalance.drift" size="small">
                   <el-table-column label="类型">
                     <template #default="{ row }">{{ row.type }}</template>
                   </el-table-column>
@@ -94,6 +96,25 @@
                   </el-table-column>
                   <el-table-column prop="action" label="动作" />
                 </el-table>
+
+                <!-- 移动端：卡片化避免 5 列硬塞 -->
+                <div v-else class="rebalance-mobile-list">
+                  <div v-for="row in rebalance.drift" :key="row.type" class="rb-card">
+                    <div class="rb-card-head">
+                      <span class="rb-type">{{ row.type }}</span>
+                      <span
+                        class="rb-drift"
+                        :class="row.drift_pct > 0 ? 'up' : row.drift_pct < 0 ? 'down' : ''"
+                      >{{ row.drift_pct > 0 ? '+' : '' }}{{ row.drift_pct.toFixed(1) }}%</span>
+                    </div>
+                    <div class="rb-card-body">
+                      <span class="rb-pct">当前 {{ row.current_pct.toFixed(1) }}%</span>
+                      <span class="rb-arrow">→</span>
+                      <span class="rb-pct rb-target">AI {{ row.target_pct.toFixed(1) }}%</span>
+                    </div>
+                    <div class="rb-card-action">{{ row.action }}</div>
+                  </div>
+                </div>
               </template>
               <el-empty v-else :description="rebalance.rationale || '暂无可执行建议'" :image-size="60" />
             </el-card>
@@ -120,7 +141,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useInvestmentStore } from '@/stores/investment'
@@ -145,6 +166,13 @@ const showOnboarding = computed(() =>
 )
 
 const activeTab = ref('overview')
+
+// 768px 以下切到移动端布局：再平衡表 / 顶部 chips 改卡片化与 2×2 网格
+const _mq = window.matchMedia('(max-width: 768px)')
+const isMobile = ref(_mq.matches)
+function _onMq(e) { isMobile.value = e.matches }
+onMounted(() => _mq.addEventListener('change', _onMq))
+onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
 
 const LEVEL_LABEL = {
   conservative: '保守型', balanced: '平衡型', aggressive: '激进型',
@@ -337,5 +365,90 @@ watch(refreshCounter, () => {
     flex-direction: column;
   }
   .col-left, .col-right { flex: none; width: 100%; }
+}
+
+/* 移动端：summary chips 改 2×2 网格，避免 4 个 chip 错落换行；
+   chip 内部 label / value 改纵向排列让数字更醒目。 */
+@media (max-width: 768px) {
+  .page-header { gap: 10px; }
+  .page-title { font-size: 18px; }
+  .summary-chips {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .chip {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+  }
+  .chip-label { font-size: 11px; }
+  .chip-value { font-size: 14px; }
+
+  /* 再平衡 header 在窄屏纵向排：标题独占，按钮组下方 */
+  .rebalance-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .rebalance-header-right {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .cached-hint { order: -1; flex-basis: 100%; }
+
+  /* 紧凑 tabs */
+  .invest-tabs { padding: 4px 12px 14px; }
+}
+
+/* 再平衡建议 移动端卡片列表 */
+.rebalance-mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rb-card {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rb-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.rb-type {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.rb-drift {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.rb-card-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.rb-target { color: var(--color-primary); font-weight: 600; }
+.rb-arrow { color: var(--color-text-muted); }
+.rb-card-action {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  padding: 4px 8px;
+  border-radius: 6px;
+  align-self: flex-start;
 }
 </style>
