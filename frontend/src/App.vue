@@ -96,16 +96,27 @@
         </router-view>
 
         <!-- LLM 配置弹窗 -->
-        <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="420px">
-          <el-form label-width="90px" autocomplete="off">
+        <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="460px">
+          <el-form label-width="100px" autocomplete="off">
+            <el-form-item label="服务商">
+              <el-select v-model="llmProvider" style="width: 100%" @change="onProviderChange">
+                <el-option
+                  v-for="p in providerOptions"
+                  :key="p.value"
+                  :value="p.value"
+                  :label="p.label"
+                />
+              </el-select>
+              <div class="provider-hint">{{ activeProviderDesc }}</div>
+            </el-form-item>
             <el-form-item label="API URL">
-              <el-input v-model="llmUrl" placeholder="https://api.example.com" autocomplete="off" />
+              <el-input v-model="llmUrl" :placeholder="urlPlaceholder" autocomplete="off" />
             </el-form-item>
             <el-form-item label="API Key">
               <el-input v-model="llmKey" type="password" show-password autocomplete="new-password" />
             </el-form-item>
             <el-form-item label="模型名称">
-              <el-input v-model="llmModel" placeholder="Pro/deepseek-ai/DeepSeek-V3" autocomplete="off" />
+              <el-input v-model="llmModel" :placeholder="modelPlaceholder" autocomplete="off" />
             </el-form-item>
             <el-form-item label="角色人设">
               <el-input v-model="llmPersona" type="textarea" :rows="2" placeholder="一个有点傲娇的财务顾问" autocomplete="off" />
@@ -151,6 +162,40 @@ const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
 const llmPersona = ref('')
+const llmProvider = ref('openai')
+
+// 三大 provider 协议族 + 常用预设。选择时自动填默认 url / model 提示。
+const providerOptions = [
+  { value: 'openai', label: 'OpenAI 兼容（DeepSeek / SiliconFlow / Qwen / Kimi / 智谱 / Ollama）',
+    desc: '走 /chat/completions 协议；URL 填到 /chat/completions 完整地址。',
+    urlExample: 'https://api.siliconflow.cn/v1/chat/completions',
+    modelExample: 'Pro/deepseek-ai/DeepSeek-V3' },
+  { value: 'anthropic', label: 'Anthropic Claude',
+    desc: 'Claude Messages API（自动补全 /v1/messages）。',
+    urlExample: 'https://api.anthropic.com',
+    modelExample: 'claude-sonnet-4-5' },
+  { value: 'gemini', label: 'Google Gemini',
+    desc: 'generateContent API；API Key 通过 query 参数注入。',
+    urlExample: 'https://generativelanguage.googleapis.com',
+    modelExample: 'gemini-2.5-flash' },
+]
+const activeProvider = computed(
+  () => providerOptions.find(p => p.value === llmProvider.value) || providerOptions[0],
+)
+const activeProviderDesc = computed(() => activeProvider.value.desc)
+const urlPlaceholder = computed(() => activeProvider.value.urlExample)
+const modelPlaceholder = computed(() => activeProvider.value.modelExample)
+
+function onProviderChange() {
+  // 切换 provider 时如果当前 url / model 是空或别家的预设，刷成新预设占位
+  const p = activeProvider.value
+  if (!llmUrl.value || providerOptions.some(o => llmUrl.value === o.urlExample)) {
+    llmUrl.value = p.urlExample
+  }
+  if (!llmModel.value || providerOptions.some(o => llmModel.value === o.modelExample)) {
+    llmModel.value = p.modelExample
+  }
+}
 const isMobile = ref(window.innerWidth < 768)
 const showDrawer = ref(false)
 
@@ -192,6 +237,7 @@ async function saveConfig() {
     apikey: llmKey.value,
     model: llmModel.value,
     persona: llmPersona.value,
+    provider: llmProvider.value,
   })
   showConfig.value = false
 }
@@ -204,6 +250,18 @@ async function logout() {
   router.push('/login')
 }
 function openConfigPanel() {
+  // 把 store / localStorage 里已存的配置回填到表单，避免每次都从空开始
+  const cfg = userStore.llmPayload
+  if (cfg && typeof cfg === 'object') {
+    llmProvider.value = cfg.provider || 'openai'
+    llmUrl.value = cfg.url || ''
+    llmKey.value = cfg.apikey || ''
+    llmModel.value = cfg.model || ''
+    llmPersona.value = cfg.persona || ''
+  } else if (!llmUrl.value && !llmModel.value) {
+    // 首次打开：填默认 provider 的占位
+    onProviderChange()
+  }
   showConfig.value = true
 }
 
@@ -485,5 +543,13 @@ body {
 .mobile-drawer .el-drawer__body {
   padding: 0 !important;
   overflow: hidden;
+}
+
+/* LLM 配置弹窗 provider 选择下方说明 */
+.provider-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  line-height: 1.5;
 }
 </style>

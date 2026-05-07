@@ -79,8 +79,8 @@ export const useUserStore = defineStore('user', {
     },
 
     /** 保存自定义 LLM 配置 */
-    async saveLlmConfig({ url, apikey, model, persona }) {
-      const payload = { url, apikey, model, persona }
+    async saveLlmConfig({ url, apikey, model, persona, provider }) {
+      const payload = { url, apikey, model, persona, provider: provider || 'openai' }
       await fetch('/api/llm_config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

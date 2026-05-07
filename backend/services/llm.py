@@ -111,25 +111,18 @@ def _call_llm(
     timeout: int = 10,
     endpoint: str = "unknown",
 ) -> dict | None:
-    """统一 LLM API 调用，返回完整 response JSON 或 None"""
+    """统一 LLM 调用入口，按 provider 字段 dispatch。
+
+    无论用户配置的是 OpenAI 兼容 / Anthropic / Gemini，provider 内部都会把响应
+    转成 OpenAI 兼容的 {choices, usage} 结构，让上层调用代码无需关心厂商差异。
+    """
+    from services.llm_providers import resolve as _resolve_provider
+
     llm = llm or {}
+    provider_name = (llm.get("provider") or "openai").strip().lower() or "openai"
     api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
     url = llm.get("url") or DEFAULT_LLM_URL
     model = llm.get("model") or DEFAULT_LLM_MODEL
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    payload: dict = {
-        "model": model,
-        "temperature": temperature,
-        "messages": messages,
-    }
-    if tools:
-        payload["tools"] = tools
-    if tool_choice:
-        payload["tool_choice"] = tool_choice
 
     try:
         _check_user_quota()
@@ -137,30 +130,24 @@ def _call_llm(
         logger.warning("LLM quota exceeded endpoint=%s err=%s", endpoint, e)
         return {"error": {"message": str(e), "code": "quota_exceeded"}}
 
+    provider = _resolve_provider(provider_name)
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        try:
-            data = res.json()
-        except ValueError:
-            logger.error("LLM 响应非 JSON（endpoint=%s status=%s）：%s",
-                         endpoint, res.status_code, (res.text or "")[:500])
-            return {"error": {"message": f"HTTP {res.status_code} 非 JSON 响应"}}
-        if "error" in data:
-            logger.error("LLM API 错误（endpoint=%s status=%s）：%s",
-                         endpoint, res.status_code, data["error"])
-            return data
-        if res.status_code >= 400:
-            logger.error("LLM HTTP %s（endpoint=%s）：%s",
-                         res.status_code, endpoint, str(data)[:500])
-            return {"error": {"message": f"HTTP {res.status_code}"}}
-        _record_usage(endpoint, model, data)
-        return data
-    except requests.exceptions.Timeout:
-        logger.error("LLM 调用超时（endpoint=%s timeout=%ss）", endpoint, timeout)
-        return {"error": {"message": f"请求超时（{timeout}s）"}}
-    except Exception as e:
-        logger.error("LLM 调用失败（endpoint=%s）: %s", endpoint, e)
+        data = provider.call(
+            messages=messages, api_key=api_key, url=url, model=model,
+            tools=tools, tool_choice=tool_choice,
+            temperature=temperature, timeout=timeout,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("LLM 调用失败（provider=%s endpoint=%s）: %s",
+                     provider.name, endpoint, e)
         return {"error": {"message": str(e) or "调用异常"}}
+
+    if "error" in data:
+        logger.error("LLM API 错误（provider=%s endpoint=%s）：%s",
+                     provider.name, endpoint, data["error"])
+        return data
+    _record_usage(endpoint, model, data)
+    return data
 
 
 def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list | None = None,

@@ -34,34 +34,47 @@ def _sanitize_persona(value: str) -> str:
     return s
 
 
+VALID_PROVIDERS = {"openai", "anthropic", "gemini"}
+
+
+def _normalize_provider(value: str | None) -> str:
+    v = (value or "openai").strip().lower()
+    return v if v in VALID_PROVIDERS else "openai"
+
+
 def get_llm_config(user_id: int) -> dict | None:
     """读取并自动解密 apikey。返回 dict 或 None。"""
     row = get_db().execute(
-        "SELECT url, apikey, model, persona FROM llm_config WHERE user_id = ?",
+        "SELECT url, apikey, model, persona, provider FROM llm_config WHERE user_id = ?",
         (user_id,),
     ).fetchone()
     if not row:
         return None
     cfg = dict(row)
     cfg["apikey"] = decrypt_secret(cfg.get("apikey") or "")
+    cfg["provider"] = _normalize_provider(cfg.get("provider"))
     return cfg
 
 
-def save_llm_config(user_id: int, *, url: str, apikey: str, model: str, persona: str) -> None:
+def save_llm_config(user_id: int, *, url: str, apikey: str, model: str,
+                    persona: str, provider: str = "openai") -> None:
     """保存配置：apikey 加密、persona 过滤后入库。"""
     enc_key = encrypt_secret((apikey or "").strip())
     safe_persona = _sanitize_persona(persona or "")
+    safe_provider = _normalize_provider(provider)
     get_db().execute(
         """
-        INSERT INTO llm_config (user_id, url, apikey, model, persona)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO llm_config (user_id, url, apikey, model, persona, provider)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             url=excluded.url,
             apikey=excluded.apikey,
             model=excluded.model,
-            persona=excluded.persona
+            persona=excluded.persona,
+            provider=excluded.provider
         """,
-        (user_id, (url or "").strip(), enc_key, (model or "").strip(), safe_persona),
+        (user_id, (url or "").strip(), enc_key, (model or "").strip(),
+         safe_persona, safe_provider),
     )
     get_db().commit()
 
