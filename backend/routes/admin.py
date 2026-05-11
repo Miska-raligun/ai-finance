@@ -95,28 +95,45 @@ def llm_usage_stats():
         SELECT substr(created_at, 1, 10) as day,
                endpoint,
                model,
+               provider,
                COUNT(*) as calls,
+               SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_calls,
+               SUM(CASE WHEN status IN ('error', 'timeout') THEN 1 ELSE 0 END) as failed_calls,
                SUM(prompt_tokens) as prompt_tokens,
                SUM(completion_tokens) as completion_tokens,
-               SUM(total_tokens) as total_tokens
+               SUM(total_tokens) as total_tokens,
+               ROUND(SUM(cost_usd), 4) as cost_usd,
+               ROUND(AVG(latency_ms), 0) as avg_latency_ms,
+               MAX(latency_ms) as max_latency_ms
         FROM llm_usage
         {where}
-        GROUP BY day, endpoint, model
+        GROUP BY day, endpoint, model, provider
         ORDER BY day DESC, total_tokens DESC
         """,
         args,
     ).fetchall()
 
     total_row = db.execute(
-        f"SELECT COUNT(*) as calls, COALESCE(SUM(total_tokens),0) as total_tokens FROM llm_usage {where}",
+        f"""SELECT COUNT(*) as calls,
+                   COALESCE(SUM(total_tokens),0) as total_tokens,
+                   ROUND(COALESCE(SUM(cost_usd), 0), 4) as cost_usd,
+                   SUM(CASE WHEN status IN ('error', 'timeout') THEN 1 ELSE 0 END) as failed_calls,
+                   ROUND(AVG(latency_ms), 0) as avg_latency_ms
+            FROM llm_usage {where}""",
         args,
     ).fetchone()
 
+    total_calls = int(total_row["calls"] or 0)
+    failed = int(total_row["failed_calls"] or 0)
     return jsonify({
         "range": rng,
         "summary": {
-            "calls": int(total_row["calls"]),
-            "total_tokens": int(total_row["total_tokens"]),
+            "calls": total_calls,
+            "failed_calls": failed,
+            "failure_rate": round(failed / total_calls, 4) if total_calls else 0,
+            "total_tokens": int(total_row["total_tokens"] or 0),
+            "cost_usd": float(total_row["cost_usd"] or 0),
+            "avg_latency_ms": int(total_row["avg_latency_ms"] or 0),
         },
         "rows": [dict(r) for r in rows],
     })

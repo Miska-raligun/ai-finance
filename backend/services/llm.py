@@ -63,13 +63,29 @@ def _check_user_quota() -> None:
         logger.debug("LLM 配额检查失败（忽略）：%s", _e)
 
 
-def _record_usage(endpoint: str, model: str, data: dict | None) -> None:
-    """把 LLM 返回的 token 用量写入 llm_usage 表，失败静默。"""
-    if not data:
-        return
-    usage = data.get("usage") or {}
-    if not usage:
-        return
+def _record_usage(endpoint: str, model: str, data: dict | None, *,
+                  latency_ms: int = 0, status: str = "success",
+                  error_reason: str | None = None,
+                  provider: str = "openai") -> None:
+    """把 LLM 调用结果（成功 / 失败 / 配额）写入 llm_usage 表。
+
+    成功时按 services/llm_pricing 估算 cost_usd；失败时仍记一行（token=0），
+    以便 admin 看板能算失败率与各端点 P95 延迟。失败记录由调用方传 status 与
+    error_reason；成功记录这两个字段保持 'success' / None。
+    """
+    usage = (data or {}).get("usage") or {}
+    p_tok = int(usage.get("prompt_tokens") or 0)
+    c_tok = int(usage.get("completion_tokens") or 0)
+    t_tok = int(usage.get("total_tokens") or (p_tok + c_tok))
+
+    cost_usd = 0.0
+    if status == "success" and (p_tok or c_tok):
+        try:
+            from services.llm_pricing import estimate_cost_usd
+            cost_usd = estimate_cost_usd(model, p_tok, c_tok)
+        except Exception:  # noqa: BLE001
+            cost_usd = 0.0
+
     try:
         from db import get_db
         from flask import g, has_request_context
@@ -82,19 +98,17 @@ def _record_usage(endpoint: str, model: str, data: dict | None) -> None:
         db.execute(
             """
             INSERT INTO llm_usage
-              (user_id, endpoint, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, request_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (user_id, endpoint, model, prompt_tokens, completion_tokens,
+               total_tokens, cost_usd, request_id, created_at,
+               latency_ms, status, error_reason, provider)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                user_id,
-                endpoint,
-                model,
-                int(usage.get("prompt_tokens") or 0),
-                int(usage.get("completion_tokens") or 0),
-                int(usage.get("total_tokens") or 0),
-                0.0,
-                rid,
+                user_id, endpoint, model, p_tok, c_tok, t_tok, cost_usd, rid,
                 datetime.utcnow().isoformat(timespec="seconds"),
+                int(latency_ms or 0), status,
+                (error_reason or None) and str(error_reason)[:200],
+                provider,
             ),
         )
         db.commit()
@@ -128,9 +142,13 @@ def _call_llm(
         _check_user_quota()
     except LLMQuotaExceeded as e:
         logger.warning("LLM quota exceeded endpoint=%s err=%s", endpoint, e)
+        _record_usage(endpoint, model, None, status="quota_exceeded",
+                      error_reason=str(e), provider=provider_name)
         return {"error": {"message": str(e), "code": "quota_exceeded"}}
 
     provider = _resolve_provider(provider_name)
+    import time as _time
+    t0 = _time.perf_counter()
     try:
         data = provider.call(
             messages=messages, api_key=api_key, url=url, model=model,
@@ -138,15 +156,25 @@ def _call_llm(
             temperature=temperature, timeout=timeout,
         )
     except Exception as e:  # noqa: BLE001
-        logger.error("LLM 调用失败（provider=%s endpoint=%s）: %s",
-                     provider.name, endpoint, e)
+        elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+        logger.error("LLM 调用失败（provider=%s endpoint=%s latency=%dms）: %s",
+                     provider.name, endpoint, elapsed_ms, e)
+        _record_usage(endpoint, model, None, latency_ms=elapsed_ms,
+                      status="error", error_reason=str(e), provider=provider.name)
         return {"error": {"message": str(e) or "调用异常"}}
 
+    elapsed_ms = int((_time.perf_counter() - t0) * 1000)
     if "error" in data:
-        logger.error("LLM API 错误（provider=%s endpoint=%s）：%s",
-                     provider.name, endpoint, data["error"])
+        err_msg = (data["error"] or {}).get("message", "") if isinstance(data["error"], dict) else str(data["error"])
+        # 超时归类为 timeout，便于 admin 看板单独筛
+        st = "timeout" if "超时" in err_msg or "timeout" in err_msg.lower() else "error"
+        logger.error("LLM API 错误（provider=%s endpoint=%s latency=%dms）：%s",
+                     provider.name, endpoint, elapsed_ms, data["error"])
+        _record_usage(endpoint, model, None, latency_ms=elapsed_ms,
+                      status=st, error_reason=err_msg, provider=provider.name)
         return data
-    _record_usage(endpoint, model, data)
+    _record_usage(endpoint, model, data, latency_ms=elapsed_ms,
+                  status="success", provider=provider.name)
     return data
 
 
