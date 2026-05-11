@@ -22,6 +22,9 @@
             :show-budget="false"
           />
         </el-tab-pane>
+        <el-tab-pane label="定期账单" name="recurring" lazy>
+          <RecurringRules />
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -44,6 +47,7 @@ import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 import ExportMenu from '@/components/ExportMenu.vue'
+import RecurringRules from '@/components/RecurringRules.vue'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 
