@@ -3,7 +3,11 @@
     <template #header>🥧 资产配置</template>
     <div v-if="!hasData" class="empty">暂无持仓数据，先添加几项资产吧。</div>
     <div v-else class="chart-wrapper">
-      <canvas ref="chartRef"></canvas>
+      <canvas
+        ref="chartRef"
+        role="img"
+        :aria-label="ariaLabel"
+      ></canvas>
     </div>
     <div v-if="hasData" class="legend">
       <div v-for="row in byType" :key="row.type" class="legend-item">
@@ -29,6 +33,12 @@ let chartInstance = null
 
 const byType = computed(() => props.allocation?.by_type || [])
 const hasData = computed(() => byType.value.length > 0 && byType.value.some(r => r.value > 0))
+// 给屏幕阅读器和盲人用户描述饼图：列出每类占比，覆盖纯视觉色块的信息
+const ariaLabel = computed(() => {
+  if (!hasData.value) return '资产配置饼图：暂无数据'
+  const segs = byType.value.map(r => `${r.type || '未分类'} ${r.pct.toFixed(1)}%`).join('；')
+  return `资产配置饼图：${segs}`
+})
 
 // 类型现在由用户自管理，直接显示后端给的 type 字符串，颜色按名字 hash 分配
 function typeLabel(t) { return t || '未分类' }

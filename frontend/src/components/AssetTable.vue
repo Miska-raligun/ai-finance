@@ -850,8 +850,9 @@ function formatTime(iso) {
 .type-filter { width: 140px; }
 .header-btn { white-space: nowrap; }
 .btn-emoji { margin-right: 4px; }
-.up { color: #EF4444; font-weight: 600; }
-.down { color: #22C55E; font-weight: 600; }
+/* 涨/盈用深红、跌/亏用深绿（A 股配色），对比度均 ≥ 4.5:1 满足 WCAG AA */
+.up { color: #DC2626; font-weight: 600; }
+.down { color: #15803D; font-weight: 600; }
 
 .value-cell { display: inline-flex; gap: 4px; align-items: center; justify-content: flex-end; }
 .auto-tag { font-size: 10px; height: 18px; line-height: 16px; padding: 0 4px; }
@@ -947,8 +948,8 @@ function formatTime(iso) {
   gap: 4px;
 }
 .sell-preview-row { display: flex; justify-content: space-between; }
-.sell-preview-row.pnl-up { color: #EF4444; font-weight: 600; }
-.sell-preview-row.pnl-down { color: #22C55E; font-weight: 600; }
+.sell-preview-row.pnl-up { color: #DC2626; font-weight: 600; }
+.sell-preview-row.pnl-down { color: #15803D; font-weight: 600; }
 
 /* 移动端卡片列表 */
 .mobile-asset-list {

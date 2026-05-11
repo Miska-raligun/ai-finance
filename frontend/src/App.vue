@@ -4,24 +4,24 @@
     <!-- PC 侧边栏 -->
     <el-aside v-if="!isMobile && route.path !== '/login'" width="220px" class="app-aside">
       <div class="brand">
-        <span class="brand-icon">💰</span>
+        <span class="brand-icon" aria-hidden="true">💰</span>
         <span class="brand-name">智能记账</span>
       </div>
-      <nav class="side-nav">
-        <router-link to="/chat" class="nav-item" :class="{ active: route.path === '/chat' }">
-          <span class="nav-icon">💬</span> 聊天记账
+      <nav class="side-nav" aria-label="主导航">
+        <router-link to="/chat" class="nav-item" :class="{ active: route.path === '/chat' }" :aria-current="route.path === '/chat' ? 'page' : null">
+          <span class="nav-icon" aria-hidden="true">💬</span> 聊天记账
         </router-link>
-        <router-link to="/ledger" class="nav-item" :class="{ active: route.path === '/ledger' }">
-          <span class="nav-icon">📒</span> 账本管理
+        <router-link to="/ledger" class="nav-item" :class="{ active: route.path === '/ledger' }" :aria-current="route.path === '/ledger' ? 'page' : null">
+          <span class="nav-icon" aria-hidden="true">📒</span> 账本管理
         </router-link>
-        <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }">
-          <span class="nav-icon">📈</span> 投资理财
+        <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }" :aria-current="route.path === '/investment' ? 'page' : null">
+          <span class="nav-icon" aria-hidden="true">📈</span> 投资理财
         </router-link>
-        <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }">
-          <span class="nav-icon">📑</span> 月度报告
+        <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }" :aria-current="route.path === '/reports' ? 'page' : null">
+          <span class="nav-icon" aria-hidden="true">📑</span> 月度报告
         </router-link>
-        <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }">
-          <span class="nav-icon">🛠</span> 用户管理
+        <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" :aria-current="route.path === '/admin' ? 'page' : null">
+          <span class="nav-icon" aria-hidden="true">🛠</span> 用户管理
         </router-link>
       </nav>
       <div class="side-footer">
@@ -90,7 +90,7 @@
 
       <el-main :class="{ 'has-topbar': isMobile && route.path !== '/login' }">
         <router-view v-slot="{ Component }">
-          <keep-alive>
+          <keep-alive :max="3">
             <component :is="Component" />
           </keep-alive>
         </router-view>

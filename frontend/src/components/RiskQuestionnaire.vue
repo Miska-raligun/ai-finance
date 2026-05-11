@@ -181,9 +181,10 @@ onMounted(load)
 .score-denom { font-size: 15px; color: var(--color-text-muted); margin-left: 4px; }
 .score-level { font-size: 14px; }
 .score-level strong { margin-left: 6px; font-size: 16px; }
-.level-conservative { color: #22C55E; }
-.level-balanced { color: #F59E0B; }
-.level-aggressive { color: #EF4444; }
+/* 文字色用深色调以满足 WCAG AA 对比度（band 背景色保留鲜艳） */
+.level-conservative { color: #15803D; }
+.level-balanced { color: #B45309; }
+.level-aggressive { color: #DC2626; }
 
 .band-wrapper {
   position: relative;

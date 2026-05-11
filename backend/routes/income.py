@@ -14,7 +14,8 @@ def get_income():
 
     try:
         page = max(1, int(request.args.get("page", 1)))
-        limit = min(200, max(1, int(request.args.get("limit", 50))))
+        # 与 records 一致的 100 条硬上限，避免一次性返回过多导致前端卡顿
+        limit = min(100, max(1, int(request.args.get("limit", 50))))
     except (ValueError, TypeError):
         page, limit = 1, 50
     offset = (page - 1) * limit

@@ -20,7 +20,8 @@ def get_records():
 
     try:
         page = max(1, int(request.args.get("page", 1)))
-        limit = min(200, max(1, int(request.args.get("limit", 50))))
+        # 单次最多 100 条；超出会让前端渲染明显卡顿，分页是更可控的解决方案
+        limit = min(100, max(1, int(request.args.get("limit", 50))))
     except (ValueError, TypeError):
         page, limit = 1, 50
     offset = (page - 1) * limit

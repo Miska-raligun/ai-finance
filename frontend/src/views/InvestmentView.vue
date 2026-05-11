@@ -319,8 +319,8 @@ watch(refreshCounter, () => {
   border-radius: 8px;
   font-size: 12px;
 }
-.up { color: #EF4444; font-weight: 600; }
-.down { color: #22C55E; font-weight: 600; }
+.up { color: #DC2626; font-weight: 600; }
+.down { color: #15803D; font-weight: 600; }
 
 .rebalance-header {
   display: flex; align-items: center; gap: 8px;
