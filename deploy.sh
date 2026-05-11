@@ -8,6 +8,14 @@ MCP_LOG="mcp.log"
 MINIMAX_MCP_LOG="minimax_mcp.log"
 FRONTEND_LOG="frontend.log"
 
+# 重启前自动备份 DB；失败不阻断部署，只记 warning。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$SCRIPT_DIR/scripts/backup_db.sh" ] && command -v sqlite3 >/dev/null 2>&1 \
+   && [ -f "$SCRIPT_DIR/backend/records.db" ]; then
+  echo "[backup] 重启前自动备份数据库..."
+  "$SCRIPT_DIR/scripts/backup_db.sh" || echo "[backup] ⚠️ 备份失败，继续部署"
+fi
+
 # === Backend Setup ===
 pushd backend >/dev/null
 
