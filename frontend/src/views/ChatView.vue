@@ -322,6 +322,8 @@ async function confirmRecord(rec) {
         amount: rec._edit.amount,
         date: rec._edit.date,
         note: rec._edit.note,
+        // 若该 pending 来自图片识别，commit 时带上 receipt_id 让后端关联归档
+        receipt_id: rec.receipt_id || null,
       })
     })
     const data = await res.json().catch(() => ({}))

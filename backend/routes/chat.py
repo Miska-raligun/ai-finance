@@ -207,6 +207,15 @@ def chat_image():
     if len(image_bytes) > MAX_IMAGE_SIZE:
         return jsonify({"success": False, "message": "图片大小超过 10MB 限制"}), 400
 
+    # 1. 落盘归档：哪怕后续 OCR 失败，账单图本身也已保留供用户回查
+    receipt_id = None
+    try:
+        from services.receipts import store_receipt
+        receipt = store_receipt(g.user_id, image_bytes, mime_type)
+        receipt_id = receipt["id"]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("收据归档失败（不阻断识别流程）：%s", e)
+
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
     del image_bytes
 
@@ -214,7 +223,11 @@ def chat_image():
     del image_b64
 
     if not recognized_text:
-        return jsonify({"reply": "图片识别失败，请重试或手动输入记账信息。", "pending_records": []})
+        return jsonify({
+            "reply": "图片识别失败，请重试或手动输入记账信息。",
+            "pending_records": [],
+            "receipt_id": receipt_id,  # 即便识别失败也可以让前端关联到手填记账
+        })
 
     from services.llm_config import get_llm_config
     llm_cfg = get_llm_config(g.user_id) or {}
@@ -246,11 +259,16 @@ def chat_image():
         reply = call_llm_chat(chat_history, llm_cfg)
 
     add_chat_message(g.user_id, "assistant", reply)
+    # receipt_id 透传给前端，下一步 commit_record 时带上即可把图片关联到记录
+    if receipt_id and pending_records:
+        for rec in pending_records:
+            rec["receipt_id"] = receipt_id
     return jsonify({
         "reply": reply,
         "pending_records": pending_records,
         "pending_assets": pending_assets,
         "pending_goals": pending_goals,
+        "receipt_id": receipt_id,
     })
 
 
@@ -298,6 +316,23 @@ def commit_record():
     else:
         return jsonify({"success": False, "message": "未知类型"}), 400
     success = result.startswith("✅")
+
+    # 如果用户从图片识别走过来并带了 receipt_id，把刚插入的记录与图片关联
+    receipt_id = data.get("receipt_id")
+    if success and receipt_id:
+        try:
+            from services.receipts import attach_to_record
+            tbl = "records" if rec_type == "expense" else "income"
+            row = get_db().execute(
+                f"SELECT id FROM {tbl} WHERE user_id = ? AND category = ? AND amount = ? "
+                f"AND date = ? ORDER BY id DESC LIMIT 1",
+                (g.user_id, params[PARAM_CATEGORY], params[PARAM_AMOUNT], params[PARAM_DATE]),
+            ).fetchone()
+            if row:
+                attach_to_record(g.user_id, int(receipt_id),
+                                 record_id=row["id"], kind=rec_type)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("收据关联失败（不阻断记账成功）：%s", e)
 
     # 预算预警：支出类型且成功时查询该分类本月预算状态
     budget_warning = None
