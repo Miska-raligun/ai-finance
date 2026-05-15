@@ -1,5 +1,14 @@
 <!-- src/App.vue -->
 <template>
+  <!-- 全局 SVG defs：Animal Island Modal 有机 blob clip-path -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <clipPath id="animal-modal-clip" clipPathUnits="objectBoundingBox">
+        <path d="M0.501,0.005 L0.523,0.005 L0.549,0.006 C0.704,0.01,0.796,0.017,0.825,0.027 L0.827,0.028 C0.872,0.045,0.939,0.044,0.978,0.17 C1,0.254,1,0.365,0.99,0.505 L0.988,0.513 C0.979,0.558,0.971,0.598,0.965,0.633 C0.956,0.689,0.979,0.77,0.964,0.865 C0.953,0.928,0.921,0.966,0.869,0.979 C0.821,0.986,0.773,0.992,0.726,0.995 L0.712,0.996 L0.694,0.997 C0.648,1,0.586,1,0.507,1 L0.501,1 L0.464,1 C0.385,1,0.325,0.998,0.283,0.995 C0.234,0.992,0.184,0.987,0.133,0.979 C0.081,0.966,0.05,0.928,0.039,0.865 C0.023,0.77,0.047,0.689,0.037,0.633 C0.031,0.595,0.023,0.552,0.013,0.505 C-0.006,0.365,-0.002,0.254,0.024,0.17 C0.064,0.045,0.13,0.045,0.174,0.028 L0.175,0.028 C0.204,0.017,0.303,0.009,0.474,0.005 L0.501,0.005"/>
+      </clipPath>
+    </defs>
+  </svg>
+
   <el-container style="height: 100vh; height: 100dvh">
     <!-- PC 侧边栏 -->
     <el-aside v-if="!isMobile && route.path !== '/login'" width="220px" class="app-aside">
@@ -290,26 +299,91 @@ if (typeof window !== 'undefined') {
 </script>
 
 <style>
-/* ===== 全局 CSS 变量 ===== */
+/* ===== 全局 CSS 变量（Animal Island 设计令牌） =====
+   暖米底 + 薄荷青 + 棕褐文字；Pill 圆角 + 3D 偏移阴影。 */
 :root {
-  --color-primary: #2563EB;
-  --color-primary-dark: #1D4ED8;
-  --color-primary-light: #DBEAFE;
-  --color-bg: #EFF6FF;
-  --color-surface: #FFFFFF;
-  --color-text: #1e3a5f;
-  --color-text-muted: #4a7aad;
-  --color-border: #BFDBFE;
-  --shadow-card: 0 1px 3px rgba(37,99,235,0.08), 0 4px 16px rgba(37,99,235,0.08);
-  --radius-card: 12px;
+  /* 背景 / 表面 */
+  --color-bg: #f8f8f0;
+  --color-surface: rgb(247, 243, 223);
+  --color-surface-2: #f0ece2;
+  /* 文字 */
+  --color-text: #725d42;
+  --color-text-strong: #794f27;
+  --color-text-muted: #9f927d;
+  --color-text-disabled: #c4b89e;
+  /* 薄荷青强调 */
+  --color-primary: #19c8b9;
+  --color-primary-dark: #11a89b;
+  --color-primary-hover: #3dd4c6;
+  --color-primary-light: #e6f9f6;
+  /* 沙边 */
+  --color-border: #c4b89e;
+  --color-border-light: #d4c9b4;
+  /* 状态色（动森色板） */
+  --color-success: #6fba2c;
+  --color-success-active: #5a9e1e;
+  --color-warning: #f5c31c;
+  --color-warning-active: #dba90e;
+  --color-error: #e05a5a;
+  --color-error-active: #c94444;
+  --color-focus: #ffcc00;
+  --color-focus-active: #e0b800;
+  /* 涨/盈红 跌/亏绿 — WCAG AA 合规深色，不被薄荷主色覆盖 */
+  --color-up: #DC2626;
+  --color-down: #15803D;
+  /* 3D 偏移阴影锚色 */
+  --shadow-anchor: #bdaea0;
+  --shadow-anchor-light: #d4c9b4;
+  /* 卡片柔阴影 */
+  --shadow-card: 0 4px 10px rgba(107, 92, 67, 0.18);
+  --shadow-card-hover: 0 8px 24px rgba(114, 93, 66, 0.22);
+  /* 圆角 */
+  --radius-pill: 50px;
+  --radius-card: 20px;
+  --radius-card-organic: 40px 35px 45px 38px / 38px 45px 35px 40px;
+  --radius-tile: 12px;
+  --radius-tile-large: 45px;
+  /* 布局 */
   --topbar-height: 56px;
+
+  /* === 映射到 Element Plus 内部 CSS 变量，避免逐组件 override === */
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: #4cd4c7;
+  --el-color-primary-light-5: #80dfd6;
+  --el-color-primary-light-7: #b3eae3;
+  --el-color-primary-light-8: #cbf0eb;
+  --el-color-primary-light-9: var(--color-primary-light);
+  --el-color-primary-dark-2: var(--color-primary-dark);
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-danger: var(--color-error);
+  --el-color-error: var(--color-error);
+  --el-text-color-primary: var(--color-text);
+  --el-text-color-regular: var(--color-text);
+  --el-text-color-secondary: var(--color-text-muted);
+  --el-text-color-placeholder: var(--color-text-disabled);
+  --el-border-color: var(--color-border);
+  --el-border-color-light: var(--color-border-light);
+  --el-border-color-lighter: #e0d6bf;
+  --el-bg-color: var(--color-surface);
+  --el-bg-color-page: var(--color-bg);
+  --el-bg-color-overlay: var(--color-surface);
+  --el-fill-color-light: var(--color-surface-2);
+  --el-fill-color-blank: var(--color-surface);
+  --el-border-radius-base: 12px;
+  --el-border-radius-small: 8px;
+  --el-border-radius-round: 50px;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'Nunito', 'Noto Sans SC', 'Zen Maru Gothic',
+               -apple-system, BlinkMacSystemFont, 'PingFang SC',
+               'Helvetica Neue', sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   background: var(--color-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
@@ -358,7 +432,7 @@ body {
 
 /* ===== 侧边栏（蓝色调浅色） ===== */
 .app-aside {
-  background: #DBEAFE;
+  background: var(--color-primary-light);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -410,7 +484,7 @@ body {
   box-shadow: none;
 }
 .nav-item:hover {
-  background: #EEF2FF;
+  background: var(--color-primary-light);
   color: var(--color-primary);
 }
 .nav-item.active {
@@ -477,7 +551,7 @@ body {
   gap: 6px;
 }
 .side-btn:hover {
-  background: #EEF2FF;
+  background: var(--color-primary-light);
   color: var(--color-primary);
 }
 .side-btn.danger {
@@ -498,7 +572,7 @@ body {
   left: 0;
   right: 0;
   height: var(--topbar-height);
-  background: #EFF6FF;
+  background: var(--color-bg);
   display: flex;
   align-items: center;
   padding: 0 12px;
