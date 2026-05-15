@@ -23,7 +23,7 @@
       </div>
 
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
-        <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
+        <img v-if="msg.sender === 'assistant'" :src="anonAvatar" class="avatar ai-avatar" alt="Anon" />
         <div class="msg-body">
           <img v-if="msg.image" :src="msg.image" class="chat-image" alt="uploaded" />
           <div v-if="msg.content" class="bubble">{{ msg.content }}</div>
@@ -125,7 +125,7 @@
       </div>
 
       <div v-if="loading" class="msg assistant">
-        <img src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
+        <img :src="anonAvatar" class="avatar ai-avatar" alt="Anon" />
         <div class="bubble typing">
           <span></span><span></span><span></span>
         </div>
@@ -191,6 +191,7 @@ import { useInvestmentStore } from '@/stores/investment'
 import VoiceInput from '@/components/VoiceInput.vue'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
+import anonAvatar from '@/assets/decor/anon-avatar.svg'
 
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
@@ -414,7 +415,7 @@ onActivated(() => {
   flex-direction: column;
   height: calc(100vh - 40px);
   height: calc(100dvh - 40px);
-  background: #EFF6FF;
+  background: var(--color-bg);
 }
 
 .chat-container {
@@ -669,7 +670,7 @@ onActivated(() => {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background: linear-gradient(90deg, var(--color-border-light) 25%, var(--color-surface-2) 50%, var(--color-border-light) 75%);
   background-size: 200% 100%;
   animation: skeletonShimmer 1.4s infinite;
   flex-shrink: 0;
@@ -677,7 +678,7 @@ onActivated(() => {
 .skel-bubble {
   height: 36px;
   border-radius: 14px;
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background: linear-gradient(90deg, var(--color-border-light) 25%, var(--color-surface-2) 50%, var(--color-border-light) 75%);
   background-size: 200% 100%;
   animation: skeletonShimmer 1.4s infinite;
 }

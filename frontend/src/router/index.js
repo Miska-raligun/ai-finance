@@ -10,10 +10,12 @@ import LoginView from '../views/LoginView.vue'
 import AdminView from '../views/AdminView.vue'
 import InvestmentView from '../views/InvestmentView.vue'
 import ReportsView from '../views/ReportsView.vue'
+import HomeView from '../views/HomeView.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', component: LoginView },
+  { path: '/home', name: 'HomeView', component: HomeView },
   { path: '/chat', name: 'ChatView', component: ChatView },
   { path: '/ledger', component: LedgerView },
   { path: '/investment', component: InvestmentView },
