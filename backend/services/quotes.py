@@ -329,10 +329,7 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
             if q.stale:
                 stale += 1
             new_value = round(q.price * holdings, 2)
-            db.execute(
-                "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
-                (new_value, _iso_now(), asset_id),
-            )
+            _apply_new_value(db, user_id, asset_id, new_value)
             updated += 1
 
     for asset_id, q in cached_apply:
@@ -340,10 +337,7 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
         holdings_row = db.execute("SELECT holdings FROM assets WHERE id = ?", (asset_id,)).fetchone()
         holdings = float(holdings_row["holdings"] or 0) if holdings_row else 0.0
         new_value = round(q.price * holdings, 2)
-        db.execute(
-            "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
-            (new_value, _iso_now(), asset_id),
-        )
+        _apply_new_value(db, user_id, asset_id, new_value)
         updated += 1
 
     db.commit()
@@ -353,6 +347,33 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
         "stale": stale,
         "last_refreshed_at": _iso_from_epoch(now),
     }
+
+
+def _apply_new_value(db, user_id: int, asset_id: int, new_value: float) -> None:
+    """更新 assets.current_value + 同步写一条 asset_value_history 快照。
+
+    历史快照的目的：让 /api/investment/assets/<id>/history 能画出市值走势。
+    去重策略：同一天内同一 asset_id 多次刷新只保留最后一条（按 asset_id+day
+    upsert），避免行情接口被高频调用时表膨胀。
+    """
+    now = _iso_now()
+    db.execute(
+        "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
+        (new_value, now, asset_id),
+    )
+    today = now[:10]
+    # 同一资产 + 同一天若已有记录则更新，否则插入
+    cur = db.execute(
+        "UPDATE asset_value_history SET value = ?, recorded_at = ? "
+        "WHERE asset_id = ? AND substr(recorded_at, 1, 10) = ?",
+        (new_value, now, asset_id, today),
+    )
+    if cur.rowcount == 0:
+        db.execute(
+            "INSERT INTO asset_value_history (user_id, asset_id, value, recorded_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, asset_id, new_value, now),
+        )
 
 
 def _iso_now() -> str:

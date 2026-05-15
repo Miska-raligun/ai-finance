@@ -127,6 +127,45 @@ def refresh_prices():
     return jsonify(stats)
 
 
+@investment_bp.route("/api/investment/assets/<int:asset_id>/history", methods=["GET"])
+@login_required
+def asset_history(asset_id: int):
+    """资产市值历史快照，用于前端画小折线图。
+
+    Query:
+      days: 1~365，默认 30。
+    每个资产同一天最多一条（refresh_user_assets 内部去重）。
+    """
+    try:
+        days = int(request.args.get("days", 30))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(1, min(days, 365))
+
+    db = get_db()
+    # 鉴权：只允许访问自己的资产
+    owns = db.execute(
+        "SELECT id, name FROM assets WHERE id = ? AND user_id = ?",
+        (asset_id, g.user_id),
+    ).fetchone()
+    if not owns:
+        return jsonify({"error": "资产不存在"}), 404
+
+    rows = db.execute(
+        "SELECT value, recorded_at FROM asset_value_history "
+        "WHERE asset_id = ? AND user_id = ? "
+        "AND recorded_at >= date('now', ?) "
+        "ORDER BY recorded_at ASC",
+        (asset_id, g.user_id, f"-{days} days"),
+    ).fetchall()
+    return jsonify({
+        "asset_id": asset_id,
+        "asset_name": owns["name"],
+        "days": days,
+        "points": [{"value": r["value"], "recorded_at": r["recorded_at"]} for r in rows],
+    })
+
+
 # ===== 卖出 / 归档：薄包装，核心结算逻辑在 services/asset_settle.py
 # 与 mcp_server.py 共用，保持单一事实来源 =====
 
