@@ -169,7 +169,7 @@ watch(
 .field-label { font-size: 11px; color: var(--color-text-muted); font-weight: 500; }
 .auto-hint {
   font-size: 11px; color: var(--color-primary);
-  padding: 5px 8px; background: #F0F7FF; border-radius: 6px;
+  padding: 5px 8px; background: var(--color-primary-light); border-radius: 6px;
 }
 
 .card-error-msg {

@@ -220,7 +220,7 @@ onMounted(load)
   font-size: 13px;
   color: var(--color-text-muted);
   padding: 10px 12px;
-  background: #F0F7FF;
+  background: var(--color-primary-light);
   border-radius: 8px;
   line-height: 1.6;
 }

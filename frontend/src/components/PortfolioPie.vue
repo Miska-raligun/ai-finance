@@ -43,7 +43,8 @@ const ariaLabel = computed(() => {
 // 类型现在由用户自管理，直接显示后端给的 type 字符串，颜色按名字 hash 分配
 function typeLabel(t) { return t || '未分类' }
 
-const PALETTE = ['#2563EB', '#60A5FA', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#14B8A6']
+// Animal Island NookPhone 调色板（hex 形式给 Chart.js，CSS 变量在 canvas 里不解析）
+const PALETTE = ['#19c8b9', '#f8a6b2', '#f7cd67', '#82d5bb', '#b77dee', '#889df0', '#e59266']
 function hashStr(s) {
   let h = 0
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff

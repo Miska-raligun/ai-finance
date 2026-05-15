@@ -162,7 +162,7 @@ watch(refreshCounter, fetchBudgets)
 }
 
 .budget-table :deep(th.el-table__cell) {
-  background: #F8FAFC !important;
+  background: var(--color-surface-2) !important;
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 600;

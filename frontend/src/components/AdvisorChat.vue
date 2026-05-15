@@ -284,7 +284,7 @@ function render(md) {
 }
 .bubble.assistant {
   align-self: flex-start;
-  background: #F0F7FF;
+  background: var(--color-primary-light);
   color: var(--color-text);
   border: 1px solid var(--color-border);
 }

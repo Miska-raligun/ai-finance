@@ -193,7 +193,7 @@ async function onRegister() {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(145deg, #DBEAFE 0%, #EFF6FF 50%, #BFDBFE 100%);
+  background: linear-gradient(145deg, var(--color-primary-light) 0%, var(--color-bg) 50%, var(--color-border-light) 100%);
   padding: 20px;
 }
 
@@ -259,7 +259,7 @@ async function onRegister() {
   height: 44px;
   width: 120px;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border-light);
   cursor: pointer;
   flex-shrink: 0;
   object-fit: cover;
@@ -269,7 +269,7 @@ async function onRegister() {
 
 .captcha-hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-muted);
 }
 
 .remember-row {

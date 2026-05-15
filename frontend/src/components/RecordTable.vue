@@ -565,7 +565,7 @@ watch(refreshCounter, () => {
 /* 表格 */
 .record-table :deep(.el-table__body-wrapper) { overflow-x: auto; }
 .record-table :deep(th.el-table__cell) {
-  background: #F8FAFC !important;
+  background: var(--color-surface-2) !important;
   color: var(--color-text-muted);
   font-weight: 600;
   font-size: 12px;

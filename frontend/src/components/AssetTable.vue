@@ -900,7 +900,7 @@ function formatTime(iso) {
 }
 .auto-value-hint {
   font-size: 12px; color: var(--color-text-muted);
-  padding: 8px 12px; background: #F0F7FF; border-radius: 6px;
+  padding: 8px 12px; background: var(--color-primary-light); border-radius: 6px;
 }
 
 .drawer-footer {
@@ -939,7 +939,7 @@ function formatTime(iso) {
 .sell-info-line { color: var(--color-text-muted); font-size: 12px; margin-top: 4px; }
 .form-hint { font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
 .sell-preview {
-  background: #F8FAFC;
+  background: var(--color-surface-2);
   border-radius: 8px;
   padding: 10px 14px;
   font-size: 13px;
@@ -969,8 +969,8 @@ function formatTime(iso) {
   transition: background 0.15s, border-color 0.15s;
 }
 .mobile-asset-card:active {
-  background: #F1F5F9;
-  border-color: var(--color-primary, #2563EB);
+  background: var(--color-surface-2);
+  border-color: var(--color-primary, var(--color-primary));
 }
 
 .mobile-card-row {
@@ -1029,7 +1029,7 @@ function formatTime(iso) {
   justify-content: flex-start;
 }
 .mobile-meta-pill {
-  background: var(--color-bg, #EFF6FF);
+  background: var(--color-bg, var(--color-bg));
   border: 1px solid var(--color-border);
   border-radius: 999px;
   padding: 2px 10px;

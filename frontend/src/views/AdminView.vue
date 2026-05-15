@@ -129,11 +129,11 @@ onActivated(() => { fetchUsers(); fetchUsage() })
   gap: 12px;
 }
 .usage-kpi {
-  background: var(--color-bg-soft, #F8FAFC);
+  background: var(--color-bg-soft, var(--color-surface-2));
   border: 1px solid var(--color-border, #E5E7EB);
   border-radius: 10px;
   padding: 10px 14px;
 }
-.k-label { font-size: 12px; color: var(--color-text-muted, #94A3B8); }
+.k-label { font-size: 12px; color: var(--color-text-muted, var(--color-text-muted)); }
 .k-value { font-size: 22px; font-weight: 600; color: var(--color-primary, #3B82F6); }
 </style>

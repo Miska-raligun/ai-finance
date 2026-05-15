@@ -159,7 +159,7 @@ onActivated(() => {
 }
 .empty {
   text-align: center;
-  color: var(--color-text-muted, #94A3B8);
+  color: var(--color-text-muted, var(--color-text-muted));
   padding: 18px 0;
   font-size: 13px;
 }
@@ -173,13 +173,13 @@ onActivated(() => {
   cursor: pointer;
   transition: background 0.15s;
 }
-.period-row:hover { background: #F8FAFC; }
+.period-row:hover { background: var(--color-surface-2); }
 .period-row.active {
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.3);
 }
 .period-name { font-weight: 600; font-size: 14px; }
-.period-time { font-size: 12px; color: var(--color-text-muted, #94A3B8); }
+.period-time { font-size: 12px; color: var(--color-text-muted, var(--color-text-muted)); }
 .main-pane { min-width: 0; }
 
 @media (max-width: 768px) {

@@ -337,7 +337,7 @@ watch(refreshCounter, () => {
   font-size: 13px; text-align: center;
 }
 .rebalance-rationale {
-  background: #F0F7FF; color: var(--color-primary);
+  background: var(--color-primary-light); color: var(--color-primary);
   padding: 8px 12px; border-radius: 8px;
   font-size: 12px; margin-bottom: 10px; line-height: 1.6;
 }

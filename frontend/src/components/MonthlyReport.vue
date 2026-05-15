@@ -139,7 +139,7 @@ const rendered = computed(() => renderMarkdown(props.report?.content || ''))
   margin-bottom: 16px;
 }
 .kpi {
-  background: var(--color-bg-soft, #F8FAFC);
+  background: var(--color-bg-soft, var(--color-surface-2));
   border-radius: 10px;
   padding: 12px 14px;
   border: 1px solid var(--color-border, #E5E7EB);
@@ -155,7 +155,7 @@ const rendered = computed(() => renderMarkdown(props.report?.content || ''))
 .markdown :deep(p)  { margin: 6px 0; line-height: 1.7; }
 .markdown :deep(ul) { padding-left: 20px; margin: 6px 0; }
 .markdown :deep(li) { line-height: 1.7; }
-.markdown :deep(code) { background: #F1F5F9; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+.markdown :deep(code) { background: var(--color-surface-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .markdown :deep(.md-table-wrap) {
   /* 窄屏时表格太宽自动允许横向滚动，不再被卡片裁掉 */
   max-width: 100%;
@@ -177,7 +177,7 @@ const rendered = computed(() => renderMarkdown(props.report?.content || ''))
   text-align: left;
   white-space: nowrap;   /* 避免数字/百分比被折行挤出单元格 */
 }
-.markdown :deep(.md-table th) { background: #F8FAFC; }
+.markdown :deep(.md-table th) { background: var(--color-surface-2); }
 
 /* 手机端进一步收窄字号和内边距，给表格留更多横向空间 */
 @media (max-width: 768px) {

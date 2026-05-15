@@ -325,7 +325,7 @@ function pct(g) {
 
 function pctColor(p) {
   if (p >= 100) return '#22C55E'
-  if (p >= 60) return '#2563EB'
+  if (p >= 60) return 'var(--color-primary)'
   if (p >= 30) return '#60A5FA'
   return '#F59E0B'
 }
@@ -488,7 +488,7 @@ function renderMarkdown(md) {
 .advise-reply {
   margin-top: 16px;
   padding: 12px 14px;
-  background: #F0F7FF;
+  background: var(--color-primary-light);
   border: 1px solid var(--color-border);
   border-radius: 10px;
   max-height: 380px;

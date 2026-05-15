@@ -99,9 +99,9 @@ const expenseChangePct = ref(null)
 const balanceChangePct = ref(null)
 const fmtNum = v => Math.abs(v).toFixed(2)
 
-const PRIMARY = '#4F46E5'
-// 高对比度调色板：色相均匀分布，相邻色差足够大
-const PALETTE = ['#4F46E5','#F59E0B','#EF4444','#22C55E','#0EA5E9','#EC4899','#F97316','#14B8A6','#8B5CF6','#84CC16']
+// Animal Island 主色 + NookPhone 13 色调色板
+const PRIMARY = '#19c8b9'
+const PALETTE = ['#19c8b9','#f8a6b2','#f7cd67','#82d5bb','#b77dee','#889df0','#e59266','#8ac68a','#fc736d','#d1da49']
 
 function showAll() {
   mode.value = 'year'
@@ -192,12 +192,12 @@ const _doFetchChartData = async () => {
   spendPieOption.value = makePie('支出分布', spendCats.map(x => ({ name: x['名称'], value: x['金额'] })), '消费分类')
 
   const lineCommon = {
-    color: [PRIMARY, '#EF4444', '#22C55E'],
+    color: [PRIMARY, '#fc736d', '#82d5bb'],
     legend: { data: ['收入', '支出', '结余'], bottom: 0, left: 'center', textStyle: { fontSize: 12 } },
     grid: { top: 36, bottom: 50, left: 50, right: 16 },
     tooltip: lineTooltip,
-    xAxis: { type: 'category', axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
-    yAxis: { type: 'value', axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: '#f1f5f9' } } },
+    xAxis: { type: 'category', axisLine: { lineStyle: { color: 'var(--color-border-light)' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
+    yAxis: { type: 'value', axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'var(--color-surface-2)' } } },
   }
 
   if (mode.value === 'month') {
@@ -263,11 +263,11 @@ watch(mode, () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: #EFF6FF;
+  background: var(--color-bg);
 }
 .stat-item.income  { background: #F0FDF4; }
 .stat-item.expense { background: #FFF1F2; }
-.stat-item.balance-pos { background: #EFF6FF; }
+.stat-item.balance-pos { background: var(--color-bg); }
 .stat-item.balance-neg { background: #FFF7ED; }
 .stat-label {
   font-size: 12px;
@@ -282,7 +282,7 @@ watch(mode, () => {
 }
 .income  .stat-value { color: #16A34A; }
 .expense .stat-value { color: #DC2626; }
-.balance-pos .stat-value { color: #2563EB; }
+.balance-pos .stat-value { color: var(--color-primary); }
 .balance-neg .stat-value { color: #EA580C; }
 
 .stat-delta {
