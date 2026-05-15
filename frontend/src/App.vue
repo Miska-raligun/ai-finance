@@ -13,7 +13,7 @@
     <!-- PC 侧边栏 -->
     <el-aside v-if="!isMobile && route.path !== '/login'" width="220px" class="app-aside">
       <div class="brand">
-        <span class="brand-icon" aria-hidden="true">💰</span>
+        <img src="@/assets/decor/tree.svg" class="brand-tree" alt="" aria-hidden="true">
         <span class="brand-name">智能记账</span>
       </div>
       <nav class="side-nav" aria-label="主导航">
@@ -42,6 +42,8 @@
           <button class="side-btn" @click="openConfigPanel">⚙️ 模型配置</button>
           <button class="side-btn danger" @click="logout">🚪 退出登录</button>
         </div>
+        <!-- 海浪条带：sidebar 底部装饰 -->
+        <div class="side-wave" aria-hidden="true"></div>
       </div>
     </el-aside>
 
@@ -56,7 +58,7 @@
     >
       <div class="app-aside drawer-inner">
         <div class="brand">
-          <span class="brand-icon">💰</span>
+          <img src="@/assets/decor/tree.svg" class="brand-tree" alt="" aria-hidden="true">
           <span class="brand-name">智能记账</span>
         </div>
         <nav class="side-nav">
@@ -85,6 +87,7 @@
             <button class="side-btn" @click="openConfigPanel(); showDrawer=false">⚙️ 模型配置</button>
             <button class="side-btn danger" @click="logout">🚪 退出登录</button>
           </div>
+          <div class="side-wave" aria-hidden="true"></div>
         </div>
       </div>
     </el-drawer>
@@ -105,7 +108,7 @@
         </router-view>
 
         <!-- LLM 配置弹窗 -->
-        <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="460px">
+        <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="460px" class="use-blob-clip">
           <el-form label-width="100px" autocomplete="off">
             <el-form-item label="服务商">
               <el-select v-model="llmProvider" style="width: 100%" @change="onProviderChange">
@@ -447,15 +450,21 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 22px 20px 18px;
+  padding: 18px 18px 14px;
   margin-bottom: 4px;
 }
 .brand-icon { font-size: 22px; }
+.brand-tree {
+  height: 40px;
+  width: auto;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.1));
+  flex-shrink: 0;
+}
 .brand-name {
   font-size: 16px;
-  font-weight: 700;
-  color: var(--color-primary);
-  letter-spacing: 0.5px;
+  font-weight: 800;
+  color: var(--color-text-strong);
+  letter-spacing: 0.05em;
 }
 
 .side-nav {
@@ -497,8 +506,16 @@ body {
 .nav-icon { font-size: 15px; }
 
 .side-footer {
-  padding: 14px 10px 16px;
+  padding: 14px 10px 0;
   margin-top: 4px;
+  position: relative;
+}
+/* 海浪条带：sidebar 底部，宽度撑满，重复平铺 */
+.side-wave {
+  margin: 16px -18px 0;
+  height: 60px;
+  background: url('@/assets/decor/wave.svg') repeat-x bottom / 180px 60px;
+  pointer-events: none;
 }
 .user-info {
   display: flex;

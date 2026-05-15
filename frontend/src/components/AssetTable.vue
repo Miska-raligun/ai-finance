@@ -195,6 +195,23 @@
             <span class="drawer-label">更新于</span>
             <span class="drawer-value text-muted">{{ formatTime(popoverRow.updated_at) }}</span>
           </div>
+
+          <!-- 市值历史折线（仅 hasCost && holdings>0 时显示） -->
+          <div v-if="canShowHistory(popoverRow)" class="asset-history">
+            <div class="asset-history-head">
+              <span class="asset-history-title">📉 市值走势</span>
+              <el-radio-group v-model="historyDays" size="small" @change="loadHistory(popoverRow)">
+                <el-radio-button :value="7">7天</el-radio-button>
+                <el-radio-button :value="30">30天</el-radio-button>
+                <el-radio-button :value="90">90天</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div v-if="historyLoading" class="asset-history-loading">加载中...</div>
+            <div v-else-if="!historyPoints.length" class="asset-history-empty">
+              暂无历史数据 — 点页面顶部「🔄 刷新行情」会写入一条快照
+            </div>
+            <canvas v-else ref="historyChartRef" class="asset-history-chart"></canvas>
+          </div>
         </div>
         <div class="drawer-footer drawer-footer-actions">
           <el-button class="drawer-action-btn" plain type="danger" @click="deleteFromDrawer">
@@ -352,6 +369,7 @@
       title="💰 卖出资产"
       width="420px"
       :close-on-click-modal="false"
+      class="use-blob-clip"
     >
       <div v-if="sellTarget" class="sell-form">
         <div class="sell-info">
@@ -436,12 +454,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import { useInvestmentStore } from '@/stores/investment'
 import { useAssetTypesStore } from '@/stores/assetTypes'
 import AssetTypeManager from '@/components/AssetTypeManager.vue'
+import Chart from 'chart.js/auto'
+import api from '@/api'
 
 const props = defineProps({ assets: { type: Array, default: () => [] } })
 const store = useInvestmentStore()
@@ -547,11 +567,89 @@ function handleRowClick(row, _col, event) {
   popoverRow.value = row
   drawerMode.value = 'view'
   showDrawer.value = true
+  // 打开抽屉后异步加载市值历史；用户切换 days 也走同一入口
+  if (canShowHistory(row)) loadHistory(row)
 }
 
 function onDrawerClose() {
   drawerMode.value = 'view'
   editingRow.value = null
+  // 销毁 chart 实例避免泄漏
+  if (historyChart) { historyChart.destroy(); historyChart = null }
+  historyPoints.value = []
+}
+
+// ===== 市值历史折线 =====
+const historyDays = ref(30)
+const historyLoading = ref(false)
+const historyPoints = ref([])
+const historyChartRef = ref(null)
+let historyChart = null
+
+function canShowHistory(row) {
+  if (!row) return false
+  const s = schemaOf(row.type)
+  // 现金类 / 一次性资产无价格波动概念
+  return s.hasCost && (row.holdings || 0) > 0
+}
+
+async function loadHistory(row) {
+  if (!row?.id) return
+  historyLoading.value = true
+  try {
+    const res = await api.get(`/api/investment/assets/${row.id}/history`,
+                              { params: { days: historyDays.value } })
+    historyPoints.value = res.data?.points || []
+    await nextTick()
+    renderHistoryChart()
+  } catch {
+    historyPoints.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function renderHistoryChart() {
+  if (!historyChartRef.value || !historyPoints.value.length) return
+  if (historyChart) { historyChart.destroy(); historyChart = null }
+  const labels = historyPoints.value.map(p => p.recorded_at.slice(5, 10))  // MM-DD
+  const data = historyPoints.value.map(p => p.value)
+  historyChart = new Chart(historyChartRef.value.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '市值',
+        data,
+        borderColor: '#19c8b9',
+        backgroundColor: 'rgba(25, 200, 185, 0.15)',
+        tension: 0.35,
+        fill: true,
+        pointRadius: 3,
+        pointBackgroundColor: '#11a89b',
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: (ctx) => `¥${Number(ctx.parsed.y).toFixed(2)}` },
+        },
+      },
+      scales: {
+        y: {
+          ticks: { color: '#725d42', callback: (v) => '¥' + v },
+          grid: { color: 'rgba(196, 184, 158, 0.25)' },
+        },
+        x: {
+          ticks: { color: '#725d42', maxRotation: 0, autoSkipPadding: 12 },
+          grid: { display: false },
+        },
+      },
+    },
+  })
 }
 
 function openCreate() {
@@ -901,6 +999,34 @@ function formatTime(iso) {
 .auto-value-hint {
   font-size: 12px; color: var(--color-text-muted);
   padding: 8px 12px; background: var(--color-primary-light); border-radius: 6px;
+}
+
+/* 市值历史折线区域 */
+.asset-history {
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 6px;
+}
+.asset-history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.asset-history-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-strong);
+}
+.asset-history-chart {
+  width: 100% !important;
+  height: 160px !important;
+}
+.asset-history-empty, .asset-history-loading {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 22px 0;
 }
 
 .drawer-footer {
