@@ -1,7 +1,7 @@
 <template>
   <div class="home-page">
     <header class="home-header">
-      <img src="@/assets/decor/anon-avatar.svg" class="home-avatar" alt="Anon 助手头像">
+      <img src="/favicon.ico" class="home-avatar" alt="Anon 助手头像">
       <div class="home-greeting">
         <div class="home-hello">你好，{{ userStore.username || '朋友' }} 👋</div>
         <div class="home-sub">今天想做点什么呢？</div>

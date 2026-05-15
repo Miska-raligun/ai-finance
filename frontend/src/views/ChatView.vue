@@ -23,7 +23,7 @@
       </div>
 
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
-        <img v-if="msg.sender === 'assistant'" :src="anonAvatar" class="avatar ai-avatar" alt="Anon" />
+        <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="msg-body">
           <img v-if="msg.image" :src="msg.image" class="chat-image" alt="uploaded" />
           <div v-if="msg.content" class="bubble">{{ msg.content }}</div>
@@ -125,7 +125,7 @@
       </div>
 
       <div v-if="loading" class="msg assistant">
-        <img :src="anonAvatar" class="avatar ai-avatar" alt="Anon" />
+        <img src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="bubble typing">
           <span></span><span></span><span></span>
         </div>
@@ -191,7 +191,6 @@ import { useInvestmentStore } from '@/stores/investment'
 import VoiceInput from '@/components/VoiceInput.vue'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
-import anonAvatar from '@/assets/decor/anon-avatar.svg'
 
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
