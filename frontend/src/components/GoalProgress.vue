@@ -179,8 +179,15 @@
     </el-drawer>
 
     <!-- AI 方案对话框（保留原有能力） -->
-    <el-dialog v-model="showAdvise" title="AI 储蓄方案" width="520px">
-      <el-form label-width="110px">
+    <el-dialog
+      v-model="showAdvise"
+      title="AI 储蓄方案"
+      :width="adviseDialogWidth"
+      :fullscreen="isMobile"
+      append-to-body
+      class="advise-dialog"
+    >
+      <el-form :label-width="isMobile ? '88px' : '110px'">
         <el-form-item label="月净现金流">
           <el-input-number
             v-model="advise.monthly"
@@ -199,11 +206,19 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
 import EmptyHint from '@/components/EmptyHint.vue'
+
+// 移动端弹窗用 fullscreen，避免 520px 在小屏溢出 + 内部长 markdown 滚动卡
+const _mq = window.matchMedia('(max-width: 768px)')
+const isMobile = ref(_mq.matches)
+function _onMq(e) { isMobile.value = e.matches }
+onMounted(() => _mq.addEventListener('change', _onMq))
+onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
+const adviseDialogWidth = computed(() => isMobile.value ? '100%' : '520px')
 
 const props = defineProps({ goals: { type: Array, default: () => [] } })
 
@@ -507,5 +522,34 @@ function renderMarkdown(md) {
 }
 .advise-reply :deep(.md-table th) {
   background: var(--color-primary-light); color: var(--color-primary);
+}
+
+/* 移动端 AI 储蓄方案 fullscreen 时的细化：
+   - dialog body 拉伸到剩余高度，markdown 区域内部滚动
+   - 标题 / 按钮区紧凑一点 */
+@media (max-width: 768px) {
+  .advise-dialog :deep(.el-dialog__body) {
+    padding: 12px 16px !important;
+    max-height: calc(100dvh - 140px);
+    overflow-y: auto;
+  }
+  .advise-dialog :deep(.el-dialog__header) {
+    padding: 14px 16px 6px !important;
+  }
+  .advise-dialog :deep(.el-form-item) {
+    margin-bottom: 12px;
+  }
+  .advise-reply {
+    max-height: none;        /* 让父级滚动而不是双重滚动 */
+    overflow-y: visible;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  /* markdown 表格在窄屏横向滚动避免溢出 */
+  .advise-reply :deep(.md-table) {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
 }
 </style>
