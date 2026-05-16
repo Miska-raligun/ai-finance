@@ -24,7 +24,7 @@
     </div>
 
     <div class="reports-layout">
-      <el-card class="side-list">
+      <el-card class="side-list animal-pop" :style="{ '--i': 0 }">
         <template #header>历史报告</template>
         <EmptyHint
           v-if="!store.list.length"
@@ -50,7 +50,7 @@
         </div>
       </el-card>
 
-      <div class="main-pane">
+      <div class="main-pane animal-pop" :style="{ '--i': 1 }">
         <el-skeleton v-if="store.loading" :rows="6" animated />
         <MonthlyReport v-else :report="store.current" />
       </div>

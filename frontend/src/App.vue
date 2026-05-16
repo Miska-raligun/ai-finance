@@ -102,9 +102,11 @@
 
       <el-main :class="{ 'has-topbar': isMobile && route.path !== '/login' }">
         <router-view v-slot="{ Component }">
-          <keep-alive :max="3">
-            <component :is="Component" />
-          </keep-alive>
+          <transition name="page" mode="out-in" appear>
+            <keep-alive :max="3">
+              <component :is="Component" :key="route.path" />
+            </keep-alive>
+          </transition>
         </router-view>
 
         <!-- LLM 配置弹窗 -->
@@ -421,6 +423,39 @@ body {
   .phone-tile:hover .tile-emoji {
     animation: none;
   }
+}
+
+/* ===== 路由切换动画：fade + 轻微下移 + 弹性曲线 =====
+   离场 200ms 较快不打断用户；进场 320ms 拉慢一点带回弹感 */
+.page-enter-active {
+  animation: page-enter 0.32s cubic-bezier(0.25, 1.2, 0.4, 1);
+}
+.page-leave-active {
+  animation: page-leave 0.18s ease-out;
+}
+@keyframes page-enter {
+  0% { opacity: 0; transform: translateY(14px) scale(0.985); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes page-leave {
+  0% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+
+/* 容器级错峰弹入：给 .animal-pop 标记的元素分配 --i 序号 */
+@keyframes animal-pop-in {
+  0% { opacity: 0; transform: translateY(12px) scale(0.94); }
+  60% { transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: none; }
+}
+.animal-pop {
+  animation: animal-pop-in 0.42s cubic-bezier(0.25, 1.2, 0.4, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active,
+  .animal-pop { animation: none !important; }
 }
 
 /* 页面标题底部装饰：薄荷青虚线 / 小波浪条

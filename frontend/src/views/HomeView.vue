@@ -10,10 +10,10 @@
 
     <main class="phone-grid" aria-label="功能入口">
       <button
-        v-for="tile in visibleTiles"
+        v-for="(tile, idx) in visibleTiles"
         :key="tile.path"
-        class="phone-tile"
-        :style="{ background: tile.color }"
+        class="phone-tile animal-pop"
+        :style="{ background: tile.color, '--i': idx }"
         @click="go(tile.path)"
       >
         <span class="tile-emoji" aria-hidden="true">{{ tile.emoji }}</span>

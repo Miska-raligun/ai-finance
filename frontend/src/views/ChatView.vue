@@ -132,7 +132,7 @@
       </div>
     </div>
 
-    <div class="quick-actions">
+    <div class="quick-actions animal-pop" :style="{ '--i': 1 }">
       <button
         v-for="q in quickActions"
         :key="q.label"
@@ -142,7 +142,7 @@
       >{{ q.label }}</button>
     </div>
 
-    <div class="chat-input">
+    <div class="chat-input animal-pop" :style="{ '--i': 2 }">
       <input
         ref="imageInput"
         type="file"

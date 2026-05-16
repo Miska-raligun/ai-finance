@@ -6,7 +6,7 @@
     </div>
 
     <!-- 记录表格 Tab -->
-    <div class="section-card">
+    <div class="section-card animal-pop" :style="{ '--i': 0 }">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="支出记录" name="expense">
           <RecordTable
@@ -30,10 +30,10 @@
 
     <!-- 预算 + 图表 -->
     <div class="ledger-layout">
-      <div class="ledger-col-left">
+      <div class="ledger-col-left animal-pop" :style="{ '--i': 1 }">
         <BudgetAndCategoryPanel />
       </div>
-      <div class="ledger-col-right">
+      <div class="ledger-col-right animal-pop" :style="{ '--i': 2 }">
         <ChartPanel :refresh-flag="categoryStore.refreshCounter" />
       </div>
     </div>

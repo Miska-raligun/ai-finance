@@ -88,9 +88,10 @@
     <!-- 移动端：卡片列表，避免 8 列硬塞造成横向溢出 / 文字挤压 -->
     <div v-else class="mobile-asset-list">
       <div
-        v-for="row in sortedMobileAssets"
+        v-for="(row, idx) in sortedMobileAssets"
         :key="row.id"
-        class="mobile-asset-card"
+        class="mobile-asset-card animal-pop"
+        :style="{ '--i': Math.min(idx, 8) }"
         @click="handleRowClick(row, null, $event)"
       >
         <div class="mobile-card-row mobile-card-head">

@@ -3,23 +3,23 @@
     <div class="page-header">
       <h2 class="page-title">📈 投资理财</h2>
       <div v-if="portfolio" class="summary-chips">
-        <div class="chip">
+        <div class="chip animal-pop" :style="{ '--i': 0 }">
           <span class="chip-label">总市值</span>
           <span class="chip-value">¥{{ portfolio.total_value.toFixed(2) }}</span>
         </div>
-        <div class="chip">
+        <div class="chip animal-pop" :style="{ '--i': 1 }">
           <span class="chip-label">累计盈亏</span>
           <span class="chip-value" :class="pnlClass">
             {{ pnlSign }}¥{{ Math.abs(portfolio.returns.pnl || 0).toFixed(2) }}
           </span>
         </div>
-        <div class="chip">
+        <div class="chip animal-pop" :style="{ '--i': 2 }">
           <span class="chip-label">回报率</span>
           <span class="chip-value" :class="pnlClass">
             {{ pnlSign }}{{ Math.abs(portfolio.returns.return_pct || 0).toFixed(2) }}%
           </span>
         </div>
-        <div class="chip">
+        <div class="chip animal-pop" :style="{ '--i': 3 }">
           <span class="chip-label">风险等级</span>
           <span class="chip-value">{{ LEVEL_LABEL[portfolio.risk_level] || '未测评' }}</span>
         </div>
@@ -45,7 +45,7 @@
     <el-tabs v-model="activeTab" class="invest-tabs">
       <el-tab-pane label="组合总览" name="overview">
         <div class="invest-layout">
-          <div class="col-left">
+          <div class="col-left animal-pop" :style="{ '--i': 4 }">
             <PortfolioPie :allocation="portfolio?.allocation" />
             <el-card v-if="portfolio && portfolio.allocation?.by_type?.length" class="mt">
               <template #header>
@@ -119,7 +119,7 @@
               <el-empty v-else :description="rebalance.rationale || '暂无可执行建议'" :image-size="60" />
             </el-card>
           </div>
-          <div class="col-right">
+          <div class="col-right animal-pop" :style="{ '--i': 5 }">
             <AdvisorChat />
           </div>
         </div>
