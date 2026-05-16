@@ -7,9 +7,12 @@
       </div>
     </template>
 
-    <div v-if="!sortedGoals.length" class="empty">
-      还没有设置目标。设定一个短/中期目标，让攒钱更有动力～
-    </div>
+    <EmptyHint
+      v-if="!sortedGoals.length"
+      kind="coin"
+      title="设个目标吧 ✨"
+      hint="给自己定一个买相机、出国旅行或攒首付的小金额，每月看着进度条往前长。"
+    />
 
     <div v-else class="goals">
       <div
@@ -200,6 +203,7 @@ import { ref, reactive, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
+import EmptyHint from '@/components/EmptyHint.vue'
 
 const props = defineProps({ goals: { type: Array, default: () => [] } })
 

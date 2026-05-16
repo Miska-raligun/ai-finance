@@ -388,8 +388,62 @@ body {
   font-weight: 500;
   letter-spacing: 0.01em;
   background: var(--color-bg);
+  /* 圆点纹理：极淡的棕色圆点平铺，远看是颗粒感纸张 */
+  background-image:
+    radial-gradient(circle, rgba(114, 93, 66, 0.06) 1.2px, transparent 1.4px),
+    radial-gradient(circle, rgba(114, 93, 66, 0.04) 1px, transparent 1.2px);
+  background-size: 24px 24px, 36px 36px;
+  background-position: 0 0, 12px 12px;
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
+}
+
+/* 全局 emoji wobble：hover 摇头小动画，给所有 .nav-icon / .brand-icon /
+   .home-avatar / .tile-emoji 等装饰元素增加可爱感。降级到 prefers-reduced-motion */
+@keyframes animal-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-8deg); }
+  75% { transform: rotate(8deg); }
+}
+.nav-icon,
+.brand-icon,
+.tile-emoji,
+.chip-label::before {
+  display: inline-block;
+  transform-origin: center;
+}
+.nav-item:hover .nav-icon,
+.phone-tile:hover .tile-emoji {
+  animation: animal-wobble 0.6s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-item:hover .nav-icon,
+  .phone-tile:hover .tile-emoji {
+    animation: none;
+  }
+}
+
+/* 页面标题底部装饰：薄荷青虚线 / 小波浪条
+   .page-title 在多个 view 已存在；通过 ::after 加 12px 高的小波浪 */
+.page-title {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 8px;
+}
+.page-title::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 8px;
+  background:
+    radial-gradient(circle at 50% 0%, transparent 0 3.5px, var(--color-primary) 3.5px 5px, transparent 5px),
+    radial-gradient(circle at 50% 0%, transparent 0 2.5px, var(--color-primary-light) 2.5px 4px, transparent 4px);
+  background-size: 14px 8px, 14px 8px;
+  background-position: 0 0, 7px 0;
+  background-repeat: repeat-x;
+  opacity: 0.85;
 }
 
 /* ===== 全局 Element Plus 覆盖 ===== */

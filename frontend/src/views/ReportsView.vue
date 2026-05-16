@@ -26,7 +26,12 @@
     <div class="reports-layout">
       <el-card class="side-list">
         <template #header>历史报告</template>
-        <div v-if="!store.list.length" class="empty">暂无历史报告</div>
+        <EmptyHint
+          v-if="!store.list.length"
+          kind="letter"
+          title="还没有月度报告"
+          hint="选个月份点「✨ 生成本月报告」试试，Anon 会帮你写一份带建议的总结。"
+        />
         <div
           v-for="r in store.list"
           :key="r.period"
@@ -60,6 +65,7 @@ import { useReportsStore } from '@/stores/reports'
 import { useUserStore } from '@/stores/user'
 import MonthlyReport from '@/components/MonthlyReport.vue'
 import ExportMenu from '@/components/ExportMenu.vue'
+import EmptyHint from '@/components/EmptyHint.vue'
 
 const store = useReportsStore()
 const userStore = useUserStore()

@@ -1,7 +1,12 @@
 <template>
   <el-card>
     <template #header>🥧 资产配置</template>
-    <div v-if="!hasData" class="empty">暂无持仓数据，先添加几项资产吧。</div>
+    <EmptyHint
+      v-if="!hasData"
+      kind="island"
+      title="还没有持仓"
+      hint="切到「资产明细」点「＋新增资产」录入第一笔，组合分布就会出现在这里。"
+    />
     <div v-else class="chart-wrapper">
       <canvas
         ref="chartRef"
@@ -23,6 +28,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Chart from 'chart.js/auto'
+import EmptyHint from '@/components/EmptyHint.vue'
 
 const props = defineProps({
   allocation: { type: Object, default: () => null },

@@ -1,9 +1,14 @@
 <template>
   <div class="login-page">
+    <!-- 装饰：左右两棵树 + 底部海浪条带 -->
+    <img src="@/assets/decor/tree.svg" class="login-deco-tree login-deco-tree-l" alt="" aria-hidden="true">
+    <img src="@/assets/decor/tree.svg" class="login-deco-tree login-deco-tree-r" alt="" aria-hidden="true">
+    <div class="login-deco-wave" aria-hidden="true"></div>
+
     <div class="login-card">
       <img src="/favicon.ico" class="login-logo" alt="Anon" />
       <h1 class="login-title">智能记账助手Anon</h1>
-      <p class="login-sub">管理你的每一笔收支</p>
+      <p class="login-sub">🌴 管理你的每一笔收支 🌴</p>
 
       <div v-if="!checking" class="login-form">
         <div class="field">
@@ -195,6 +200,31 @@ async function onRegister() {
   align-items: center;
   background: linear-gradient(145deg, var(--color-primary-light) 0%, var(--color-bg) 50%, var(--color-border-light) 100%);
   padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 装饰元素：左下/右下两棵树 + 底部海浪 */
+.login-deco-tree {
+  position: absolute;
+  bottom: 56px;
+  height: 80px;
+  z-index: 0;
+  filter: drop-shadow(0 4px 4px rgba(0,0,0,0.1));
+}
+.login-deco-tree-l { left: 8%; }
+.login-deco-tree-r { right: 8%; transform: scaleX(-1); }
+.login-deco-wave {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 56px;
+  background: url('@/assets/decor/wave.svg') repeat-x bottom / 200px 56px;
+  z-index: 0;
+  pointer-events: none;
+}
+.login-card { position: relative; z-index: 1; }
+@media (max-width: 540px) {
+  .login-deco-tree { display: none; }
 }
 
 .login-card {

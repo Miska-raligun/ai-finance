@@ -283,12 +283,17 @@ watch(refreshCounter, () => {
   align-items: center;
   font-size: 13px;
 }
-.chip-label { color: var(--color-text-muted); }
+.chip-label { color: var(--color-text-muted); font-size: 12px; }
 .chip-value {
-  font-weight: 700;
-  color: var(--color-primary);
+  /* Animal Island 规范：金额 / 时间数字 800-900 字重，2px 字距 */
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--color-text-strong);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
+.chip-value.up { color: var(--color-up); }
+.chip-value.down { color: var(--color-down); }
 .invest-onboarding {
   margin-bottom: 12px;
 }
