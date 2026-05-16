@@ -80,7 +80,12 @@
     </div>
 
     <!-- 编辑 / 新建对话框 -->
-    <el-dialog v-model="showDialog" :title="editing.id ? '编辑规则' : '新建规则'" width="420px">
+    <el-dialog
+      v-model="showDialog"
+      :title="editing.id ? '编辑规则' : '新建规则'"
+      :width="dialogWidth"
+      class="use-blob-clip"
+    >
       <el-form label-width="80px">
         <el-form-item label="类型">
           <el-radio-group v-model="editing.kind">
@@ -119,7 +124,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
@@ -134,6 +139,10 @@ const isMobile = ref(_mq.matches)
 function _onMq(e) { isMobile.value = e.matches }
 onMounted(() => _mq.addEventListener('change', _onMq))
 onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
+
+// 弹窗宽度：桌面 420px 固定；移动端用视口宽减边距，避免 420px 在 360px
+// 屏上溢出/被切。
+const dialogWidth = computed(() => isMobile.value ? 'calc(100vw - 32px)' : '420px')
 
 async function load() {
   const res = await api.get('/api/recurring')

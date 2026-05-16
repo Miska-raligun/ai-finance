@@ -83,7 +83,7 @@ Content-Length: {request_info['content_length']}
 
 # ✅ 路径前缀白名单（匹配 /api/ 和前端路径）
 WHITELIST_PREFIXES = (
-    "/login", "/chat", "/ledger", "/admin",
+    "/login", "/chat", "/ledger", "/admin", "/home",
     "/api/me", "/api/login", "/api/logout", "/api/chat", "/api/register",
     "/api/captcha",
     "/api/categories", "/api/income", "/api/records",
@@ -91,6 +91,8 @@ WHITELIST_PREFIXES = (
     "/api/users",
     "/api/investment", "/api/reports", "/api/profile",
     "/api/export", "/api/admin",
+    # 第二/三轮新增端点：避免被 LLM-WAF 误判 block
+    "/api/recurring", "/api/receipts",
 )
 
 def is_whitelisted(path):

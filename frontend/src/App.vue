@@ -33,6 +33,22 @@
           <span class="nav-icon" aria-hidden="true">🛠</span> 用户管理
         </router-link>
       </nav>
+
+      <!-- 中间装饰：Anon 提示卡 + 实时时钟 + 小树
+           填充 nav 与 footer 之间的视觉空白 -->
+      <div class="side-mid" aria-hidden="true">
+        <div class="side-tip">
+          <img src="/favicon.ico" class="side-tip-avatar" alt="">
+          <div class="side-tip-bubble">
+            <div class="side-tip-text">{{ tip }}</div>
+          </div>
+        </div>
+        <div class="side-clock">
+          <span class="clock-time">{{ clockTime }}</span>
+          <span class="clock-date">{{ clockDate }}</span>
+        </div>
+      </div>
+
       <div class="side-footer">
         <div class="user-info">
           <div class="user-avatar">{{ username.slice(0, 1).toUpperCase() }}</div>
@@ -245,6 +261,40 @@ function checkConfig() {
 onMounted(checkConfig)
 watch(() => route.path, checkConfig)
 
+// ===== Sidebar 中间装饰：实时时钟 + 每日轮换的 Anon 小贴士 =====
+const _now = ref(new Date())
+let _clockTimer = null
+const clockTime = computed(() => {
+  const d = _now.value
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+})
+const clockDate = computed(() => {
+  const d = _now.value
+  const w = ['日', '一', '二', '三', '四', '五', '六']
+  return `${d.getMonth() + 1}/${d.getDate()} 周${w[d.getDay()]}`
+})
+const TIPS = [
+  '今天也要好好记账哦 🌱',
+  '小额日常累积起来很惊人～',
+  '每月看一眼月度报告吧 📑',
+  '设个理财目标更有方向感 🎯',
+  '记得定期备份你的账本 💾',
+  '检查一下本月预算还剩多少？',
+  '🌴 投资理财，长期主义最香',
+  '咖啡也要记 ☕',
+]
+const tip = computed(() => {
+  // 按"今天的日期"取一条，每天换一句
+  const day = Math.floor(_now.value / (24 * 3600 * 1000))
+  return TIPS[day % TIPS.length]
+})
+onMounted(() => {
+  _clockTimer = setInterval(() => { _now.value = new Date() }, 30_000)
+})
+onBeforeUnmount(() => {
+  if (_clockTimer) clearInterval(_clockTimer)
+})
+
 async function saveConfig() {
   await userStore.saveLlmConfig({
     url: llmUrl.value,
@@ -390,12 +440,17 @@ body {
   font-weight: 500;
   letter-spacing: 0.01em;
   background: var(--color-bg);
-  /* 圆点纹理：极淡的棕色圆点平铺，远看是颗粒感纸张 */
+  /* 三层叠加背景：
+     1. 暖米底色（var(--color-bg)）已设
+     2. 浅色动森图案（叶子 / 贝壳 / 星 / 圆点）大面积平铺
+     3. 极淡棕色颗粒点提供"纸张"质感 */
   background-image:
+    url('@/assets/decor/pattern.svg'),
     radial-gradient(circle, rgba(114, 93, 66, 0.06) 1.2px, transparent 1.4px),
     radial-gradient(circle, rgba(114, 93, 66, 0.04) 1px, transparent 1.2px);
-  background-size: 24px 24px, 36px 36px;
-  background-position: 0 0, 12px 12px;
+  background-size: 240px 240px, 24px 24px, 36px 36px;
+  background-position: 0 0, 0 0, 12px 12px;
+  background-repeat: repeat, repeat, repeat;
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
 }
@@ -557,12 +612,98 @@ body {
 }
 
 .side-nav {
-  flex: 1;
-  padding: 12px 14px;
+  flex: 0 0 auto;
+  padding: 12px 14px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
+}
+
+/* 中间装饰区 */
+.side-mid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  padding: 12px 12px 0;
+  gap: 12px;
+  min-height: 0;
+}
+.side-tip {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 0 2px;
+}
+.side-tip-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--color-surface);
+  box-shadow: 0 3px 0 0 var(--shadow-anchor);
+  flex-shrink: 0;
+  animation: animal-tip-bob 4s ease-in-out infinite;
+}
+@keyframes animal-tip-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-3deg); }
+}
+.side-tip-bubble {
+  flex: 1;
+  position: relative;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-light);
+  border-radius: 14px 14px 14px 4px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--color-text);
+  line-height: 1.5;
+  min-width: 0;
+  box-shadow: 0 2px 0 0 var(--shadow-anchor-light);
+}
+.side-tip-bubble::before {
+  /* 气泡左下小尖角，指向头像 */
+  content: "";
+  position: absolute;
+  left: -8px;
+  bottom: 2px;
+  width: 8px;
+  height: 8px;
+  background: var(--color-surface);
+  border-left: 2px solid var(--color-border-light);
+  border-bottom: 2px solid var(--color-border-light);
+  transform: rotate(45deg);
+  border-bottom-left-radius: 3px;
+}
+.side-tip-text {
+  word-break: break-word;
+}
+
+.side-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  background: linear-gradient(135deg, var(--color-primary-light), var(--color-surface));
+  border-radius: 16px;
+  border: 2px solid var(--color-border-light);
+  box-shadow: 0 3px 0 0 var(--shadow-anchor-light);
+}
+.clock-time {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--color-primary-dark);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+.clock-date {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 600;
 }
 .nav-item {
   display: flex;
