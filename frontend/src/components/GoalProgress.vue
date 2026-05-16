@@ -179,7 +179,7 @@
     </el-drawer>
 
     <!-- AI 方案对话框（保留原有能力） -->
-    <el-dialog v-model="showAdvise" title="AI 储蓄方案" width="520px" class="use-blob-clip">
+    <el-dialog v-model="showAdvise" title="AI 储蓄方案" width="520px">
       <el-form label-width="110px">
         <el-form-item label="月净现金流">
           <el-input-number

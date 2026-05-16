@@ -99,11 +99,12 @@ from routes.export import export_bp
 from routes.health import health_bp
 from routes.recurring import recurring_bp
 from routes.receipts import receipts_bp
+from routes.tips import tips_bp
 
 for bp in [auth_bp, chat_bp, records_bp, income_bp,
            categories_bp, budgets_bp, stats_bp, admin_bp,
            investment_bp, reports_bp, export_bp, health_bp,
-           recurring_bp, receipts_bp]:
+           recurring_bp, receipts_bp, tips_bp]:
     app.register_blueprint(bp)
 
 # LLM 成本敏感端点的用户级限流（IP 级仍由 llm_security_middleware 兜底）

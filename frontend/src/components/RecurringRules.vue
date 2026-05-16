@@ -84,7 +84,7 @@
       v-model="showDialog"
       :title="editing.id ? '编辑规则' : '新建规则'"
       :width="dialogWidth"
-      class="use-blob-clip"
+      append-to-body
     >
       <el-form label-width="80px">
         <el-form-item label="类型">

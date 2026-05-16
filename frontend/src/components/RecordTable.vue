@@ -188,6 +188,7 @@
       :with-header="false"
       :size="drawerMode === 'edit' ? '420px' : (showBudget ? '360px' : '320px')"
       class="row-detail-drawer"
+      append-to-body
       @close="onDrawerClose"
     >
       <div class="drawer-handle-bar"></div>

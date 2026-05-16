@@ -34,16 +34,23 @@
         </router-link>
       </nav>
 
-      <!-- 中间装饰：Anon 提示卡 + 实时时钟 + 小树
+      <!-- 中间装饰：Anon 提示卡（点头像换一句）+ 实时时钟
            填充 nav 与 footer 之间的视觉空白 -->
-      <div class="side-mid" aria-hidden="true">
+      <div class="side-mid">
         <div class="side-tip">
-          <img src="/favicon.ico" class="side-tip-avatar" alt="">
+          <img
+            src="/favicon.ico"
+            class="side-tip-avatar"
+            :class="{ 'is-loading': tipLoading }"
+            alt="点击换一句"
+            title="点击让 Anon 换一句"
+            @click="refreshTip"
+          >
           <div class="side-tip-bubble">
             <div class="side-tip-text">{{ tip }}</div>
           </div>
         </div>
-        <div class="side-clock">
+        <div class="side-clock" aria-hidden="true">
           <span class="clock-time">{{ clockTime }}</span>
           <span class="clock-date">{{ clockDate }}</span>
         </div>
@@ -94,6 +101,21 @@
             <span class="nav-icon">🛠</span> 用户管理
           </router-link>
         </nav>
+
+        <!-- 中间装饰：与 PC sidebar 一致 -->
+        <div class="side-mid" aria-hidden="true">
+          <div class="side-tip">
+            <img src="/favicon.ico" class="side-tip-avatar" alt="" @click="refreshTip">
+            <div class="side-tip-bubble">
+              <div class="side-tip-text">{{ tip }}</div>
+            </div>
+          </div>
+          <div class="side-clock">
+            <span class="clock-time">{{ clockTime }}</span>
+            <span class="clock-date">{{ clockDate }}</span>
+          </div>
+        </div>
+
         <div class="side-footer">
           <div class="user-info">
             <div class="user-avatar">{{ username.slice(0, 1).toUpperCase() }}</div>
@@ -126,7 +148,7 @@
         </router-view>
 
         <!-- LLM 配置弹窗 -->
-        <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="460px" class="use-blob-clip">
+        <el-dialog v-model="showConfig" title="⚙ LLM 配置" width="460px">
           <el-form label-width="100px" autocomplete="off">
             <el-form-item label="服务商">
               <el-select v-model="llmProvider" style="width: 100%" @change="onProviderChange">
@@ -261,7 +283,7 @@ function checkConfig() {
 onMounted(checkConfig)
 watch(() => route.path, checkConfig)
 
-// ===== Sidebar 中间装饰：实时时钟 + 每日轮换的 Anon 小贴士 =====
+// ===== Sidebar 中间装饰：实时时钟 + LLM 生成的随机小贴士 =====
 const _now = ref(new Date())
 let _clockTimer = null
 const clockTime = computed(() => {
@@ -273,24 +295,32 @@ const clockDate = computed(() => {
   const w = ['日', '一', '二', '三', '四', '五', '六']
   return `${d.getMonth() + 1}/${d.getDate()} 周${w[d.getDay()]}`
 })
-const TIPS = [
-  '今天也要好好记账哦 🌱',
-  '小额日常累积起来很惊人～',
-  '每月看一眼月度报告吧 📑',
-  '设个理财目标更有方向感 🎯',
-  '记得定期备份你的账本 💾',
-  '检查一下本月预算还剩多少？',
-  '🌴 投资理财，长期主义最香',
-  '咖啡也要记 ☕',
-]
-const tip = computed(() => {
-  // 按"今天的日期"取一条，每天换一句
-  const day = Math.floor(_now.value / (24 * 3600 * 1000))
-  return TIPS[day % TIPS.length]
-})
+
+// tip 由后端 /api/anon/tip 异步生成；点头像 refreshTip() 重新请求
+import api from '@/api'
+const tip = ref('Anon 正在想小贴士…')
+const tipLoading = ref(false)
+async function refreshTip() {
+  if (tipLoading.value) return
+  tipLoading.value = true
+  try {
+    const res = await api.get('/api/anon/tip', { silent: true })
+    if (res.data?.tip) tip.value = res.data.tip
+  } catch {
+    // 拦截器已显示错误；保留旧文案不替换
+  } finally {
+    tipLoading.value = false
+  }
+}
+
 onMounted(() => {
   _clockTimer = setInterval(() => { _now.value = new Date() }, 30_000)
+  // 首次进入页面 + 用户名就绪时拉一句
+  if (userStore.username) refreshTip()
 })
+// 用户登录后再拉
+watch(() => userStore.username, (v) => { if (v) refreshTip() })
+
 onBeforeUnmount(() => {
   if (_clockTimer) clearInterval(_clockTimer)
 })
@@ -445,12 +475,13 @@ body {
      2. 浅色动森图案（叶子 / 贝壳 / 星 / 圆点）大面积平铺
      3. 极淡棕色颗粒点提供"纸张"质感 */
   background-image:
-    url('@/assets/decor/pattern.svg'),
+    url('./assets/decor/pattern.svg'),
     radial-gradient(circle, rgba(114, 93, 66, 0.06) 1.2px, transparent 1.4px),
     radial-gradient(circle, rgba(114, 93, 66, 0.04) 1px, transparent 1.2px);
   background-size: 240px 240px, 24px 24px, 36px 36px;
   background-position: 0 0, 0 0, 12px 12px;
   background-repeat: repeat, repeat, repeat;
+  background-attachment: fixed, scroll, scroll;
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
 }
@@ -568,7 +599,8 @@ body {
 
 /* el-main */
 .el-main {
-  background: var(--color-bg);
+  /* 不能再用实色，否则会盖住 body 的动森装饰图案 */
+  background: transparent;
   padding: 20px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -645,11 +677,31 @@ body {
   border: 2px solid var(--color-surface);
   box-shadow: 0 3px 0 0 var(--shadow-anchor);
   flex-shrink: 0;
+  cursor: pointer;
   animation: animal-tip-bob 4s ease-in-out infinite;
+  transition: transform 0.2s ease;
+}
+.side-tip-avatar:hover {
+  transform: scale(1.1);
+}
+.side-tip-avatar:active,
+.side-tip-avatar.is-loading {
+  /* 点击或正在请求时强烈摇头 0.5s 表示"在想"，loading 时持续 */
+  animation: animal-tip-shake 0.5s ease;
+}
+.side-tip-avatar.is-loading {
+  animation-iteration-count: infinite;
 }
 @keyframes animal-tip-bob {
   0%, 100% { transform: translateY(0) rotate(0deg); }
   50% { transform: translateY(-3px) rotate(-3deg); }
+}
+@keyframes animal-tip-shake {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-15deg) scale(1.1); }
+  40% { transform: rotate(12deg) scale(1.1); }
+  60% { transform: rotate(-10deg) scale(1.05); }
+  80% { transform: rotate(8deg) scale(1.05); }
 }
 .side-tip-bubble {
   flex: 1;

@@ -140,6 +140,7 @@
       :with-header="false"
       :size="drawerMode === 'edit' ? '540px' : '400px'"
       class="asset-drawer"
+      append-to-body
       @close="onDrawerClose"
     >
       <div class="drawer-handle-bar"></div>
@@ -351,6 +352,7 @@
       :with-header="false"
       size="420px"
       class="asset-drawer"
+      append-to-body
     >
       <div class="drawer-handle-bar"></div>
       <div class="drawer-edit-title">⚙️ 资产类型管理</div>
@@ -370,7 +372,7 @@
       title="💰 卖出资产"
       width="420px"
       :close-on-click-modal="false"
-      class="use-blob-clip"
+      append-to-body
     >
       <div v-if="sellTarget" class="sell-form">
         <div class="sell-info">
