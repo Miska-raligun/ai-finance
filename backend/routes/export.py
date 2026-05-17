@@ -1,10 +1,11 @@
-"""数据导出路由：CSV (records/income/assets) + 月报 HTML (可浏览器打印为 PDF)。"""
+"""数据导出路由：CSV / JSON / Excel（records/income/assets）+ 月报 HTML。"""
 from __future__ import annotations
 
 import csv
 import io
+import json
 
-from flask import Blueprint, Response, abort, g, request, stream_with_context
+from flask import Blueprint, Response, abort, g, jsonify, request, stream_with_context
 
 from auth import login_required
 from db import get_db
@@ -36,15 +37,37 @@ _KIND_QUERIES = {
 @export_bp.route("/api/export/csv", methods=["GET"])
 @login_required
 def export_csv():
+    """兼容旧 URL：保留 /api/export/csv 端点，等价于 /api/export?format=csv。"""
+    return _do_export("csv")
+
+
+@export_bp.route("/api/export", methods=["GET"])
+@login_required
+def export_any():
+    """统一导出入口：?type=records|income|assets & ?format=csv|json|xlsx。"""
+    return _do_export((request.args.get("format") or "csv").strip().lower())
+
+
+def _do_export(fmt: str) -> Response:
     kind = (request.args.get("type") or "records").strip()
     if kind not in _KIND_QUERIES:
         abort(400, description=f"不支持的导出类型：{kind}")
+    if fmt not in ("csv", "json", "xlsx"):
+        abort(400, description=f"不支持的导出格式：{fmt}")
 
     sql, headers = _KIND_QUERIES[kind]
     user_id = g.user_id
 
-    # 流式生成：行游标按需迭代，单行写一次 buffer 后立即 yield，
-    # 避免在用户记录数 ↑↑ 时把整张表读进内存。
+    if fmt == "csv":
+        return _stream_csv(kind, sql, headers, user_id)
+    if fmt == "json":
+        return _emit_json(kind, sql, headers, user_id)
+    return _emit_xlsx(kind, sql, headers, user_id)
+
+
+# ---------------- CSV：流式输出，避免大账户内存峰值 ----------------
+
+def _stream_csv(kind, sql, headers, user_id) -> Response:
     def _generate():
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -72,6 +95,75 @@ def export_csv():
         mimetype="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="{kind}.csv"',
+        },
+    )
+
+
+# ---------------- JSON：一次性返回结构化数组 ----------------
+
+def _emit_json(kind, sql, headers, user_id) -> Response:
+    rows = [dict(r) for r in get_db().execute(sql, (user_id,)).fetchall()]
+    payload = {"type": kind, "count": len(rows), "fields": headers, "rows": rows}
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    return Response(
+        body,
+        mimetype="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{kind}.json"',
+        },
+    )
+
+
+# ---------------- Excel：openpyxl 写一份带表头样式的 .xlsx ----------------
+
+def _emit_xlsx(kind, sql, headers, user_id) -> Response:
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError:
+        abort(501, description="缺少 openpyxl 依赖，无法导出 Excel；请联系管理员")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = kind
+
+    # 表头样式：暖米底、棕褐字、加粗 + 居中
+    header_fill = PatternFill(fgColor="F0ECE2", fill_type="solid")
+    header_font = Font(name="Calibri", bold=True, color="794F27")
+    center = Alignment(horizontal="center", vertical="center")
+    for col, label in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col, value=label)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+
+    cursor = get_db().execute(sql, (user_id,))
+    try:
+        row_idx = 2
+        for r in cursor:
+            for col, key in enumerate(r.keys(), start=1):
+                v = r[key]
+                ws.cell(row=row_idx, column=col, value=v)
+            row_idx += 1
+    finally:
+        cursor.close()
+
+    # 自动列宽（按列内容长度估算）
+    for col, label in enumerate(headers, start=1):
+        max_len = len(str(label))
+        for r in range(2, ws.max_row + 1):
+            v = ws.cell(row=r, column=col).value
+            if v is not None:
+                max_len = max(max_len, min(40, len(str(v))))
+        ws.column_dimensions[chr(64 + col)].width = max(10, min(40, max_len + 2))
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(
+        buf.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{kind}.xlsx"',
         },
     )
 

@@ -523,6 +523,111 @@ def set_budget(category: str, amount: float, month: str = "") -> str:
     return f"✅ 已设置{month}「{category}」预算：¥{amount}"
 
 
+# ============ 定期账单 / 重复记账规则 ============
+
+@mcp.tool()
+def list_recurring_rules() -> str:
+    """列出当前用户的所有定期账单规则（房租 / 工资 / 订阅等）。"""
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, kind, category, amount, day_of_month, note, active, last_run_date "
+        "FROM recurring_rules WHERE user_id=? "
+        "ORDER BY active DESC, day_of_month ASC",
+        (uid(),),
+    ).fetchall()
+    if not rows:
+        return "暂无定期账单规则。可用 add_recurring_rule 创建。"
+    lines = [f"📅 共 {len(rows)} 条："]
+    for r in rows:
+        flag = "✅" if r["active"] else "⏸"
+        last = f"，上次 {r['last_run_date']}" if r["last_run_date"] else ""
+        kind_zh = "收入" if r["kind"] == "income" else "支出"
+        lines.append(
+            f"{flag} ID:{r['id']} | {kind_zh}「{r['category']}」¥{r['amount']:.2f} "
+            f"每月 {r['day_of_month']} 日{last}"
+            + (f" · {r['note']}" if r["note"] else "")
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_recurring_rule(kind: str, category: str, amount: float,
+                       day_of_month: int, note: str = "") -> str:
+    """创建一条定期账单规则。kind 取 'expense' 或 'income'。
+    day_of_month 1-31，月不足该日时（如 2 月 31）系统会自动回退到月末。
+    """
+    if kind not in ("expense", "income"):
+        return "⚠️ kind 必须是 expense 或 income"
+    if amount <= 0:
+        return "⚠️ 金额必须大于 0"
+    if not 1 <= day_of_month <= 31:
+        return "⚠️ day_of_month 必须在 1-31 之间"
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO recurring_rules "
+        "(user_id, kind, category, amount, day_of_month, note, active, "
+        " created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))",
+        (uid(), kind, category, amount, day_of_month, note or None),
+    )
+    db.commit()
+    return f"✅ 已创建规则 ID:{cur.lastrowid}（{kind} {category} ¥{amount:.2f} 每月 {day_of_month} 日）"
+
+
+@mcp.tool()
+def run_recurring_now() -> str:
+    """立即扫一遍当月已到日且未跑过的规则，展开成 records / income 行。"""
+    from services.recurring import run_due
+    result = run_due()
+    executed, errors = result["executed"], result.get("errors") or []
+    msg = f"📅 已展开 {executed} 条规则（{result['as_of']}）"
+    if errors:
+        msg += f"\n⚠️ {len(errors)} 条失败：" + "; ".join(
+            f"ID:{e['rule_id']} {e['reason']}" for e in errors[:3]
+        )
+    return msg
+
+
+@mcp.tool()
+def delete_recurring_rule(rule_id: int) -> str:
+    """删除一条定期账单规则（已展开的历史记录不会被删除）。"""
+    db = get_db()
+    res = db.execute(
+        "DELETE FROM recurring_rules WHERE id=? AND user_id=?",
+        (rule_id, uid()),
+    )
+    db.commit()
+    if res.rowcount == 0:
+        return f"❌ 未找到 ID:{rule_id} 的规则"
+    return f"✅ 已删除规则 ID:{rule_id}"
+
+
+# ============ 资产市值历史 ============
+
+@mcp.tool()
+def asset_value_history(asset_id: int, days: int = 30) -> str:
+    """查询某项资产最近 N 天的市值快照（每天最多一条）。days 自动 clamp 到 [1,365]。"""
+    days = max(1, min(days, 365))
+    db = get_db()
+    owns = db.execute(
+        "SELECT name FROM assets WHERE id=? AND user_id=?", (asset_id, uid()),
+    ).fetchone()
+    if not owns:
+        return f"❌ 未找到 ID:{asset_id} 的资产"
+    rows = db.execute(
+        "SELECT value, recorded_at FROM asset_value_history "
+        "WHERE asset_id=? AND user_id=? "
+        "AND recorded_at >= date('now', ?) "
+        "ORDER BY recorded_at ASC",
+        (asset_id, uid(), f"-{days} days"),
+    ).fetchall()
+    if not rows:
+        return f"📉 「{owns['name']}」最近 {days} 天无历史快照（点页面刷新行情会写一条）"
+    return f"📉 「{owns['name']}」最近 {days} 天市值走势：\n" + "\n".join(
+        f"  {r['recorded_at'][:10]}: ¥{r['value']:.2f}" for r in rows
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     from werkzeug.security import check_password_hash

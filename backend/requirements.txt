@@ -27,3 +27,6 @@ pytest-cov>=4.1.0
 
 # 用户 LLM API key 加密存储（Fernet）
 cryptography>=42.0.0
+
+# Excel 导出（routes/export.py xlsx 分支）
+openpyxl>=3.1.0

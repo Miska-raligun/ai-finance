@@ -10,6 +10,7 @@
           v-for="opt in items"
           :key="opt.command"
           :command="opt.command"
+          :divided="opt.divided"
         >{{ opt.label }}</el-dropdown-item>
       </el-dropdown-menu>
     </template>
@@ -30,29 +31,40 @@ const props = defineProps({
 
 const items = computed(() => {
   if (props.scope === 'investment') {
-    return [{ command: 'csv:assets', label: '📊 持仓 CSV' }]
+    return [
+      { command: 'csv:assets',  label: '📊 持仓 CSV' },
+      { command: 'xlsx:assets', label: '📗 持仓 Excel' },
+      { command: 'json:assets', label: '🧾 持仓 JSON' },
+    ]
   }
   if (props.scope === 'reports') {
     return [{ command: 'report:html', label: '🖨️ 当前月度报告（PDF）' }]
   }
   return [
-    { command: 'csv:records', label: '💸 支出记录 CSV' },
-    { command: 'csv:income',  label: '💰 收入记录 CSV' },
+    { command: 'csv:records',  label: '💸 支出 CSV' },
+    { command: 'xlsx:records', label: '📗 支出 Excel' },
+    { command: 'json:records', label: '🧾 支出 JSON' },
+    { divided: true, command: 'csv:income',  label: '💰 收入 CSV' },
+    { command: 'xlsx:income', label: '📗 收入 Excel' },
+    { command: 'json:income', label: '🧾 收入 JSON' },
   ]
 })
 
 function onCommand(cmd) {
-  if (cmd.startsWith('csv:')) {
-    const kind = cmd.slice(4)
-    window.open(`/api/export/csv?type=${encodeURIComponent(kind)}`, '_blank')
-    return
-  }
+  // 格式:类型 — csv:records / xlsx:assets / json:income
   if (cmd === 'report:html') {
     if (!props.reportPeriod) {
       ElMessage.warning('请先选择并加载一份月度报告')
       return
     }
     window.open(`/api/export/report.html?period=${encodeURIComponent(props.reportPeriod)}`, '_blank')
+    return
   }
+  const [fmt, kind] = cmd.split(':')
+  if (!fmt || !kind) return
+  window.open(
+    `/api/export?type=${encodeURIComponent(kind)}&format=${encodeURIComponent(fmt)}`,
+    '_blank',
+  )
 }
 </script>

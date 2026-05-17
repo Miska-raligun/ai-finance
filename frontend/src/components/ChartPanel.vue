@@ -51,7 +51,7 @@
             <el-skeleton-item variant="circle" style="width: 200px; height: 200px; margin: 30px auto;" />
           </template>
         </el-skeleton>
-        <VChart v-else :option="incomePieOption" style="height: 280px; width: 100%" autoresize />
+        <VChart theme="animal" v-else :option="incomePieOption" style="height: 280px; width: 100%" autoresize />
       </div>
       <div class="pie-wrap">
         <el-skeleton v-if="loading" animated>
@@ -59,12 +59,12 @@
             <el-skeleton-item variant="circle" style="width: 200px; height: 200px; margin: 30px auto;" />
           </template>
         </el-skeleton>
-        <VChart v-else :option="spendPieOption" style="height: 280px; width: 100%" autoresize />
+        <VChart theme="animal" v-else :option="spendPieOption" style="height: 280px; width: 100%" autoresize />
       </div>
     </div>
 
     <el-skeleton v-if="loading" animated :rows="3" style="margin-top: 12px" />
-    <VChart v-else :option="lineOption" style="height: 280px; width: 100%" autoresize />
+    <VChart theme="animal" v-else :option="lineOption" style="height: 280px; width: 100%" autoresize />
   </el-card>
 </template>
 
