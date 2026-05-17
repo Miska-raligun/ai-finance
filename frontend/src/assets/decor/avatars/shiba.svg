@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+  <!-- 柴犬：账本管理（认真贴心的助理） -->
+  <!-- 三角立耳 -->
+  <polygon points="14,8 22,4 24,18" fill="#e59266"/>
+  <polygon points="50,8 42,4 40,18" fill="#e59266"/>
+  <polygon points="17,11 22,9 22,16" fill="#fff5f0"/>
+  <polygon points="47,11 42,9 42,16" fill="#fff5f0"/>
+  <!-- 圆脸（橘色） -->
+  <ellipse cx="32" cy="36" rx="22" ry="20" fill="#e59266"/>
+  <!-- 脸下白色 -->
+  <path d="M32 28 Q 18 32 24 50 Q 32 56 40 50 Q 46 32 32 28 Z" fill="#fff5f0"/>
+  <!-- 眼睛 -->
+  <ellipse cx="24" cy="34" rx="2.4" ry="3" fill="#3b2419"/>
+  <ellipse cx="40" cy="34" rx="2.4" ry="3" fill="#3b2419"/>
+  <circle cx="25" cy="33" r="0.9" fill="#fff"/>
+  <circle cx="41" cy="33" r="0.9" fill="#fff"/>
+  <!-- 黑鼻 -->
+  <ellipse cx="32" cy="42" rx="2.4" ry="1.7" fill="#3b2419"/>
+  <!-- 微笑嘴 -->
+  <path d="M28 46 Q 32 50 36 46" stroke="#3b2419" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- 腮红 -->
+  <ellipse cx="14" cy="42" rx="2.5" ry="1.5" fill="#fc736d" opacity="0.5"/>
+  <ellipse cx="50" cy="42" rx="2.5" ry="1.5" fill="#fc736d" opacity="0.5"/>
+</svg>

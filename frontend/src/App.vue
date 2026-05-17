@@ -18,19 +18,19 @@
       </div>
       <nav class="side-nav" aria-label="主导航">
         <router-link to="/chat" class="nav-item" :class="{ active: route.path === '/chat' }" :aria-current="route.path === '/chat' ? 'page' : null">
-          <span class="nav-icon" aria-hidden="true">💬</span> 聊天记账
+          <img :src="iconBunny" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 聊天记账
         </router-link>
         <router-link to="/ledger" class="nav-item" :class="{ active: route.path === '/ledger' }" :aria-current="route.path === '/ledger' ? 'page' : null">
-          <span class="nav-icon" aria-hidden="true">📒</span> 账本管理
+          <img :src="iconShiba" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 账本管理
         </router-link>
         <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }" :aria-current="route.path === '/investment' ? 'page' : null">
-          <span class="nav-icon" aria-hidden="true">📈</span> 投资理财
+          <img :src="iconOwl" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 投资理财
         </router-link>
         <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }" :aria-current="route.path === '/reports' ? 'page' : null">
-          <span class="nav-icon" aria-hidden="true">📑</span> 月度报告
+          <img :src="iconBeaver" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 月度报告
         </router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" :aria-current="route.path === '/admin' ? 'page' : null">
-          <span class="nav-icon" aria-hidden="true">🛠</span> 用户管理
+          <img :src="iconFox" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 用户管理
         </router-link>
       </nav>
 
@@ -86,19 +86,19 @@
         </div>
         <nav class="side-nav">
           <router-link to="/chat" class="nav-item" :class="{ active: route.path === '/chat' }" @click="showDrawer=false">
-            <span class="nav-icon">💬</span> 聊天记账
+            <img :src="iconBunny" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 聊天记账
           </router-link>
           <router-link to="/ledger" class="nav-item" :class="{ active: route.path === '/ledger' }" @click="showDrawer=false">
-            <span class="nav-icon">📒</span> 账本管理
+            <img :src="iconShiba" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 账本管理
           </router-link>
           <router-link to="/investment" class="nav-item" :class="{ active: route.path === '/investment' }" @click="showDrawer=false">
-            <span class="nav-icon">📈</span> 投资理财
+            <img :src="iconOwl" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 投资理财
           </router-link>
           <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }" @click="showDrawer=false">
-            <span class="nav-icon">📑</span> 月度报告
+            <img :src="iconBeaver" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 月度报告
           </router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" @click="showDrawer=false">
-            <span class="nav-icon">🛠</span> 用户管理
+            <img :src="iconFox" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 用户管理
           </router-link>
         </nav>
 
@@ -190,6 +190,12 @@ import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount, onErrorC
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+// 原创小动物头像 — 替代 sidebar nav 与 Phone 磁贴的 emoji，避免任天堂版权问题
+import iconBunny from '@/assets/decor/avatars/bunny.svg'
+import iconShiba from '@/assets/decor/avatars/shiba.svg'
+import iconOwl from '@/assets/decor/avatars/owl.svg'
+import iconBeaver from '@/assets/decor/avatars/beaver.svg'
+import iconFox from '@/assets/decor/avatars/fox.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -786,6 +792,24 @@ body {
   font-weight: 700;
 }
 .nav-icon { font-size: 15px; }
+.nav-avatar {
+  width: 28px;
+  height: 28px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  background: #fff;
+  border-radius: 50%;
+  padding: 1px;
+  box-shadow: 0 2px 0 0 var(--shadow-anchor-light);
+  transition: transform 0.2s ease;
+}
+.nav-item.active .nav-avatar {
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 0 0 rgba(0,0,0,0.15);
+}
+.nav-item:hover .nav-avatar {
+  transform: scale(1.1) rotate(-5deg);
+}
 
 .side-footer {
   padding: 14px 10px 0;

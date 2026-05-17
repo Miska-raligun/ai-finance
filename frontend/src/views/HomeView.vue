@@ -16,7 +16,7 @@
         :style="{ background: tile.color, '--i': idx }"
         @click="go(tile.path)"
       >
-        <span class="tile-emoji" aria-hidden="true">{{ tile.emoji }}</span>
+        <img :src="tile.avatar" class="tile-avatar" alt="" aria-hidden="true">
         <span class="tile-label">{{ tile.label }}</span>
       </button>
     </main>
@@ -34,17 +34,22 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import iconBunny from '@/assets/decor/avatars/bunny.svg'
+import iconShiba from '@/assets/decor/avatars/shiba.svg'
+import iconOwl from '@/assets/decor/avatars/owl.svg'
+import iconBeaver from '@/assets/decor/avatars/beaver.svg'
+import iconFox from '@/assets/decor/avatars/fox.svg'
 
 const router = useRouter()
 const userStore = useUserStore()
 
-// NookPhone 13 色调色板里抽出来用作磁贴背景
+// NookPhone 13 色调色板里抽出来用作磁贴背景；avatar 与 sidebar 同款小动物
 const TILES = [
-  { path: '/chat', label: '聊天记账', emoji: '💬', color: '#82d5bb' },
-  { path: '/ledger', label: '账本管理', emoji: '📒', color: '#f7cd67' },
-  { path: '/investment', label: '投资理财', emoji: '📈', color: '#889df0' },
-  { path: '/reports', label: '月度报告', emoji: '📑', color: '#f8a6b2' },
-  { path: '/admin', label: '用户管理', emoji: '🛠', color: '#e59266', adminOnly: true },
+  { path: '/chat',       label: '聊天记账', avatar: iconBunny,  color: '#82d5bb' },
+  { path: '/ledger',     label: '账本管理', avatar: iconShiba,  color: '#f7cd67' },
+  { path: '/investment', label: '投资理财', avatar: iconOwl,    color: '#889df0' },
+  { path: '/reports',    label: '月度报告', avatar: iconBeaver, color: '#f8a6b2' },
+  { path: '/admin',      label: '用户管理', avatar: iconFox,    color: '#e59266', adminOnly: true },
 ]
 
 const visibleTiles = computed(() =>
@@ -136,6 +141,21 @@ function go(path) {
   font-size: 36px;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,0.15));
 }
+.tile-avatar {
+  width: 56px;
+  height: 56px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 50%;
+  padding: 4px;
+  box-shadow: 0 3px 0 0 rgba(0,0,0,0.18);
+  transition: transform 0.25s cubic-bezier(0.25, 1.2, 0.4, 1);
+}
+.phone-tile:hover .tile-avatar {
+  transform: scale(1.08) rotate(-6deg);
+}
+.phone-tile:active .tile-avatar {
+  transform: scale(0.95) rotate(0);
+}
 .tile-label {
   font-size: 13px;
   font-weight: 700;
@@ -173,6 +193,7 @@ function go(path) {
 @media (max-width: 380px) {
   .phone-grid { gap: 12px; }
   .tile-emoji { font-size: 28px; }
+  .tile-avatar { width: 44px; height: 44px; padding: 3px; }
   .tile-label { font-size: 11px; }
 }
 </style>
