@@ -82,6 +82,16 @@ def _set_security_headers(resp):
         resp.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
         )
+
+    # 只读统计 / 报告端点加 30s 浏览器缓存：用户来回切 tab / 切回应用时
+    # 不重发请求（must-revalidate 保证 30s 后会用 If-Modified-Since 重新校验）。
+    # 限定 GET 200，避免给错误响应也缓存了。
+    from flask import request as _req
+    if (resp.status_code == 200 and _req.method == "GET"
+            and _req.path.startswith(("/api/stats/", "/api/reports"))
+            and not _req.path.endswith("/generate")):
+        resp.headers.setdefault("Cache-Control", "private, max-age=30, must-revalidate")
+
     return resp
 
 # 注册 Blueprints

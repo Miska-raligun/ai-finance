@@ -136,10 +136,14 @@
       <button
         v-for="q in quickActions"
         :key="q.label"
-        class="quick-btn"
+        class="quick-card"
+        :style="{ background: q.color }"
         :disabled="loading"
         @click="sendQuick(q.text)"
-      >{{ q.label }}</button>
+      >
+        <img :src="q.avatar" class="quick-avatar" alt="" aria-hidden="true">
+        <span class="quick-text">{{ q.label }}</span>
+      </button>
     </div>
 
     <div class="chat-input animal-pop" :style="{ '--i': 2 }">
@@ -191,16 +195,26 @@ import { useInvestmentStore } from '@/stores/investment'
 import VoiceInput from '@/components/VoiceInput.vue'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
+import iconBunny from '@/assets/decor/avatars/bunny.svg'
+import iconShiba from '@/assets/decor/avatars/shiba.svg'
+import iconOwl from '@/assets/decor/avatars/owl.svg'
+import iconBeaver from '@/assets/decor/avatars/beaver.svg'
 
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
 const chatStore = useChatStore()
 const investmentStore = useInvestmentStore()
 
+// 动物建议卡：每个角色对应一个常用咨询场景
 const quickActions = [
-  { label: '📊 分析本月财务', text: '分析一下我本月的财务状况' },
-  { label: '💡 智能推荐预算', text: '根据我的消费习惯帮我推荐合适的预算' },
-  { label: '💰 查看预算余额', text: '查询本月各分类预算余额' },
+  { label: '本月分析',  text: '分析一下我本月的财务状况',
+    avatar: iconBeaver, color: '#fef3c7' },
+  { label: '推荐预算',  text: '根据我的消费习惯帮我推荐合适的预算',
+    avatar: iconOwl,    color: '#e6f9f6' },
+  { label: '预算余额',  text: '查询本月各分类预算余额',
+    avatar: iconShiba,  color: '#fde4e4' },
+  { label: '存钱建议',  text: '给我一个本月可以省下更多钱的小建议',
+    avatar: iconBunny,  color: '#fce7f3' },
 ]
 function sendQuick(text) {
   userInput.value = text
@@ -576,33 +590,59 @@ onActivated(() => {
 .card-label { color: var(--color-text-muted); }
 .card-value { color: var(--color-text); text-align: right; }
 
-/* 快捷操作 */
+/* 快捷操作 — 动物建议卡片 */
 .quick-actions {
   display: flex;
-  gap: 8px;
-  padding: 0 12px 8px;
+  gap: 10px;
+  padding: 0 12px 10px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .quick-actions::-webkit-scrollbar { display: none; }
-.quick-btn {
+.quick-card {
   flex-shrink: 0;
-  padding: 5px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px 10px;
+  min-width: 78px;
+  border: 2px solid rgba(0,0,0,0.05);
   border-radius: 16px;
-  border: 1px solid var(--color-border);
   background: var(--color-surface);
-  color: var(--color-text);
-  font-size: 12px;
+  color: #3b2419;
+  font-family: inherit;
   cursor: pointer;
+  box-shadow: 0 3px 0 0 var(--shadow-anchor-light);
+  transition: transform 0.18s cubic-bezier(0.25, 1.2, 0.4, 1),
+              box-shadow 0.18s cubic-bezier(0.25, 1.2, 0.4, 1);
+}
+.quick-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 0 var(--shadow-anchor);
+}
+.quick-card:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 0 var(--shadow-anchor);
+}
+.quick-card:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.quick-avatar {
+  width: 36px;
+  height: 36px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 50%;
+  padding: 2px;
+}
+.quick-card:hover:not(:disabled) .quick-avatar {
+  animation: animal-wobble 0.6s ease;
+}
+.quick-text {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.quick-btn:hover:not(:disabled) {
-  background: var(--color-primary-light);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-.quick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* 图片消息 */
 .chat-image {

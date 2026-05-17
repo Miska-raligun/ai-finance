@@ -5,6 +5,17 @@
       <ExportMenu scope="ledger" />
     </div>
 
+    <!-- 本月成就 / 警示 banner —— 数据驱动 -->
+    <transition name="badge">
+      <div v-if="banner" :class="['ledger-banner', banner.level]">
+        <img :src="banner.avatar" class="banner-avatar" alt="" aria-hidden="true">
+        <div class="banner-body">
+          <div class="banner-title">{{ banner.title }}</div>
+          <div v-if="banner.detail" class="banner-detail">{{ banner.detail }}</div>
+        </div>
+      </div>
+    </transition>
+
     <!-- 记录表格 Tab -->
     <div class="section-card animal-pop" :style="{ '--i': 0 }">
       <el-tabs v-model="activeTab">
@@ -50,11 +61,92 @@ import ExportMenu from '@/components/ExportMenu.vue'
 import RecurringRules from '@/components/RecurringRules.vue'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
+import api from '@/api'
+import iconBeaver from '@/assets/decor/avatars/beaver.svg'
+import iconShiba from '@/assets/decor/avatars/shiba.svg'
+import iconFox from '@/assets/decor/avatars/fox.svg'
+import iconOwl from '@/assets/decor/avatars/owl.svg'
 
 const activeTab = ref('expense')
 const router = useRouter()
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
+
+// 本月成就 / 警示 banner
+// 优先级：超预算 > 接近预算 > 比上月省更多 > 收支健康
+// 数据源：/api/stats/comparison（本月 vs 上月）+ /api/budgets + 本月支出
+const banner = ref(null)
+
+async function computeBanner() {
+  try {
+    const month = new Date().toISOString().slice(0, 7)
+    const [bRes, sRes, cRes] = await Promise.all([
+      api.get('/api/budgets', { params: { month }, silent: true }).catch(() => null),
+      api.get('/api/stats/by-category', { params: { month }, silent: true }).catch(() => null),
+      api.get('/api/stats/comparison', { params: { month }, silent: true }).catch(() => null),
+    ])
+    const budgets = bRes?.data || []
+    const spendMap = {}
+    ;(sRes?.data || []).forEach(r => { if (r['类型'] === '支出') spendMap[r['名称']] = r['金额'] })
+
+    // 找出超预算 / 接近预算的分类
+    let over = null      // {category, budget, spent, pct}
+    let warn = null
+    for (const b of budgets) {
+      const spent = spendMap[b.category] || 0
+      if (!b.amount || b.amount <= 0) continue
+      const pct = spent / b.amount * 100
+      if (pct >= 100 && (!over || pct > over.pct)) over = { ...b, spent, pct }
+      else if (pct >= 80 && pct < 100 && (!warn || pct > warn.pct)) warn = { ...b, spent, pct }
+    }
+    if (over) {
+      banner.value = {
+        level: 'over',
+        avatar: iconFox,
+        title: `🚨 「${over.category}」超预算了！`,
+        detail: `本月预算 ¥${over.amount}，已花 ¥${over.spent.toFixed(2)}（${over.pct.toFixed(0)}%），超出 ¥${(over.spent - over.amount).toFixed(2)}`,
+      }
+      return
+    }
+    if (warn) {
+      banner.value = {
+        level: 'warn',
+        avatar: iconBeaver,
+        title: `⚠️ 「${warn.category}」已用 ${warn.pct.toFixed(0)}%`,
+        detail: `本月预算 ¥${warn.amount}，已花 ¥${warn.spent.toFixed(2)}，剩 ¥${(warn.amount - warn.spent).toFixed(2)}`,
+      }
+      return
+    }
+
+    // 没有警示 → 看是否比上月省得多
+    const expense = cRes?.data?.expense
+    if (expense && expense.previous > 0 && expense.change < -50) {
+      const savedPct = Math.abs(expense.change_pct).toFixed(0)
+      banner.value = {
+        level: 'good',
+        avatar: iconShiba,
+        title: `🎉 本月支出比上月省了 ${savedPct}%`,
+        detail: `已支出 ¥${expense.current.toFixed(2)}（上月 ¥${expense.previous.toFixed(2)}），继续保持～`,
+      }
+      return
+    }
+
+    // 收支健康提示（只在数据存在时）
+    const balance = cRes?.data?.balance
+    if (balance && balance.current > 0) {
+      banner.value = {
+        level: 'info',
+        avatar: iconOwl,
+        title: `🌱 本月净结余 +¥${balance.current.toFixed(2)}`,
+        detail: '收支健康，记得按时设置预算 / 调整目标。',
+      }
+      return
+    }
+    banner.value = null
+  } catch {
+    banner.value = null
+  }
+}
 
 // 切回账本时刷新数据（refreshCounter 变化驱动 RecordTable / ChartPanel /
 // BudgetAndCategoryPanel 重拉）。但 keep-alive 下用户来回切页面会反复触发，
@@ -65,9 +157,14 @@ function bumpThrottled() {
   if (now - _lastBumpAt < 10_000) return
   _lastBumpAt = now
   categoryStore.bumpRefresh()
+  computeBanner()  // 数据可能变了，刷新成就 / 警示
 }
 
-onActivated(bumpThrottled)
+onActivated(() => {
+  bumpThrottled()
+  // 首次激活也算
+  if (!banner.value) computeBanner()
+})
 
 function onVisibilityChange() {
   if (document.visibilityState === 'visible') {
@@ -80,6 +177,7 @@ function onVisibilityChange() {
 onMounted(() => {
   if (!userStore.username) router.push('/login')
   document.addEventListener('visibilitychange', onVisibilityChange)
+  computeBanner()
 })
 
 onUnmounted(() => {
@@ -88,6 +186,71 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 本月成就 / 警示 banner */
+.ledger-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-radius: 16px;
+  border: 2px solid transparent;
+  box-shadow: 0 3px 0 0 var(--shadow-anchor-light);
+  font-family: inherit;
+}
+.ledger-banner.over {
+  background: #fde4e4;
+  border-color: var(--color-error);
+  color: var(--color-error-active);
+  animation: banner-pulse 1.6s ease-in-out infinite;
+}
+.ledger-banner.warn {
+  background: #fef3c7;
+  border-color: var(--color-warning);
+  color: #92580d;
+}
+.ledger-banner.good {
+  background: #e8f5d8;
+  border-color: var(--color-success);
+  color: var(--color-success-active);
+}
+.ledger-banner.info {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary-dark);
+}
+@keyframes banner-pulse {
+  0%, 100% { box-shadow: 0 3px 0 0 var(--shadow-anchor-light); }
+  50%      { box-shadow: 0 3px 0 0 var(--shadow-anchor-light), 0 0 0 4px rgba(224, 90, 90, 0.18); }
+}
+.banner-avatar {
+  width: 42px;
+  height: 42px;
+  background: rgba(255,255,255,0.7);
+  border-radius: 50%;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.banner-body { flex: 1; min-width: 0; }
+.banner-title {
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+.banner-detail {
+  font-size: 12px;
+  color: var(--color-text);
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+/* banner transition */
+.badge-enter-active { animation: badge-pop 0.45s cubic-bezier(0.25, 1.2, 0.4, 1); }
+.badge-leave-active { animation: badge-pop 0.2s reverse ease-out; }
+@keyframes badge-pop {
+  0% { opacity: 0; transform: scale(0.9) translateY(-6px); }
+  100% { opacity: 1; transform: none; }
+}
+
 .ledger-page {
   display: flex;
   flex-direction: column;
