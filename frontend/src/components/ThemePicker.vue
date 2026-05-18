@@ -21,8 +21,11 @@
       </button>
     </div>
     <div class="theme-foot">
-      <el-checkbox v-model="auto" @change="onAutoChange">
-        按季节自动切换（3-5 春樱 / 6-8 夏海 / 9-11 秋叶 / 12-2 冬雪）
+      <el-checkbox v-model="auto" @change="onAutoChange" class="theme-auto-cb">
+        <span class="auto-label">
+          <span class="auto-title">按季节自动切换</span>
+          <span class="auto-detail">3-5 春樱 · 6-8 夏海 · 9-11 秋叶 · 12-2 冬雪</span>
+        </span>
       </el-checkbox>
     </div>
   </el-dialog>
@@ -141,6 +144,8 @@ setTheme(stored, false)
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
 }
 .theme-check {
   position: absolute;
@@ -155,5 +160,44 @@ setTheme(stored, false)
   padding-top: 12px;
   border-top: 1px solid var(--color-border-light);
   font-size: 13px;
+}
+
+/* 让 checkbox 内部允许两行：标题 + 详细描述 */
+.theme-auto-cb :deep(.el-checkbox__label) {
+  white-space: normal;
+  line-height: 1.4;
+}
+.auto-label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.auto-title {
+  font-weight: 700;
+  color: var(--color-text);
+}
+.auto-detail {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+/* 移动端：磁贴更小、文字更紧凑，让 2 列也能放下 */
+@media (max-width: 480px) {
+  .theme-list {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .theme-card {
+    padding: 14px 8px;
+    min-height: 78px;
+    border-radius: 14px;
+  }
+  .theme-emoji { font-size: 20px; }
+  .theme-name {
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+  .auto-detail { font-size: 10px; }
 }
 </style>

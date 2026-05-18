@@ -10,7 +10,7 @@
           value-format="YYYY-MM"
           size="small"
           @change="fetchData"
-          style="width: 150px"
+          class="sk-date-picker"
         />
       </div>
     </template>
@@ -27,13 +27,13 @@
       theme="animal"
       :option="option"
       autoresize
-      style="width: 100%; height: 280px"
+      :style="{ width: '100%', height: chartHeight + 'px' }"
     />
   </el-card>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import api from '@/api'
 import { use } from 'echarts/core'
 import VChart from 'vue-echarts'
@@ -50,6 +50,20 @@ const month = ref(new Date().toISOString().slice(0, 7))
 const loading = ref(false)
 const income = ref([])   // [{名称, 金额, 类型: '收入'}]
 const expense = ref([])
+
+// 手机端：图加高 + 字号缩小 + 留更小 right padding 防止标签被截
+const _mq = window.matchMedia('(max-width: 768px)')
+const isMobile = ref(_mq.matches)
+function _onMq(e) { isMobile.value = e.matches }
+onMounted(() => _mq.addEventListener('change', _onMq))
+onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
+
+const chartHeight = computed(() => {
+  if (!isMobile.value) return 280
+  // 节点越多越高，给标签留空间
+  const n = income.value.length + expense.value.length
+  return Math.min(420, Math.max(300, 240 + n * 16))
+})
 
 const totalIncome = computed(() => income.value.reduce((s, x) => s + x['金额'], 0))
 const totalExpense = computed(() => expense.value.reduce((s, x) => s + x['金额'], 0))
@@ -113,13 +127,14 @@ const option = computed(() => {
       links,
       layout: 'none',
       orient: 'horizontal',
-      left: 6,
-      right: 70,
+      // 移动端两侧标签更紧凑、节点更细，避免最右侧标签被裁剪
+      left: isMobile.value ? 36 : 6,
+      right: isMobile.value ? 46 : 70,
       top: 14,
       bottom: 14,
       nodeAlign: 'justify',
-      nodeWidth: 14,
-      nodeGap: 8,
+      nodeWidth: isMobile.value ? 10 : 14,
+      nodeGap: isMobile.value ? 6 : 8,
       lineStyle: {
         color: 'gradient',
         curveness: 0.55,
@@ -128,8 +143,13 @@ const option = computed(() => {
       label: {
         color: '#725d42',
         fontWeight: 600,
-        fontSize: 11,
-        formatter: (p) => p.name.replace(/\s+$/, ''),  // 去掉空格后缀
+        fontSize: isMobile.value ? 10 : 11,
+        // 移动端长名截断 + 中间标签居中靠节点放，防止跑出画布
+        formatter: (p) => {
+          const name = p.name.replace(/\s+$/, '')
+          if (isMobile.value && name.length > 5) return name.slice(0, 4) + '…'
+          return name
+        },
       },
       emphasis: { focus: 'adjacency' },
     }],
@@ -166,11 +186,31 @@ watch(() => props.refreshFlag, fetchData)
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.sk-header > span {
+  font-weight: 800;
+  white-space: nowrap;
 }
 .sk-loading {
   text-align: center;
   padding: 80px 0;
   color: var(--color-text-muted);
   font-size: 13px;
+}
+.sk-date-picker {
+  width: 150px;
+}
+
+/* 移动端：标题与月份选择器分行，月份选择器占满整行 */
+@media (max-width: 480px) {
+  .sk-header { gap: 6px; }
+  .sk-date-picker {
+    width: 100%;
+  }
+  .sk-header :deep(.el-input__wrapper) {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
 }
 </style>
