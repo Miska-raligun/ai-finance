@@ -210,9 +210,14 @@
             </div>
             <div v-if="historyLoading" class="asset-history-loading">加载中...</div>
             <div v-else-if="!historyPoints.length" class="asset-history-empty">
-              暂无历史数据 — 点页面顶部「🔄 刷新行情」会写入一条快照
+              还没记录到走势 — 试试刷新行情或修改一下市值，会自动写入一条快照。
             </div>
-            <canvas v-else ref="historyChartRef" class="asset-history-chart"></canvas>
+            <template v-else>
+              <canvas ref="historyChartRef" class="asset-history-chart"></canvas>
+              <div v-if="historyPoints.length < 3" class="asset-history-note">
+                目前只有 {{ historyPoints.length }} 个数据点；多更新几次行情后曲线会更顺滑。
+              </div>
+            </template>
           </div>
         </div>
         <div class="drawer-footer drawer-footer-actions">
@@ -615,8 +620,12 @@ async function loadHistory(row) {
 function renderHistoryChart() {
   if (!historyChartRef.value || !historyPoints.value.length) return
   if (historyChart) { historyChart.destroy(); historyChart = null }
-  const labels = historyPoints.value.map(p => p.recorded_at.slice(5, 10))  // MM-DD
-  const data = historyPoints.value.map(p => p.value)
+  // 1 个点时画不出线段：复制一份让 chart 显示一条水平短线
+  const src = historyPoints.value.length === 1
+    ? [historyPoints.value[0], historyPoints.value[0]]
+    : historyPoints.value
+  const labels = src.map(p => (p.recorded_at || '').slice(5, 10) || '—')
+  const data = src.map(p => p.value)
   historyChart = new Chart(historyChartRef.value.getContext('2d'), {
     type: 'line',
     data: {
@@ -628,7 +637,7 @@ function renderHistoryChart() {
         backgroundColor: 'rgba(25, 200, 185, 0.15)',
         tension: 0.35,
         fill: true,
-        pointRadius: 3,
+        pointRadius: 4,
         pointBackgroundColor: '#11a89b',
       }],
     },
@@ -1030,6 +1039,16 @@ function formatTime(iso) {
   color: var(--color-text-muted);
   text-align: center;
   padding: 22px 0;
+}
+.asset-history-note {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-align: center;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: var(--color-surface-2);
+  border-radius: 8px;
+  display: inline-block;
 }
 
 .drawer-footer {

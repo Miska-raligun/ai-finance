@@ -157,6 +157,9 @@ def sell_asset(db, user_id: int, asset_id: int, *,
             "updated_at = ? WHERE id = ? AND user_id = ?",
             (new_holdings, new_cost, new_value, _now_iso(), asset_id, user_id),
         )
+        # 部分卖出后市值变化也写入历史，保证 /history 折线连续
+        from services.asset_history import snapshot
+        snapshot(db, user_id, asset_id, new_value)
 
     db.commit()
     return {

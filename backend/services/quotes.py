@@ -352,28 +352,16 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
 def _apply_new_value(db, user_id: int, asset_id: int, new_value: float) -> None:
     """更新 assets.current_value + 同步写一条 asset_value_history 快照。
 
-    历史快照的目的：让 /api/investment/assets/<id>/history 能画出市值走势。
-    去重策略：同一天内同一 asset_id 多次刷新只保留最后一条（按 asset_id+day
-    upsert），避免行情接口被高频调用时表膨胀。
+    历史快照逻辑被 services/asset_history.snapshot 抽走，让所有改 current_value
+    的入口（create / update / sell / refresh-prices）共用一处去重 / 写入逻辑。
     """
+    from services.asset_history import snapshot
     now = _iso_now()
     db.execute(
         "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
         (new_value, now, asset_id),
     )
-    today = now[:10]
-    # 同一资产 + 同一天若已有记录则更新，否则插入
-    cur = db.execute(
-        "UPDATE asset_value_history SET value = ?, recorded_at = ? "
-        "WHERE asset_id = ? AND substr(recorded_at, 1, 10) = ?",
-        (new_value, now, asset_id, today),
-    )
-    if cur.rowcount == 0:
-        db.execute(
-            "INSERT INTO asset_value_history (user_id, asset_id, value, recorded_at) "
-            "VALUES (?, ?, ?, ?)",
-            (user_id, asset_id, new_value, now),
-        )
+    snapshot(db, user_id, asset_id, new_value, recorded_at=now)
 
 
 def _iso_now() -> str:

@@ -64,6 +64,10 @@ def create_asset():
                 now_iso(), now_iso(),
             ),
         )
+        # 立即写一条历史"起点"，让 /history 端点至少有一个数据点
+        if current_value > 0:
+            from services.asset_history import snapshot
+            snapshot(db, g.user_id, cur.lastrowid, current_value)
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": f"资产「{name}」已存在，请换个名称或编辑已有资产"}), 409
@@ -93,6 +97,15 @@ def update_asset(asset_id: int):
     values = list(updates.values()) + [now_iso(), asset_id, g.user_id]
     try:
         db.execute(f"UPDATE assets SET {sets} WHERE id = ? AND user_id = ?", values)
+        # 用户改动了 current_value（手填资产场景）→ 写一条历史快照
+        if "current_value" in updates:
+            try:
+                v = float(updates["current_value"])
+                if v > 0:
+                    from services.asset_history import snapshot
+                    snapshot(db, g.user_id, asset_id, v)
+            except (TypeError, ValueError):
+                pass
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": "资产名称与已有资产重复"}), 409
@@ -145,7 +158,8 @@ def asset_history(asset_id: int):
     db = get_db()
     # 鉴权：只允许访问自己的资产
     owns = db.execute(
-        "SELECT id, name FROM assets WHERE id = ? AND user_id = ?",
+        "SELECT id, name, cost_basis, current_value, created_at "
+        "FROM assets WHERE id = ? AND user_id = ?",
         (asset_id, g.user_id),
     ).fetchone()
     if not owns:
@@ -158,11 +172,31 @@ def asset_history(asset_id: int):
         "ORDER BY recorded_at ASC",
         (asset_id, g.user_id, f"-{days} days"),
     ).fetchall()
+    points = [{"value": r["value"], "recorded_at": r["recorded_at"]} for r in rows]
+
+    # Fallback：旧资产从未写过 history（早期 refresh 才写，create/update 没写过），
+    # 用 cost_basis 作入场起点 + current_value 作当下点，至少画一条线段。
+    # 顺手补一条 snapshot 进表，下次访问就有真实历史数据了。
+    if not points and (owns["current_value"] or 0) > 0:
+        from datetime import datetime as _dt
+        from services.asset_history import snapshot
+        cost = float(owns["cost_basis"] or 0)
+        cur_v = float(owns["current_value"] or 0)
+        created = owns["created_at"]
+        now_str = _dt.now().isoformat(timespec="seconds")
+        synthetic = []
+        if cost > 0 and created and created[:10] != now_str[:10]:
+            synthetic.append({"value": cost, "recorded_at": created})
+        synthetic.append({"value": cur_v, "recorded_at": now_str})
+        points = synthetic
+        snapshot(db, g.user_id, asset_id, cur_v)
+        db.commit()
+
     return jsonify({
         "asset_id": asset_id,
         "asset_name": owns["name"],
         "days": days,
-        "points": [{"value": r["value"], "recorded_at": r["recorded_at"]} for r in rows],
+        "points": points,
     })
 
 
