@@ -325,3 +325,44 @@ def _daily_stats_compute(month):
         })
 
     return result
+
+
+@stats_bp.route("/api/stats/calendar")
+@login_required
+def calendar_stats():
+    """日历热力图数据：过去 N 天每天的支出/收入。
+
+    Query: days = 90 | 180 | 365 (clamp 30..730)
+    返回 [{date, expense, income}]，按日期升序。
+    """
+    try:
+        days = int(request.args.get("days", 90))
+    except (TypeError, ValueError):
+        days = 90
+    days = max(30, min(730, days))
+
+    db = get_db()
+    spend_rows = db.execute(
+        "SELECT date, SUM(amount) AS total FROM records "
+        "WHERE user_id = ? AND date >= date('now', ?) "
+        "GROUP BY date",
+        (g.user_id, f"-{days} days"),
+    ).fetchall()
+    income_rows = db.execute(
+        "SELECT date, SUM(amount) AS total FROM income "
+        "WHERE user_id = ? AND date >= date('now', ?) "
+        "GROUP BY date",
+        (g.user_id, f"-{days} days"),
+    ).fetchall()
+    spend = {r["date"]: float(r["total"]) for r in spend_rows}
+    income = {r["date"]: float(r["total"]) for r in income_rows}
+    all_dates = sorted(set(spend) | set(income))
+    return jsonify({
+        "days": days,
+        "data": [
+            {"date": d,
+             "expense": round(spend.get(d, 0.0), 2),
+             "income": round(income.get(d, 0.0), 2)}
+            for d in all_dates
+        ],
+    })

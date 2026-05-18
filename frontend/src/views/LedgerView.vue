@@ -48,6 +48,16 @@
         <ChartPanel :refresh-flag="categoryStore.refreshCounter" />
       </div>
     </div>
+
+    <!-- 进阶视图：日历热力 + 收支桑基 -->
+    <div class="ledger-viz-extra">
+      <div class="animal-pop" :style="{ '--i': 3 }">
+        <SpendCalendar :refresh-flag="categoryStore.refreshCounter" />
+      </div>
+      <div class="animal-pop" :style="{ '--i': 4 }">
+        <IncomeSankey :refresh-flag="categoryStore.refreshCounter" />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -59,6 +69,8 @@ import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 import ExportMenu from '@/components/ExportMenu.vue'
 import RecurringRules from '@/components/RecurringRules.vue'
+import SpendCalendar from '@/components/SpendCalendar.vue'
+import IncomeSankey from '@/components/IncomeSankey.vue'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 import api from '@/api'
@@ -287,6 +299,16 @@ onUnmounted(() => {
 }
 .ledger-col-left { flex: 1; min-width: 0; }
 .ledger-col-right { flex: 2; min-width: 0; }
+
+/* 进阶视图：日历热力 + 桑基图，桌面端两列，移动端纵向 */
+.ledger-viz-extra {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 900px) {
+  .ledger-viz-extra { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 768px) {
   .ledger-layout {
