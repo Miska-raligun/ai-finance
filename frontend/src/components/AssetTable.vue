@@ -604,17 +604,21 @@ function canShowHistory(row) {
 async function loadHistory(row) {
   if (!row?.id) return
   historyLoading.value = true
+  let points = []
   try {
     const res = await api.get(`/api/investment/assets/${row.id}/history`,
                               { params: { days: historyDays.value } })
-    historyPoints.value = res.data?.points || []
-    await nextTick()
-    renderHistoryChart()
+    points = res.data?.points || []
   } catch {
-    historyPoints.value = []
-  } finally {
-    historyLoading.value = false
+    points = []
   }
+  // 关键顺序：先把 loading 切 false 让 canvas 进入 DOM，再 nextTick + render
+  // 否则 chart.js 会 attach 到一个 v-if 还没渲染出来的 canvas（ref=null），
+  // 表现为"图表面积空白"。
+  historyPoints.value = points
+  historyLoading.value = false
+  await nextTick()
+  renderHistoryChart()
 }
 
 function renderHistoryChart() {
