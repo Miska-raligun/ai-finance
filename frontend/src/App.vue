@@ -62,6 +62,7 @@
           <div class="user-name">{{ username }}</div>
         </div>
         <div class="side-actions">
+          <button class="side-btn" @click="showThemePicker = true">🎨 主题</button>
           <button class="side-btn" @click="openConfigPanel">⚙️ 模型配置</button>
           <button class="side-btn danger" @click="logout">🚪 退出登录</button>
         </div>
@@ -122,6 +123,7 @@
             <div class="user-name">{{ username }}</div>
           </div>
           <div class="side-actions">
+            <button class="side-btn" @click="showThemePicker = true; showDrawer=false">🎨 主题</button>
             <button class="side-btn" @click="openConfigPanel(); showDrawer=false">⚙️ 模型配置</button>
             <button class="side-btn danger" @click="logout">🚪 退出登录</button>
           </div>
@@ -179,6 +181,9 @@
             <el-button type="primary" @click="saveConfig">保存配置</el-button>
           </template>
         </el-dialog>
+
+        <!-- 主题切换器 -->
+        <ThemePicker v-model="showThemePicker" />
       </el-main>
     </el-container>
   </el-container>
@@ -196,6 +201,7 @@ import iconShiba from '@/assets/decor/avatars/shiba.svg'
 import iconOwl from '@/assets/decor/avatars/owl.svg'
 import iconBeaver from '@/assets/decor/avatars/beaver.svg'
 import iconFox from '@/assets/decor/avatars/fox.svg'
+import ThemePicker from '@/components/ThemePicker.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -216,6 +222,7 @@ const topbarTitle = computed(() => {
 
 const active = ref(route.path)
 const showConfig = ref(false)
+const showThemePicker = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')

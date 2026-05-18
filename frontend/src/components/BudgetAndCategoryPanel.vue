@@ -1,6 +1,11 @@
 <template>
   <el-card>
-    <template #header>预算 &amp; 分类管理</template>
+    <template #header>
+      <div class="bp-header">
+        <span>预算 &amp; 分类管理</span>
+        <el-button size="small" plain @click="openCalibrate">🤖 AI 校准建议</el-button>
+      </div>
+    </template>
 
     <!-- 月份选择 -->
     <div class="section-label">选择月份</div>
@@ -70,11 +75,89 @@
       </el-tab-pane>
     </el-tabs>
   </el-card>
+
+  <!-- AI 预算校准对话框 -->
+  <el-dialog
+    v-model="calibrate.visible"
+    title="🤖 AI 预算校准"
+    :width="dialogWidth"
+    append-to-body
+  >
+    <div class="cal-form">
+      <div class="cal-form-row">
+        <label>目标月份：</label>
+        <el-date-picker
+          v-model="calibrate.month"
+          type="month" value-format="YYYY-MM"
+          size="small" style="width: 140px"
+          @change="loadCalibration"
+        />
+        <label style="margin-left: 12px">缓冲系数：</label>
+        <el-input-number
+          v-model="calibrate.inflation"
+          :min="1.0" :max="2.0" :step="0.05" :precision="2"
+          size="small" controls-position="right"
+          style="width: 110px"
+          @change="loadCalibration"
+        />
+      </div>
+      <div class="cal-hint">
+        基于过去 3 个月该分类的实际平均支出 × 缓冲系数。系数 1.05 表示在均值上留 5% 余量。
+      </div>
+    </div>
+
+    <div v-if="calibrate.loading" class="cal-loading">分析中…</div>
+    <div v-else-if="!calibrate.items.length" class="cal-empty">
+      过去 3 个月没有足够的支出数据用来给出建议。再多记几笔吧～
+    </div>
+    <el-table v-else :data="calibrate.items" size="small" max-height="320" @selection-change="onCalSelChange">
+      <el-table-column type="selection" width="40" />
+      <el-table-column prop="category" label="分类" min-width="100" />
+      <el-table-column label="3 月均值" align="right" width="100">
+        <template #default="{ row }">¥{{ row.avg_spend_3m.toFixed(2) }}</template>
+      </el-table-column>
+      <el-table-column label="当前预算" align="right" width="100">
+        <template #default="{ row }">
+          <span v-if="row.current_budget">¥{{ row.current_budget.toFixed(2) }}</span>
+          <span v-else class="cal-muted">未设</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="建议" align="right" width="100">
+        <template #default="{ row }">
+          <span class="cal-sugg">¥{{ row.suggested_budget.toFixed(2) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="变化" align="right" width="80">
+        <template #default="{ row }">
+          <span v-if="row.delta_pct !== null"
+                :class="row.delta_pct > 0 ? 'cal-up' : row.delta_pct < 0 ? 'cal-down' : ''">
+            {{ row.delta_pct > 0 ? '+' : '' }}{{ row.delta_pct }}%
+          </span>
+          <span v-else class="cal-muted">—</span>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <div class="cal-total">
+      <span class="cal-muted">合计建议预算</span>
+      <strong>¥{{ calibrate.total.toFixed(2) }}</strong>
+    </div>
+
+    <template #footer>
+      <el-button @click="calibrate.visible = false">取消</el-button>
+      <el-button type="primary"
+                 :disabled="!calibrate.selected.length"
+                 :loading="calibrate.applying"
+                 @click="applyCalibration">
+        采纳 {{ calibrate.selected.length }} 条
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import api from '@/api'
@@ -83,6 +166,86 @@ import { useCategoryStore } from '@/stores/categories'
 
 const categoryStore = useCategoryStore()
 const { refreshCounter } = storeToRefs(categoryStore)
+
+// ===== AI 预算校准 =====
+const _mq = window.matchMedia('(max-width: 768px)')
+const _isMobile = ref(_mq.matches)
+function _onMq(e) { _isMobile.value = e.matches }
+onMounted(() => _mq.addEventListener('change', _onMq))
+onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
+const dialogWidth = computed(() => _isMobile.value ? 'calc(100vw - 24px)' : '640px')
+
+function _nextMonth(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+}
+
+const calibrate = reactive({
+  visible: false,
+  loading: false,
+  applying: false,
+  month: '',
+  inflation: 1.05,
+  items: [],
+  total: 0,
+  selected: [],
+})
+
+function openCalibrate() {
+  // 默认建议"当前选中月份的下个月"——通常用户在月底设下月预算
+  const base = (typeof selectedMonth !== 'undefined' && selectedMonth.value)
+               || new Date().toISOString().slice(0, 7)
+  calibrate.month = _nextMonth(base)
+  calibrate.visible = true
+  loadCalibration()
+}
+
+async function loadCalibration() {
+  if (!calibrate.month) return
+  calibrate.loading = true
+  try {
+    const res = await api.get('/api/budgets/calibrate', {
+      params: { month: calibrate.month, inflation: calibrate.inflation },
+      silent: true,
+    })
+    calibrate.items = res.data?.items || []
+    calibrate.total = res.data?.total_suggested || 0
+  } catch {
+    calibrate.items = []
+    calibrate.total = 0
+  } finally {
+    calibrate.loading = false
+  }
+}
+
+function onCalSelChange(rows) {
+  calibrate.selected = rows
+}
+
+async function applyCalibration() {
+  if (!calibrate.selected.length) return
+  calibrate.applying = true
+  try {
+    const res = await api.post('/api/budgets/calibrate/apply', {
+      month: calibrate.month,
+      items: calibrate.selected.map(r => ({
+        category: r.category,
+        suggested_budget: r.suggested_budget,
+      })),
+    })
+    ElMessage.success(`已采纳 ${res.data?.applied || 0} 条建议预算到 ${calibrate.month}`)
+    calibrate.visible = false
+    // 如果用户选中月份正是 target，则刷新预算列表
+    if (selectedMonth.value === calibrate.month) {
+      await fetchBudgets()
+    }
+    categoryStore.bumpRefresh()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '应用失败')
+  } finally {
+    calibrate.applying = false
+  }
+}
 // 支出分类从 store 派生，CategoryManager 更新后自动响应
 const expenseCategories = computed(() => categoryStore.expenseNames)
 
@@ -152,6 +315,59 @@ watch(refreshCounter, fetchBudgets)
 </script>
 
 <style scoped>
+/* AI 预算校准 */
+.bp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.cal-form {
+  background: var(--color-surface-2);
+  padding: 12px 14px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.cal-form-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cal-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+.cal-loading, .cal-empty {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+.cal-sugg { color: var(--color-primary-dark); font-weight: 700; }
+.cal-muted { color: var(--color-text-muted); }
+.cal-up { color: var(--color-up); font-weight: 600; }
+.cal-down { color: var(--color-down); font-weight: 600; }
+.cal-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: var(--color-primary-light);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.cal-total strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+  font-variant-numeric: tabular-nums;
+}
+
 .section-label {
   font-size: 12px;
   font-weight: 600;

@@ -134,3 +134,128 @@ def delete_budget_manual():
     )
     db.commit()
     return jsonify({"success": True})
+
+
+@budgets_bp.route('/api/budgets/calibrate', methods=['GET'])
+@login_required
+def calibrate_budgets():
+    """基于过去 3 个月的平均消费，建议下月每个分类的预算。
+
+    公式：建议预算 = ceil(round(过去 3 个月该分类总支出 / 实际月数, 0) * inflation)
+    inflation = 1.05（默认 5% 缓冲，应对偶发大额支出）
+
+    Query: month=YYYY-MM 默认本月+1（即下月）；inflation=float 默认 1.05
+
+    返回 {target_month, items: [{category, avg_spend_3m, current_budget,
+    suggested_budget, delta_pct}], total_suggested}
+    """
+    import math
+    target = (request.args.get("month") or "").strip()
+    if not target:
+        # 默认建议"下月"
+        today = datetime.now()
+        year, mon = today.year, today.month
+        target = f"{year + 1}-01" if mon == 12 else f"{year}-{mon + 1:02d}"
+    if len(target) != 7:
+        return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
+
+    try:
+        infl = float(request.args.get("inflation") or 1.05)
+    except (TypeError, ValueError):
+        infl = 1.05
+    infl = max(0.5, min(infl, 2.0))  # clamp 防止滥用
+
+    db = get_db()
+    # 过去 3 个完整月（不含 target 当月）
+    rows = db.execute(
+        """
+        SELECT category,
+               SUM(amount) AS total,
+               COUNT(DISTINCT strftime('%Y-%m', date)) AS active_months
+        FROM records
+        WHERE user_id = ?
+          AND strftime('%Y-%m', date) < ?
+          AND strftime('%Y-%m', date) >= strftime('%Y-%m', date(?, '-3 months'))
+        GROUP BY category
+        ORDER BY total DESC
+        """,
+        (g.user_id, target, target + "-01"),
+    ).fetchall()
+
+    # 当前 target 月已有预算
+    current_budgets = {
+        r["category"]: float(r["amount"])
+        for r in db.execute(
+            "SELECT category, amount FROM budgets WHERE user_id = ? AND month = ?",
+            (g.user_id, target),
+        ).fetchall()
+    }
+
+    items = []
+    total_suggested = 0.0
+    for r in rows:
+        active = max(1, int(r["active_months"] or 1))
+        avg = float(r["total"]) / active
+        suggested = math.ceil(avg * infl)
+        current = current_budgets.get(r["category"], 0)
+        delta_pct = None
+        if current > 0:
+            delta_pct = round((suggested - current) / current * 100, 1)
+        items.append({
+            "category": r["category"],
+            "avg_spend_3m": round(avg, 2),
+            "active_months": active,
+            "current_budget": current,
+            "suggested_budget": suggested,
+            "delta_pct": delta_pct,
+        })
+        total_suggested += suggested
+
+    return jsonify({
+        "target_month": target,
+        "inflation": infl,
+        "items": items,
+        "total_suggested": round(total_suggested, 2),
+    })
+
+
+@budgets_bp.route('/api/budgets/calibrate/apply', methods=['POST'])
+@login_required
+def apply_calibration():
+    """批量应用一组建议预算到指定月份。
+
+    Body: {month, items: [{category, suggested_budget}]}
+    """
+    data = request.get_json() or {}
+    month = (data.get("month") or "").strip()
+    items = data.get("items") or []
+    if len(month) != 7:
+        return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "items 必须是非空列表"}), 400
+
+    db = get_db()
+    applied = 0
+    for it in items:
+        cat = (it.get("category") or "").strip()
+        try:
+            amt = float(it.get("suggested_budget") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not cat or amt <= 0:
+            continue
+        # 分类不存在则跳过（避免静默建错分类）
+        ok = db.execute(
+            "SELECT 1 FROM categories WHERE user_id = ? AND name = ? AND type = ?",
+            (g.user_id, cat, CATEGORY_EXPENSE),
+        ).fetchone()
+        if not ok:
+            continue
+        db.execute(
+            "INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month) "
+            "VALUES (?, ?, ?, '月', ?)",
+            (g.user_id, cat, amt, month),
+        )
+        applied += 1
+    db.commit()
+    return jsonify({"success": True, "applied": applied, "month": month})

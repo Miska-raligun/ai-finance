@@ -7,6 +7,28 @@ import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 // Animal Island 主题：紧跟 element-plus 默认样式之后加载以覆盖
 import '@/styles/animal-theme.css'
+// 主题色板预设：暗色 + 四季
+import '@/styles/themes.css'
+
+// 启动时立即应用保存的主题（先于 Vue mount），避免页面短暂闪烁默认色
+;(function _bootTheme() {
+  try {
+    const auto = localStorage.getItem('theme_auto') === '1'
+    let theme
+    if (auto) {
+      const m = new Date().getMonth() + 1
+      theme = m >= 3 && m <= 5 ? 'spring'
+            : m >= 6 && m <= 8 ? 'summer'
+            : m >= 9 && m <= 11 ? 'autumn'
+            : 'winter'
+    } else {
+      theme = localStorage.getItem('theme') || 'default'
+    }
+    if (theme && theme !== 'default') {
+      document.body.setAttribute('data-theme', theme)
+    }
+  } catch { /* localStorage 不可用时降级为默认 */ }
+})()
 // ECharts 全局主题注册：让所有 echarts 实例默认走动森配色
 import * as echarts from 'echarts/core'
 import { ANIMAL_ECHARTS_THEME } from '@/echarts-theme'
