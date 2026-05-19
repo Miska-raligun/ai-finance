@@ -62,6 +62,7 @@
           <div class="user-name">{{ username }}</div>
         </div>
         <div class="side-actions">
+          <button class="side-btn primary" @click="showDecisionHelper = true">💭 买之前问一下</button>
           <button class="side-btn" @click="showThemePicker = true">🎨 主题</button>
           <button class="side-btn" @click="openConfigPanel">⚙️ 模型配置</button>
           <button class="side-btn danger" @click="logout">🚪 退出登录</button>
@@ -123,6 +124,7 @@
             <div class="user-name">{{ username }}</div>
           </div>
           <div class="side-actions">
+            <button class="side-btn primary" @click="showDecisionHelper = true; showDrawer=false">💭 买之前问一下</button>
             <button class="side-btn" @click="showThemePicker = true; showDrawer=false">🎨 主题</button>
             <button class="side-btn" @click="openConfigPanel(); showDrawer=false">⚙️ 模型配置</button>
             <button class="side-btn danger" @click="logout">🚪 退出登录</button>
@@ -184,6 +186,9 @@
 
         <!-- 主题切换器 -->
         <ThemePicker v-model="showThemePicker" />
+
+        <!-- 决策助手：买之前问一下 -->
+        <DecisionHelper v-model="showDecisionHelper" />
       </el-main>
     </el-container>
   </el-container>
@@ -202,6 +207,7 @@ import iconOwl from '@/assets/decor/avatars/owl.svg'
 import iconBeaver from '@/assets/decor/avatars/beaver.svg'
 import iconFox from '@/assets/decor/avatars/fox.svg'
 import ThemePicker from '@/components/ThemePicker.vue'
+import DecisionHelper from '@/components/DecisionHelper.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -223,6 +229,7 @@ const topbarTitle = computed(() => {
 const active = ref(route.path)
 const showConfig = ref(false)
 const showThemePicker = ref(false)
+const showDecisionHelper = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
@@ -883,6 +890,22 @@ body {
 .side-btn:hover {
   background: var(--color-primary-light);
   color: var(--color-primary);
+}
+.side-btn.primary {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+  box-shadow: 0 3px 0 0 var(--shadow-anchor, #bdaea0);
+}
+.side-btn.primary:hover {
+  background: var(--color-primary-dark);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 0 var(--shadow-anchor, #bdaea0);
+}
+.side-btn.primary:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 0 var(--shadow-anchor, #bdaea0);
 }
 .side-btn.danger {
   border-color: #ef4444;

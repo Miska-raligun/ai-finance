@@ -31,6 +31,8 @@ def temp_db(monkeypatch):
 def app(temp_db, monkeypatch):
     """构造一个最小化的 Flask app（不挂 LLM 安全中间件，避免外部依赖）。"""
     monkeypatch.setenv("LOG_DIR", tempfile.mkdtemp())
+    # 测试环境提供一个固定 SECRET_KEY，让 services/crypto.py 能派生 Fernet key
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-pytest-only")
 
     import db as db_mod
     db_mod.init_db()
@@ -60,9 +62,11 @@ def app(temp_db, monkeypatch):
     from routes.recurring import recurring_bp
     from routes.receipts import receipts_bp
     from routes.tips import tips_bp
+    from routes.decide import decide_bp
 
     for bp in [auth_bp, records_bp, income_bp, categories_bp, budgets_bp, stats_bp, admin_bp,
-               investment_bp, reports_bp, export_bp, health_bp, recurring_bp, receipts_bp, tips_bp]:
+               investment_bp, reports_bp, export_bp, health_bp, recurring_bp, receipts_bp,
+               tips_bp, decide_bp]:
         flask_app.register_blueprint(bp)
 
     yield flask_app
