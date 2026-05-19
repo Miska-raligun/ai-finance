@@ -120,11 +120,11 @@ const maxSpend = computed(() => rows.value.reduce((m, r) => Math.max(m, r.expens
 const activeDays = computed(() => rows.value.filter(r => (r.expense || 0) > 0).length)
 const avgSpend = computed(() => activeDays.value ? totalSpend.value / activeDays.value : 0)
 
-// 日历高度按 days 自动适配：90 天 ~3 个月 1 行；半年 2 行；1 年 3 行
+// 日历高度按 days 自动适配（cell 14px + GitHub 风更紧凑）
 const chartHeight = computed(() => {
-  if (days.value <= 100) return 180
-  if (days.value <= 200) return 230
-  return 260
+  if (days.value <= 100) return 160
+  if (days.value <= 200) return 200
+  return 230
 })
 
 const rangeEnd = computed(() => new Date().toISOString().slice(0, 10))
@@ -150,34 +150,31 @@ const option = computed(() => ({
   visualMap: {
     min: 0,
     max: Math.max(50, maxSpend.value),
-    type: 'piecewise',     // 改用分段更直观
+    type: 'piecewise',
     pieces: _piecewise(maxSpend.value),
     orient: 'horizontal',
     left: 'center',
     bottom: 4,
-    itemWidth: 18,
+    itemWidth: 12,
     itemHeight: 12,
-    itemGap: 6,
+    itemGap: 4,
     textGap: 4,
     textStyle: { color: '#725d42', fontSize: 11, fontWeight: 600 },
-    showLabel: false,      // 单独显示极值标签更好看
+    showLabel: false,
   },
   calendar: {
     range: [rangeStart.value, rangeEnd.value],
-    cellSize: ['auto', 18],
+    cellSize: ['auto', 14],
     left: 36,
     right: 12,
     top: 28,
     bottom: 50,
-    splitLine: {
-      show: true,
-      lineStyle: { color: '#e0d6bf', width: 1, type: 'solid' },
-    },
+    // GitHub 风：用极细的间隙线（与底色相近）而不是粗黑框
+    splitLine: { show: false },
     itemStyle: {
-      borderWidth: 3,
-      borderColor: 'var(--color-bg, #f8f8f0)',  // 间隙融入背景
-      borderRadius: 4,
-      color: '#ece0c4',                          // 0 值用沙色，比白色更协调
+      borderWidth: 0,
+      borderRadius: 2,
+      color: '#ebedf0',  // 空格子 — GitHub 同款浅灰
     },
     yearLabel: { show: false },
     monthLabel: {
@@ -201,30 +198,30 @@ const option = computed(() => ({
     coordinateSystem: 'calendar',
     data: rows.value.map(r => [r.date, r.expense]),
     itemStyle: {
-      borderRadius: 4,
-      borderWidth: 3,
-      borderColor: 'var(--color-bg, #f8f8f0)',
+      borderRadius: 2,
+      borderWidth: 2,
+      borderColor: '#f8f8f0',  // 与页面暖米底一致，营造 GitHub 式细网格间隙
     },
     emphasis: {
       itemStyle: {
         borderColor: '#11a89b',
-        borderWidth: 2,
-        shadowBlur: 6,
-        shadowColor: 'rgba(17, 168, 155, 0.45)',
+        borderWidth: 1.5,
+        shadowBlur: 4,
+        shadowColor: 'rgba(17, 168, 155, 0.35)',
       },
     },
   }],
 }))
 
-// 5 段动森色阶 — 自适应当前最大值
+// 5 段色阶 — GitHub 风的薄荷青渐变（动森色系）
 function _piecewise(max) {
   const m = Math.max(50, max)
   return [
-    { value: 0, label: '无', color: '#ece0c4' },
-    { min: 0.01, max: m * 0.2,  label: '少',  color: '#d4f0eb' },
-    { min: m * 0.2,  max: m * 0.5, label: '中', color: '#82dfd2' },
-    { min: m * 0.5,  max: m * 0.8, label: '多', color: '#19c8b9' },
-    { min: m * 0.8, label: '高', color: '#0a8a7e' },
+    { value: 0,                        label: '无', color: '#ebedf0' },
+    { min: 0.01,    max: m * 0.2,      label: '少', color: '#c8efe9' },
+    { min: m * 0.2, max: m * 0.5,      label: '中', color: '#82dfd2' },
+    { min: m * 0.5, max: m * 0.8,      label: '多', color: '#19c8b9' },
+    { min: m * 0.8,                    label: '高', color: '#0a8a7e' },
   ]
 }
 

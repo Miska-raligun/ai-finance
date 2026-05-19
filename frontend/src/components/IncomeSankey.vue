@@ -116,9 +116,18 @@ const option = computed(() => {
       trigger: 'item',
       formatter: (p) => {
         if (p.dataType === 'edge') {
-          return `${p.data.source} → ${p.data.target}<br/>¥${p.data.value.toFixed(2)}`
+          const src = (p.data.source || '').replace(/\s+$/, '')
+          const dst = (p.data.target || '').replace(/\s+$/, '')
+          return `${src} → ${dst}<br/>¥${p.data.value.toFixed(2)}`
         }
-        return `${p.name}`
+        // 节点：显示名称 + 流入/流出总额
+        const name = (p.name || '').replace(/\s+$/, '')
+        const inSum = links.filter(l => l.target === p.name)
+          .reduce((s, l) => s + l.value, 0)
+        const outSum = links.filter(l => l.source === p.name)
+          .reduce((s, l) => s + l.value, 0)
+        const total = Math.max(inSum, outSum)
+        return `<b>${name}</b><br/>¥${total.toFixed(2)}`
       },
     },
     series: [{
@@ -127,31 +136,31 @@ const option = computed(() => {
       links,
       layout: 'none',
       orient: 'horizontal',
-      // 移动端两侧标签更紧凑、节点更细，避免最右侧标签被裁剪
-      left: isMobile.value ? 36 : 6,
-      right: isMobile.value ? 46 : 70,
+      // 标签隐藏，节点不再占用两侧空间，图本身可以铺满
+      left: 12,
+      right: 12,
       top: 14,
       bottom: 14,
       nodeAlign: 'justify',
-      nodeWidth: isMobile.value ? 10 : 14,
+      nodeWidth: isMobile.value ? 12 : 16,
       nodeGap: isMobile.value ? 6 : 8,
       lineStyle: {
         color: 'gradient',
         curveness: 0.55,
         opacity: 0.55,
       },
-      label: {
-        color: '#725d42',
-        fontWeight: 600,
-        fontSize: isMobile.value ? 10 : 11,
-        // 移动端长名截断 + 中间标签居中靠节点放，防止跑出画布
-        formatter: (p) => {
-          const name = p.name.replace(/\s+$/, '')
-          if (isMobile.value && name.length > 5) return name.slice(0, 4) + '…'
-          return name
+      // 默认不显示标签 — tooltip / 高亮态会展示
+      label: { show: false },
+      emphasis: {
+        focus: 'adjacency',
+        label: {
+          show: true,
+          color: '#725d42',
+          fontWeight: 700,
+          fontSize: isMobile.value ? 11 : 12,
+          formatter: (p) => p.name.replace(/\s+$/, ''),
         },
       },
-      emphasis: { focus: 'adjacency' },
     }],
   }
 })
