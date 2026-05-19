@@ -119,6 +119,9 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
 
 const props = defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue'])
@@ -157,6 +160,8 @@ async function submit() {
       price: Number(form.value.price),
       category: form.value.category.trim() || undefined,
       note: form.value.note.trim() || undefined,
+      // 用户在前端选了「自定义 LLM」时把 key 直接传过去；'default' 模式下为 null
+      llm: userStore.llmPayload,
     })
     result.value = res.data
   } catch (e) {

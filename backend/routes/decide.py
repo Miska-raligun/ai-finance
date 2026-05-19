@@ -120,6 +120,14 @@ def decide():
     if price > 1_000_000:
         return jsonify({"error": "金额过大，请检查输入"}), 400
 
+    # 与 chat 路由保持一致：前端可显式传 llm 配置；缺字段用 DB 持久化的值兜底；
+    # 再缺则 _call_llm 内部读 DEEPSEEK_API_KEY env var（系统默认）。
+    llm_cfg = payload.get("llm") or {}
+    if not isinstance(llm_cfg, dict):
+        llm_cfg = {}
+    for k, v in (get_llm_config(g.user_id) or {}).items():
+        llm_cfg.setdefault(k, v)
+
     ctx = _gather_context(g.user_id)
 
     # 客观影响估算（不依赖 LLM，先算好作为答复 base）
@@ -139,10 +147,11 @@ def decide():
         ),
     }
 
-    # 若用户没配 LLM key 或 LLM 失败，回退到基于规则的本地建议
-    llm_cfg = get_llm_config(g.user_id) or {}
-    api_key = llm_cfg.get("apikey")
-    if not api_key:
+    # 若两边都没 key（用户自定义 + 系统默认），回退到基于规则的本地建议，
+    # 避免一次必失败的 HTTP 调用。
+    import os as _os
+    has_any_key = bool(llm_cfg.get("apikey")) or bool(_os.getenv("DEEPSEEK_API_KEY"))
+    if not has_any_key:
         return jsonify({
             "verdict": "建议谨慎",
             "reason": "\n".join(_RUBRIC_FALLBACK),
@@ -185,6 +194,7 @@ def decide():
             for g_ in ctx["goals"]) + "\n" if ctx["goals"] else "")
     )
 
+    llm_error_msg: str | None = None
     try:
         result = _call_llm(
             messages=[
@@ -196,8 +206,14 @@ def decide():
             timeout=20,
             endpoint="decide.advise",
         )
-        if not result or "error" in result or "choices" not in result:
-            raise RuntimeError("LLM 返回为空")
+        if not result:
+            raise RuntimeError("LLM 无响应")
+        if "error" in result:
+            err = result["error"]
+            llm_error_msg = err.get("message") if isinstance(err, dict) else str(err)
+            raise RuntimeError(llm_error_msg or "LLM 返回错误")
+        if "choices" not in result:
+            raise RuntimeError("LLM 响应缺少 choices")
         raw = (result["choices"][0]["message"].get("content") or "").strip()
         # 兼容 LLM 偶尔仍带 ``` 围栏
         if raw.startswith("```"):
@@ -213,10 +229,19 @@ def decide():
             "impact": impact, "context_used": ctx, "source": "llm",
         })
     except Exception as e:  # noqa: BLE001
-        logger.warning("decide LLM 解析失败，回退本地建议: %s", e)
+        logger.warning("decide LLM 失败，回退本地建议: %s", e)
+        # LLM 调通了但失败（超时 / 配额 / 解析失败） vs 完全没调通：文案区分
+        if llm_error_msg:
+            fallback_reason = (
+                f"⚠️ AI 调用失败：{llm_error_msg[:80]}\n"
+                "下面是按通用原则给出的建议——\n"
+                + "\n".join(_RUBRIC_FALLBACK[1:])
+            )
+        else:
+            fallback_reason = "\n".join(_RUBRIC_FALLBACK)
         return jsonify({
             "verdict": "建议谨慎",
-            "reason": "\n".join(_RUBRIC_FALLBACK),
+            "reason": fallback_reason,
             "alternatives": [], "tips": [],
             "impact": impact, "context_used": ctx, "source": "fallback",
         })

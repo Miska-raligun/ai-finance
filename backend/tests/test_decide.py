@@ -79,6 +79,32 @@ def test_decide_uses_llm_when_configured(auth_client, app, monkeypatch):
     assert "等 618" in body["tips"]
 
 
+def test_decide_uses_system_default_key(auth_client, monkeypatch):
+    """用户没配 LLM 但系统有 DEEPSEEK_API_KEY 时，应该尝试调 LLM 而不是直接 fallback。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-system-default")
+
+    called = {"ok": False}
+
+    def _fake_call(**kw):
+        called["ok"] = True
+        return {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict":"建议买","reason":"系统默认 LLM 走通了","alternatives":[],"tips":[]}'
+                }
+            }],
+            "usage": {"total_tokens": 10},
+        }
+    monkeypatch.setattr("routes.decide._call_llm", _fake_call)
+
+    r = auth_client.post("/api/decide", json={"item": "鼠标", "price": 200})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert called["ok"] is True
+    assert body["source"] == "llm"
+    assert body["verdict"] == "建议买"
+
+
 def test_decide_falls_back_on_invalid_llm_json(auth_client, app, monkeypatch):
     """LLM 返回非 JSON 时回退本地，不应 500。"""
     from services.llm_config import save_llm_config
