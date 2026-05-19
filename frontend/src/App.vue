@@ -124,7 +124,6 @@
             <div class="user-name">{{ username }}</div>
           </div>
           <div class="side-actions">
-            <button class="side-btn primary" @click="showDecisionHelper = true; showDrawer=false">💭 买之前问一下</button>
             <button class="side-btn" @click="showThemePicker = true; showDrawer=false">🎨 主题</button>
             <button class="side-btn" @click="openConfigPanel(); showDrawer=false">⚙️ 模型配置</button>
             <button class="side-btn danger" @click="logout">🚪 退出登录</button>
@@ -137,8 +136,14 @@
     <el-container style="flex-direction: column; overflow: hidden; min-width: 0;">
       <!-- 移动端顶部导航栏 -->
       <header v-if="isMobile && route.path !== '/login'" class="mobile-topbar">
-        <button class="topbar-menu-btn" @click="showDrawer = true">☰</button>
+        <button class="topbar-menu-btn" @click="showDrawer = true" aria-label="打开菜单">☰</button>
         <span class="topbar-title">{{ topbarTitle }}</span>
+        <button
+          class="topbar-decide-btn"
+          @click="showDecisionHelper = true"
+          aria-label="买之前问一下"
+          title="买之前问一下"
+        >💭</button>
         <div class="topbar-user">{{ username.slice(0, 1).toUpperCase() }}</div>
       </header>
 
@@ -953,6 +958,32 @@ body {
   font-weight: 600;
   text-align: center;
 }
+.topbar-decide-btn {
+  width: 36px;
+  height: 36px;
+  margin-right: 6px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 0 0 var(--shadow-anchor, #bdaea0);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.topbar-decide-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 0 var(--shadow-anchor, #bdaea0);
+}
+.topbar-decide-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 0 var(--shadow-anchor, #bdaea0);
+}
+
 .topbar-user {
   width: 30px;
   height: 30px;
