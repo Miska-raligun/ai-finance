@@ -34,10 +34,9 @@
             ¥{{ (g.current_progress || 0).toFixed(0) }} / ¥{{ g.target_amount.toFixed(0) }}
           </span>
         </div>
-        <el-progress
-          :percentage="pct(g)"
-          :color="pctColor(pct(g))"
-          :stroke-width="10"
+        <IslandProgress
+          :current="g.current_progress || 0"
+          :target="g.target_amount"
         />
         <div class="goal-meta">
           <span v-if="g.deadline">截止 {{ g.deadline }}</span>
@@ -178,6 +177,28 @@
       </template>
     </el-drawer>
 
+    <!-- 攒满庆祝浮层：第一次达到 100% 时弹一次 -->
+    <transition name="celebrate">
+      <div v-if="celebratingGoal" class="celebrate-overlay" @click="celebratingGoal = null">
+        <div class="celebrate-card" @click.stop>
+          <div class="celebrate-stars" aria-hidden="true">
+            <span>🎊</span><span>🎉</span><span>✨</span>
+            <span>🦌</span><span>🦊</span><span>🐢</span>
+            <span>🦋</span><span>🌟</span><span>🎉</span>
+          </div>
+          <div class="celebrate-title">🎉 攒满啦！</div>
+          <div class="celebrate-goal">「{{ celebratingGoal.name }}」</div>
+          <div class="celebrate-amount">
+            ¥{{ celebratingGoal.target_amount.toFixed(0) }}
+          </div>
+          <div class="celebrate-hint">小岛上的伙伴们都到齐了 🐾</div>
+          <el-button type="primary" round @click="celebratingGoal = null">
+            收下这份喜悦
+          </el-button>
+        </div>
+      </div>
+    </transition>
+
     <!-- AI 方案对话框（保留原有能力） -->
     <el-dialog
       v-model="showAdvise"
@@ -206,11 +227,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
 import EmptyHint from '@/components/EmptyHint.vue'
+import IslandProgress from '@/components/IslandProgress.vue'
 
 // 移动端弹窗用 fullscreen，避免 520px 在小屏溢出 + 内部长 markdown 滚动卡
 const _mq = window.matchMedia('(max-width: 768px)')
@@ -232,6 +254,43 @@ const editingRow = ref(null)
 
 const sortedGoals = computed(() =>
   [...props.goals].sort((a, b) => (a.priority || 3) - (b.priority || 3))
+)
+
+// 首次攒满 100% 弹一次庆祝浮层。已庆祝过的 goal id 存 localStorage，
+// 避免每次切回页面都重新触发。
+const celebratingGoal = ref(null)
+const _celebKey = () => `celebrated_goals_${userStore.username || 'guest'}`
+
+function _readCelebrated() {
+  try { return new Set(JSON.parse(localStorage.getItem(_celebKey()) || '[]')) }
+  catch { return new Set() }
+}
+function _markCelebrated(id) {
+  const set = _readCelebrated()
+  set.add(id)
+  try { localStorage.setItem(_celebKey(), JSON.stringify([...set])) } catch { /* quota */ }
+}
+
+watch(() => props.goals.map(g => [g.id, g.current_progress, g.target_amount]),
+  (next, prev) => {
+    if (!next) return
+    const prevPct = new Map((prev || []).map(([id, cur, tgt]) =>
+      [id, tgt ? Math.min(100, Math.round((cur || 0) / tgt * 100)) : 0]))
+    const done = _readCelebrated()
+    for (const g of props.goals) {
+      const p = g.target_amount
+        ? Math.min(100, Math.round((g.current_progress || 0) / g.target_amount * 100))
+        : 0
+      const prevP = prevPct.get(g.id) ?? 0
+      // 仅当本次更新从 <100 跨越到 >=100 且这条 goal 没庆祝过
+      if (p >= 100 && prevP < 100 && !done.has(g.id)) {
+        nextTick(() => { celebratingGoal.value = g })
+        _markCelebrated(g.id)
+        break  // 一次只弹一条，避免连续触发
+      }
+    }
+  },
+  { deep: true },
 )
 
 function priorityClass(p) {
@@ -422,11 +481,12 @@ function renderMarkdown(md) {
 .goal-item {
   padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: #F8FAFF;
+  border-radius: 14px;
+  background: var(--color-surface, #F8FAFF);
   cursor: pointer;
-  transition: box-shadow 0.2s;
+  transition: box-shadow 0.2s, transform 0.2s;
 }
+.goal-item:hover { transform: translateY(-1px); }
 .goal-item:hover { box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15); }
 .goal-head {
   display: flex; justify-content: space-between; margin-bottom: 6px;
@@ -551,5 +611,92 @@ function renderMarkdown(md) {
     overflow-x: auto;
     white-space: nowrap;
   }
+}
+
+/* 攒满 100% 浮层 */
+.celebrate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(40, 30, 15, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.celebrate-card {
+  position: relative;
+  width: min(360px, calc(100vw - 36px));
+  padding: 28px 28px 20px;
+  background: linear-gradient(180deg, #fff6d0 0%, #ffe6a8 60%, #fff 100%);
+  border: 3px solid #f5c31c;
+  border-radius: 32px 28px 36px 30px / 30px 36px 28px 32px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.25);
+  text-align: center;
+  overflow: visible;
+}
+.celebrate-stars {
+  position: absolute;
+  inset: -10px;
+  pointer-events: none;
+}
+.celebrate-stars span {
+  position: absolute;
+  font-size: 22px;
+  animation: confetti-fall 2s cubic-bezier(0.4,0,0.2,1) infinite;
+  opacity: 0;
+}
+.celebrate-stars span:nth-child(1) { top: -10px; left: 8%;  animation-delay: 0s; }
+.celebrate-stars span:nth-child(2) { top: -14px; left: 22%; animation-delay: 0.2s; font-size: 26px; }
+.celebrate-stars span:nth-child(3) { top: -8px;  left: 38%; animation-delay: 0.4s; }
+.celebrate-stars span:nth-child(4) { top: -12px; left: 56%; animation-delay: 0.1s; }
+.celebrate-stars span:nth-child(5) { top: -16px; left: 72%; animation-delay: 0.5s; }
+.celebrate-stars span:nth-child(6) { top: -10px; left: 88%; animation-delay: 0.3s; }
+.celebrate-stars span:nth-child(7) { top: -14px; left: 12%; animation-delay: 0.8s; font-size: 24px; }
+.celebrate-stars span:nth-child(8) { top: -8px;  left: 50%; animation-delay: 1.0s; }
+.celebrate-stars span:nth-child(9) { top: -10px; left: 82%; animation-delay: 1.2s; }
+@keyframes confetti-fall {
+  0%   { opacity: 0; transform: translateY(-12px) rotate(0deg); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(420px) rotate(360deg); }
+}
+.celebrate-title {
+  font-size: 22px; font-weight: 900;
+  color: #8c5b00;
+  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+}
+.celebrate-goal {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 6px;
+}
+.celebrate-amount {
+  font-size: 30px;
+  font-weight: 900;
+  color: #c0871c;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+  text-shadow: 0 2px 0 rgba(255,255,255,0.7);
+}
+.celebrate-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: 18px;
+}
+
+.celebrate-enter-active, .celebrate-leave-active {
+  transition: opacity 0.3s, transform 0.3s;
+}
+.celebrate-enter-from, .celebrate-leave-to {
+  opacity: 0;
+}
+.celebrate-enter-from .celebrate-card { transform: scale(0.85); }
+.celebrate-leave-to   .celebrate-card { transform: scale(0.95); }
+
+@media (prefers-reduced-motion: reduce) {
+  .celebrate-stars span { animation: none !important; opacity: 0; }
 }
 </style>
