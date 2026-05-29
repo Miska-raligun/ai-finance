@@ -114,8 +114,11 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { toPng } from 'html-to-image'
+import { domToPng } from 'modern-screenshot'
 import EmptyHint from '@/components/EmptyHint.vue'
+// 通过 Vite 资源导入拿到 favicon 的正确 URL（dev 是 /favicon.ico，prod 是带 hash 的
+// /assets/favicon-xxxx.ico）——硬编码 '/favicon.ico' 在生产构建里会 404。
+import anonUrl from '../../favicon.ico'
 
 const props = defineProps({
   recap: { type: Object, default: null },
@@ -129,20 +132,21 @@ const _mq = window.matchMedia('(max-width: 768px)')
 const isMobile = ref(_mq.matches)
 function _onMq(e) { isMobile.value = e.matches }
 
-// Anon 头像：预先把 favicon 转成 data URL 内联进卡片，这样导出时 html-to-image
-// 无需再抓取外部图片（外部图抓取正是导出不全 / 变慢的常见原因）。
-const anonSrc = ref('/favicon.ico')
+// Anon 头像：预先把 favicon 转成 data URL 内联进卡片，导出时无需再抓外部图。
+const anonSrc = ref(anonUrl)
 async function _inlineAnon() {
   try {
-    const res = await fetch('/favicon.ico', { cache: 'force-cache' })
+    const res = await fetch(anonUrl, { cache: 'force-cache' })
     const blob = await res.blob()
+    // 防 SPA 404 兜底返回 index.html：拿到的不是图片就不替换，继续用资源 URL。
+    if (!blob.type.startsWith('image')) return
     anonSrc.value = await new Promise((resolve, reject) => {
       const fr = new FileReader()
       fr.onload = () => resolve(fr.result)
       fr.onerror = reject
       fr.readAsDataURL(blob)
     })
-  } catch { /* 抓取失败就退回直接路径 */ }
+  } catch { /* 抓取失败就退回资源 URL */ }
 }
 
 onMounted(() => {
@@ -165,17 +169,14 @@ async function exportPng() {
       try { await document.fonts.ready } catch { /* ignore */ }
     }
     const bg = getComputedStyle(document.body).getPropertyValue('--color-surface').trim() || '#f7f3df'
-    const opts = {
-      pixelRatio: 2,
+    // modern-screenshot：相比 html-to-image 对资源 / webfont 的预加载更完整，
+    // 单次调用即可拿到完整截图，速度也更快。
+    const dataUrl = await domToPng(node, {
+      scale: 2,
       backgroundColor: bg,
-      cacheBust: true,
-      skipFonts: true,
       width: node.scrollWidth,
       height: node.scrollHeight,
-    }
-    // html-to-image 首次调用常渲染不全（资源/布局未热）：连跑两遍取第二张，结果稳定。
-    await toPng(node, opts)
-    const dataUrl = await toPng(node, opts)
+    })
     const a = document.createElement('a')
     a.href = dataUrl
     a.download = `回顾_${props.recap?.period || ''}.png`
