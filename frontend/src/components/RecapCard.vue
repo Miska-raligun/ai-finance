@@ -26,25 +26,23 @@
                 <div class="recap-period">{{ recap.period }}</div>
               </div>
             </div>
-            <div class="recap-anon" aria-label="Anon">🦝</div>
+            <img :src="anonSrc" class="recap-anon" alt="Anon" />
           </header>
 
           <div class="recap-caption">{{ recap.caption }}</div>
 
           <div class="recap-kpis">
-            <div class="kpi">
-              <div class="kpi-label">总支出</div>
-              <div class="kpi-value spend">¥{{ fmt(recap.spend_total) }}</div>
+            <div class="kpi-row">
+              <span class="kpi-label">总支出</span>
+              <span class="kpi-value spend">¥{{ fmt(recap.spend_total) }}</span>
             </div>
-            <div class="kpi">
-              <div class="kpi-label">总收入</div>
-              <div class="kpi-value income">¥{{ fmt(recap.income_total) }}</div>
+            <div class="kpi-row">
+              <span class="kpi-label">总收入</span>
+              <span class="kpi-value income">¥{{ fmt(recap.income_total) }}</span>
             </div>
-            <div class="kpi">
-              <div class="kpi-label">净结余</div>
-              <div class="kpi-value" :class="recap.net >= 0 ? 'income' : 'spend'">
-                {{ recap.net >= 0 ? '+' : '-' }}¥{{ fmt(Math.abs(recap.net)) }}
-              </div>
+            <div class="kpi-row">
+              <span class="kpi-label">净结余</span>
+              <span class="kpi-value" :class="recap.net >= 0 ? 'income' : 'spend'">¥{{ fmt(Math.abs(recap.net)) }}</span>
             </div>
           </div>
         </div>
@@ -130,7 +128,27 @@ const exporting = ref(false)
 const _mq = window.matchMedia('(max-width: 768px)')
 const isMobile = ref(_mq.matches)
 function _onMq(e) { isMobile.value = e.matches }
-onMounted(() => _mq.addEventListener('change', _onMq))
+
+// Anon 头像：预先把 favicon 转成 data URL 内联进卡片，这样导出时 html-to-image
+// 无需再抓取外部图片（外部图抓取正是导出不全 / 变慢的常见原因）。
+const anonSrc = ref('/favicon.ico')
+async function _inlineAnon() {
+  try {
+    const res = await fetch('/favicon.ico', { cache: 'force-cache' })
+    const blob = await res.blob()
+    anonSrc.value = await new Promise((resolve, reject) => {
+      const fr = new FileReader()
+      fr.onload = () => resolve(fr.result)
+      fr.onerror = reject
+      fr.readAsDataURL(blob)
+    })
+  } catch { /* 抓取失败就退回直接路径 */ }
+}
+
+onMounted(() => {
+  _mq.addEventListener('change', _onMq)
+  _inlineAnon()
+})
 onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
 
 function fmt(n) {
@@ -143,21 +161,21 @@ async function exportPng() {
   if (!node) return
   exporting.value = true
   try {
-    // 等字体就绪，避免首次渲染缺字
     if (document.fonts && document.fonts.ready) {
       try { await document.fonts.ready } catch { /* ignore */ }
     }
     const bg = getComputedStyle(document.body).getPropertyValue('--color-surface').trim() || '#f7f3df'
-    // skipFonts: 跳过把整站 CSS（含 element-plus）内联进字体的步骤——这是导出
-    // 又慢又只剩边框的根因；系统字体足以渲染中文与 emoji。
-    const dataUrl = await toPng(node, {
+    const opts = {
       pixelRatio: 2,
       backgroundColor: bg,
       cacheBust: true,
       skipFonts: true,
-      width: node.offsetWidth,
-      height: node.offsetHeight,
-    })
+      width: node.scrollWidth,
+      height: node.scrollHeight,
+    }
+    // html-to-image 首次调用常渲染不全（资源/布局未热）：连跑两遍取第二张，结果稳定。
+    await toPng(node, opts)
+    const dataUrl = await toPng(node, opts)
     const a = document.createElement('a')
     a.href = dataUrl
     a.download = `回顾_${props.recap?.period || ''}.png`
@@ -195,7 +213,7 @@ async function exportPng() {
   padding: 20px 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 /* PC：横版，左信息 + 右亮点，整体更大 */
@@ -203,11 +221,11 @@ async function exportPng() {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: 22px;
-  max-width: 820px;
-  padding: 26px 28px 22px;
+  gap: 24px;
+  max-width: 840px;
+  padding: 28px 30px 24px;
 }
-.recap-card.is-pc .recap-left { flex: 0 0 300px; }
+.recap-card.is-pc .recap-left { flex: 0 0 312px; }
 .recap-card.is-pc .recap-right { flex: 1 1 auto; }
 
 .recap-left, .recap-right {
@@ -216,7 +234,7 @@ async function exportPng() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .recap-deco {
@@ -235,7 +253,7 @@ async function exportPng() {
 .recap-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 .recap-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -243,11 +261,10 @@ async function exportPng() {
 .recap-kicker { font-size: 12px; color: var(--color-text-muted); font-weight: 700; letter-spacing: 1px; }
 .recap-period { font-size: 24px; font-weight: 900; color: var(--color-text-strong, #794f27); }
 .recap-anon {
-  width: 42px; height: 42px;
+  width: 44px; height: 44px;
   flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 24px;
   border-radius: 50%;
+  object-fit: cover;
   background: var(--color-surface, #fff);
   border: 2px solid var(--color-border);
 }
@@ -264,22 +281,32 @@ async function exportPng() {
   word-break: break-word;
 }
 
+/* KPI：整行 label + value，数字单行右对齐，绝不换行 */
 .recap-kpis {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-top: auto;
 }
-.kpi {
-  min-width: 0;
+.kpi-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   background: var(--color-surface, #fff);
   border: 1.5px solid var(--color-border-light, #d4c9b4);
-  border-radius: 14px;
-  padding: 10px 6px;
-  text-align: center;
+  border-radius: 12px;
+  padding: 9px 14px;
 }
-.kpi-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 3px; }
-.kpi-value { font-size: clamp(13px, 3.4vw, 17px); font-weight: 900; line-height: 1.2; word-break: break-word; }
+.kpi-label { font-size: 12px; color: var(--color-text-muted); flex-shrink: 0; }
+.kpi-value {
+  font-size: 17px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .kpi-value.spend, .tile-main.spend { color: var(--color-up, #DC2626); }
 .kpi-value.income, .tile-main.income { color: var(--color-down, #15803D); }
 
@@ -303,7 +330,7 @@ async function exportPng() {
 .tile-ico { font-size: 22px; flex-shrink: 0; }
 .tile-body { min-width: 0; flex: 1 1 auto; }
 .tile-label { font-size: 11px; color: var(--color-text-muted); }
-.tile-main { font-size: 15px; font-weight: 800; color: var(--color-text-strong, #794f27); word-break: break-word; line-height: 1.3; }
+.tile-main { font-size: 15px; font-weight: 800; color: var(--color-text-strong, #794f27); font-variant-numeric: tabular-nums; word-break: break-word; line-height: 1.3; }
 .tile-sub { font-size: 11px; color: var(--color-text-muted); word-break: break-word; line-height: 1.4; }
 
 .recap-foot {
