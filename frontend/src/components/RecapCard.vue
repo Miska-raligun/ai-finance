@@ -13,92 +13,94 @@
     </template>
 
     <template v-else-if="recap">
-      <!-- 导出范围：内层固定宽度容器，按钮在容器外不进图 -->
-      <div ref="cardRef" class="recap-card">
+      <!-- 导出范围：cardRef；PC 横版、移动端竖版 -->
+      <div ref="cardRef" class="recap-card" :class="isMobile ? 'is-mobile' : 'is-pc'">
         <div class="recap-deco" aria-hidden="true"></div>
 
-        <header class="recap-head">
-          <div class="recap-title">
-            <span class="recap-emoji">🐾</span>
-            <div>
-              <div class="recap-kicker">本月回顾</div>
-              <div class="recap-period">{{ recap.period }}</div>
-            </div>
-          </div>
-          <img src="/favicon.ico" class="recap-anon" alt="Anon" />
-        </header>
-
-        <div class="recap-caption">{{ recap.caption }}</div>
-
-        <div class="recap-kpis">
-          <div class="kpi">
-            <div class="kpi-label">总支出</div>
-            <div class="kpi-value spend">¥{{ fmt(recap.spend_total) }}</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">总收入</div>
-            <div class="kpi-value income">¥{{ fmt(recap.income_total) }}</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">净结余</div>
-            <div class="kpi-value" :class="recap.net >= 0 ? 'income' : 'spend'">
-              {{ recap.net >= 0 ? '+' : '-' }}¥{{ fmt(Math.abs(recap.net)) }}
-            </div>
-          </div>
-        </div>
-
-        <div class="recap-tiles">
-          <div v-if="recap.largest_txn" class="tile">
-            <span class="tile-ico">💸</span>
-            <div class="tile-body">
-              <div class="tile-label">最大单笔</div>
-              <div class="tile-main">¥{{ fmt(recap.largest_txn.amount) }}</div>
-              <div class="tile-sub">{{ recap.largest_txn.category }}<template v-if="recap.largest_txn.note"> · {{ recap.largest_txn.note }}</template></div>
-            </div>
-          </div>
-
-          <div v-if="recap.highest_day" class="tile">
-            <span class="tile-ico">📅</span>
-            <div class="tile-body">
-              <div class="tile-label">花得最多的一天</div>
-              <div class="tile-main">{{ recap.highest_day.date.slice(5) }}</div>
-              <div class="tile-sub">当天 ¥{{ fmt(recap.highest_day.total) }}</div>
-            </div>
-          </div>
-
-          <div v-if="recap.top_category" class="tile">
-            <span class="tile-ico">🏆</span>
-            <div class="tile-body">
-              <div class="tile-label">最舍得花的分类</div>
-              <div class="tile-main">{{ recap.top_category.category }}</div>
-              <div class="tile-sub">¥{{ fmt(recap.top_category.total) }} · {{ recap.top_category.cnt }} 笔</div>
-            </div>
-          </div>
-
-          <div class="tile">
-            <span class="tile-ico">🔥</span>
-            <div class="tile-body">
-              <div class="tile-label">连续记账</div>
-              <div class="tile-main">{{ recap.streak }} 天</div>
-              <div class="tile-sub">本月记账 {{ recap.active_days }} 天 · 共 {{ recap.record_count }} 笔</div>
-            </div>
-          </div>
-
-          <div v-if="recap.mom && recap.mom.change_pct !== null" class="tile">
-            <span class="tile-ico">{{ recap.mom.change_pct <= 0 ? '🟢' : '🔴' }}</span>
-            <div class="tile-body">
-              <div class="tile-label">支出环比</div>
-              <div class="tile-main" :class="recap.mom.change_pct <= 0 ? 'income' : 'spend'">
-                {{ recap.mom.change_pct >= 0 ? '↑' : '↓' }} {{ Math.abs(recap.mom.change_pct) }}%
+        <div class="recap-left">
+          <header class="recap-head">
+            <div class="recap-title">
+              <span class="recap-emoji">🐾</span>
+              <div>
+                <div class="recap-kicker">本月回顾</div>
+                <div class="recap-period">{{ recap.period }}</div>
               </div>
-              <div class="tile-sub">上月 ¥{{ fmt(recap.mom.prev_spend) }}</div>
+            </div>
+            <div class="recap-anon" aria-label="Anon">🦝</div>
+          </header>
+
+          <div class="recap-caption">{{ recap.caption }}</div>
+
+          <div class="recap-kpis">
+            <div class="kpi">
+              <div class="kpi-label">总支出</div>
+              <div class="kpi-value spend">¥{{ fmt(recap.spend_total) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">总收入</div>
+              <div class="kpi-value income">¥{{ fmt(recap.income_total) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">净结余</div>
+              <div class="kpi-value" :class="recap.net >= 0 ? 'income' : 'spend'">
+                {{ recap.net >= 0 ? '+' : '-' }}¥{{ fmt(Math.abs(recap.net)) }}
+              </div>
             </div>
           </div>
         </div>
 
-        <footer class="recap-foot">
-          由 Anon 生成 · 数据来自你本月的真实记账 🌿
-        </footer>
+        <div class="recap-right">
+          <div class="recap-tiles">
+            <div v-if="recap.largest_txn" class="tile">
+              <span class="tile-ico">💸</span>
+              <div class="tile-body">
+                <div class="tile-label">最大单笔</div>
+                <div class="tile-main">¥{{ fmt(recap.largest_txn.amount) }}</div>
+                <div class="tile-sub">{{ recap.largest_txn.category }}<template v-if="recap.largest_txn.note"> · {{ recap.largest_txn.note }}</template></div>
+              </div>
+            </div>
+
+            <div v-if="recap.highest_day" class="tile">
+              <span class="tile-ico">📅</span>
+              <div class="tile-body">
+                <div class="tile-label">花得最多的一天</div>
+                <div class="tile-main">{{ recap.highest_day.date.slice(5) }}</div>
+                <div class="tile-sub">当天 ¥{{ fmt(recap.highest_day.total) }}</div>
+              </div>
+            </div>
+
+            <div v-if="recap.top_category" class="tile">
+              <span class="tile-ico">🏆</span>
+              <div class="tile-body">
+                <div class="tile-label">最舍得花的分类</div>
+                <div class="tile-main">{{ recap.top_category.category }}</div>
+                <div class="tile-sub">¥{{ fmt(recap.top_category.total) }} · {{ recap.top_category.cnt }} 笔</div>
+              </div>
+            </div>
+
+            <div class="tile">
+              <span class="tile-ico">🔥</span>
+              <div class="tile-body">
+                <div class="tile-label">连续记账</div>
+                <div class="tile-main">{{ recap.streak }} 天</div>
+                <div class="tile-sub">本月记账 {{ recap.active_days }} 天 · 共 {{ recap.record_count }} 笔</div>
+              </div>
+            </div>
+
+            <div v-if="recap.mom && recap.mom.change_pct !== null" class="tile">
+              <span class="tile-ico">{{ recap.mom.change_pct <= 0 ? '🟢' : '🔴' }}</span>
+              <div class="tile-body">
+                <div class="tile-label">支出环比</div>
+                <div class="tile-main" :class="recap.mom.change_pct <= 0 ? 'income' : 'spend'">
+                  {{ recap.mom.change_pct >= 0 ? '↑' : '↓' }} {{ Math.abs(recap.mom.change_pct) }}%
+                </div>
+                <div class="tile-sub">上月 ¥{{ fmt(recap.mom.prev_spend) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <footer class="recap-foot">由 Anon 生成 · 数据来自你本月的真实记账 🌿</footer>
+        </div>
       </div>
 
       <div class="recap-actions">
@@ -112,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { toPng } from 'html-to-image'
 import EmptyHint from '@/components/EmptyHint.vue'
@@ -125,27 +127,43 @@ const props = defineProps({
 const cardRef = ref(null)
 const exporting = ref(false)
 
+const _mq = window.matchMedia('(max-width: 768px)')
+const isMobile = ref(_mq.matches)
+function _onMq(e) { isMobile.value = e.matches }
+onMounted(() => _mq.addEventListener('change', _onMq))
+onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
+
 function fmt(n) {
   if (n == null) return '0.00'
   return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 async function exportPng() {
-  if (!cardRef.value) return
+  const node = cardRef.value
+  if (!node) return
   exporting.value = true
   try {
-    // 读取当前主题底色，避免导出图背景透明 / 发黑
+    // 等字体就绪，避免首次渲染缺字
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready } catch { /* ignore */ }
+    }
     const bg = getComputedStyle(document.body).getPropertyValue('--color-surface').trim() || '#f7f3df'
-    const dataUrl = await toPng(cardRef.value, {
+    // skipFonts: 跳过把整站 CSS（含 element-plus）内联进字体的步骤——这是导出
+    // 又慢又只剩边框的根因；系统字体足以渲染中文与 emoji。
+    const dataUrl = await toPng(node, {
       pixelRatio: 2,
       backgroundColor: bg,
       cacheBust: true,
+      skipFonts: true,
+      width: node.offsetWidth,
+      height: node.offsetHeight,
     })
     const a = document.createElement('a')
     a.href = dataUrl
     a.download = `回顾_${props.recap?.period || ''}.png`
     a.click()
   } catch (e) {
+    console.error('recap export failed', e)
     ElMessage.error('导出失败，请重试')
   } finally {
     exporting.value = false
@@ -160,9 +178,8 @@ async function exportPng() {
 .recap-card {
   position: relative;
   overflow: hidden;
-  max-width: 460px;
   margin: 0 auto;
-  padding: 22px 22px 16px;
+  box-sizing: border-box;
   border-radius: var(--radius-card, 20px);
   background:
     radial-gradient(120% 80% at 100% 0%, var(--color-primary-light, #e6f9f6) 0%, transparent 55%),
@@ -170,91 +187,128 @@ async function exportPng() {
   border: 2px solid var(--color-border, #c4b89e);
   box-shadow: var(--shadow-card, 0 4px 10px rgba(107,92,67,0.18));
 }
+
+/* 移动端：竖版单列，撑满可用宽度 */
+.recap-card.is-mobile {
+  width: 100%;
+  max-width: 480px;
+  padding: 20px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* PC：横版，左信息 + 右亮点，整体更大 */
+.recap-card.is-pc {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 22px;
+  max-width: 820px;
+  padding: 26px 28px 22px;
+}
+.recap-card.is-pc .recap-left { flex: 0 0 300px; }
+.recap-card.is-pc .recap-right { flex: 1 1 auto; }
+
+.recap-left, .recap-right {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .recap-deco {
   position: absolute;
   right: -30px;
   bottom: -30px;
-  width: 130px;
-  height: 130px;
+  width: 150px;
+  height: 150px;
   border-radius: 50%;
   background: var(--color-primary-light, #e6f9f6);
-  opacity: 0.5;
+  opacity: 0.45;
   pointer-events: none;
+  z-index: 0;
 }
 
 .recap-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  position: relative;
-  z-index: 1;
+  gap: 8px;
 }
-.recap-title { display: flex; align-items: center; gap: 10px; }
-.recap-emoji { font-size: 30px; }
+.recap-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.recap-emoji { font-size: 30px; flex-shrink: 0; }
 .recap-kicker { font-size: 12px; color: var(--color-text-muted); font-weight: 700; letter-spacing: 1px; }
-.recap-period { font-size: 22px; font-weight: 900; color: var(--color-text-strong, #794f27); }
-.recap-anon { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--color-border); }
+.recap-period { font-size: 24px; font-weight: 900; color: var(--color-text-strong, #794f27); }
+.recap-anon {
+  width: 42px; height: 42px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px;
+  border-radius: 50%;
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border);
+}
 
 .recap-caption {
-  position: relative;
-  z-index: 1;
-  margin: 14px 0 16px;
-  padding: 12px 14px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   font-weight: 700;
   color: var(--color-text-strong, #794f27);
   background: var(--color-surface-2, #f0ece2);
   border-radius: 14px;
   border: 1.5px dashed var(--color-border, #c4b89e);
+  padding: 12px 14px;
+  word-break: break-word;
 }
 
 .recap-kpis {
-  position: relative;
-  z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  margin-bottom: 12px;
+  margin-top: auto;
 }
 .kpi {
+  min-width: 0;
   background: var(--color-surface, #fff);
   border: 1.5px solid var(--color-border-light, #d4c9b4);
   border-radius: 14px;
-  padding: 10px 8px;
+  padding: 10px 6px;
   text-align: center;
 }
 .kpi-label { font-size: 11px; color: var(--color-text-muted); margin-bottom: 3px; }
-.kpi-value { font-size: clamp(13px, 4vw, 17px); font-weight: 900; word-break: break-all; }
+.kpi-value { font-size: clamp(13px, 3.4vw, 17px); font-weight: 900; line-height: 1.2; word-break: break-word; }
 .kpi-value.spend, .tile-main.spend { color: var(--color-up, #DC2626); }
 .kpi-value.income, .tile-main.income { color: var(--color-down, #15803D); }
 
 .recap-tiles {
-  position: relative;
-  z-index: 1;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 8px;
 }
+.recap-card.is-pc .recap-tiles { grid-template-columns: 1fr 1fr; }
+
 .tile {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   background: var(--color-surface, #fff);
   border: 1.5px solid var(--color-border-light, #d4c9b4);
   border-radius: 14px;
   padding: 10px 12px;
 }
 .tile-ico { font-size: 22px; flex-shrink: 0; }
-.tile-body { min-width: 0; }
+.tile-body { min-width: 0; flex: 1 1 auto; }
 .tile-label { font-size: 11px; color: var(--color-text-muted); }
-.tile-main { font-size: 15px; font-weight: 800; color: var(--color-text-strong, #794f27); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile-sub { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-main { font-size: 15px; font-weight: 800; color: var(--color-text-strong, #794f27); word-break: break-word; line-height: 1.3; }
+.tile-sub { font-size: 11px; color: var(--color-text-muted); word-break: break-word; line-height: 1.4; }
 
 .recap-foot {
-  position: relative;
-  z-index: 1;
-  margin-top: 14px;
+  margin-top: auto;
+  padding-top: 6px;
   text-align: center;
   font-size: 11px;
   color: var(--color-text-muted);
@@ -274,9 +328,5 @@ async function exportPng() {
   border-radius: 50px;
   background: var(--color-border);
   color: var(--color-text-muted);
-}
-
-@media (max-width: 768px) {
-  .recap-tiles { grid-template-columns: 1fr; }
 }
 </style>
