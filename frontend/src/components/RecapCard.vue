@@ -169,13 +169,13 @@ async function exportPng() {
       try { await document.fonts.ready } catch { /* ignore */ }
     }
     const bg = getComputedStyle(document.body).getPropertyValue('--color-surface').trim() || '#f7f3df'
-    // modern-screenshot：相比 html-to-image 对资源 / webfont 的预加载更完整，
-    // 单次调用即可拿到完整截图，速度也更快。
+    // 不传 width/height：让 modern-screenshot 用 offsetWidth/Height（含边框的完整可视盒），
+    // 之前传 scrollWidth/Height 比可视盒小，导致导出偏移、右侧数字被裁。
+    // style.margin 置 0：抵消卡片 margin:0 auto 在克隆时带来的水平偏移。
     const dataUrl = await domToPng(node, {
       scale: 2,
       backgroundColor: bg,
-      width: node.scrollWidth,
-      height: node.scrollHeight,
+      style: { margin: '0' },
     })
     const a = document.createElement('a')
     a.href = dataUrl
@@ -299,14 +299,13 @@ async function exportPng() {
   border-radius: 12px;
   padding: 9px 14px;
 }
-.kpi-label { font-size: 12px; color: var(--color-text-muted); flex-shrink: 0; }
+.kpi-label { font-size: 12px; color: var(--color-text-muted); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kpi-value {
   font-size: 17px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
 }
 .kpi-value.spend, .tile-main.spend { color: var(--color-up, #DC2626); }
 .kpi-value.income, .tile-main.income { color: var(--color-down, #15803D); }
