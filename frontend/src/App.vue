@@ -63,6 +63,7 @@
         </div>
         <div class="side-actions">
           <button class="side-btn primary" @click="showDecisionHelper = true">💭 买之前问一下</button>
+          <button class="side-btn" @click="showCheckup = true">🩺 财务体检</button>
           <button class="side-btn" @click="showThemePicker = true">🎨 主题</button>
           <button class="side-btn" @click="openConfigPanel">⚙️ 模型配置</button>
           <button class="side-btn danger" @click="logout">🚪 退出登录</button>
@@ -139,6 +140,12 @@
         <button class="topbar-menu-btn" @click="showDrawer = true" aria-label="打开菜单">☰</button>
         <span class="topbar-title">{{ topbarTitle }}</span>
         <button
+          class="topbar-decide-btn checkup"
+          @click="showCheckup = true"
+          aria-label="财务体检"
+          title="财务体检"
+        >🩺</button>
+        <button
           class="topbar-decide-btn"
           @click="showDecisionHelper = true"
           aria-label="买之前问一下"
@@ -194,6 +201,9 @@
 
         <!-- 决策助手：买之前问一下 -->
         <DecisionHelper v-model="showDecisionHelper" />
+
+        <!-- 财务体检：健康分 + 四维 + 趋势 -->
+        <FinancialCheckup v-model="showCheckup" />
       </el-main>
     </el-container>
   </el-container>
@@ -213,6 +223,7 @@ import iconBeaver from '@/assets/decor/avatars/beaver.svg'
 import iconFox from '@/assets/decor/avatars/fox.svg'
 import ThemePicker from '@/components/ThemePicker.vue'
 import DecisionHelper from '@/components/DecisionHelper.vue'
+import FinancialCheckup from '@/components/FinancialCheckup.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -235,6 +246,7 @@ const active = ref(route.path)
 const showConfig = ref(false)
 const showThemePicker = ref(false)
 const showDecisionHelper = ref(false)
+const showCheckup = ref(false)
 const llmUrl = ref('')
 const llmKey = ref('')
 const llmModel = ref('')
@@ -982,6 +994,9 @@ body {
 .topbar-decide-btn:active {
   transform: translateY(2px);
   box-shadow: 0 1px 0 0 var(--shadow-anchor, #bdaea0);
+}
+.topbar-decide-btn.checkup {
+  background: var(--color-warning, #f5c31c);
 }
 
 .topbar-user {

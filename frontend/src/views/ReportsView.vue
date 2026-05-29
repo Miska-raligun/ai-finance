@@ -51,30 +51,58 @@
       </el-card>
 
       <div class="main-pane animal-pop" :style="{ '--i': 1 }">
-        <el-skeleton v-if="store.loading" :rows="6" animated />
-        <MonthlyReport v-else :report="store.current" />
+        <div class="view-toggle">
+          <el-radio-group v-model="viewMode" size="small">
+            <el-radio-button label="recap">✨ 回顾卡片</el-radio-button>
+            <el-radio-button label="detail">📑 详细报告</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <RecapCard
+          v-if="viewMode === 'recap'"
+          :recap="store.recap"
+          :loading="store.recapLoading"
+        />
+        <template v-else>
+          <el-skeleton v-if="store.loading" :rows="6" animated />
+          <MonthlyReport v-else :report="store.current" />
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onActivated, ref } from 'vue'
+import { onMounted, onActivated, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReportsStore } from '@/stores/reports'
 import { useUserStore } from '@/stores/user'
 import MonthlyReport from '@/components/MonthlyReport.vue'
 import ExportMenu from '@/components/ExportMenu.vue'
 import EmptyHint from '@/components/EmptyHint.vue'
+import RecapCard from '@/components/RecapCard.vue'
 
 const store = useReportsStore()
 const userStore = useUserStore()
 const month = ref(currentMonth())
+const viewMode = ref('recap')
 
 function currentMonth() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+
+async function loadRecap() {
+  if (!month.value) return
+  try {
+    await store.fetchRecap(month.value)
+  } catch {
+    // 回顾卡片拉取失败不阻塞页面
+  }
+}
+
+// 切月份即刷新回顾卡片（即时计算，无需点生成）
+watch(month, loadRecap)
 
 function formatTime(iso) {
   if (!iso) return ''
@@ -84,11 +112,13 @@ function formatTime(iso) {
 async function onGenerate() {
   try {
     ElMessage.info('生成中…LLM 写整月报告通常需要 1-3 分钟，可继续浏览其他页面')
+    loadRecap()
     const data = await store.generate(month.value, userStore.llmPayload)
     if (data?.content?.includes('无任何记录')) {
       ElMessage.warning('该月暂无记账数据')
     } else {
       ElMessage.success(`已生成 ${data?.period || month.value} 月度报告`)
+      viewMode.value = 'detail'
     }
   } catch (e) {
     ElMessage.error(e.message || e.response?.data?.error || '生成失败，请稍后重试')
@@ -97,6 +127,8 @@ async function onGenerate() {
 
 async function select(period) {
   try {
+    month.value = period
+    viewMode.value = 'detail'
     await store.fetchOne(period)
   } catch (e) {
     ElMessage.error('加载报告失败')
@@ -117,8 +149,11 @@ async function remove(period) {
 
 onMounted(async () => {
   await store.fetchList()
-  if (store.list.length) {
-    await select(store.list[0].period)
+  loadRecap()
+  // 预载当前月的详细报告（若已存在），方便切到「详细报告」即看到
+  const hit = store.list.find(r => r.period === month.value)
+  if (hit) {
+    try { await store.fetchOne(hit.period) } catch { /* 忽略 */ }
   }
 })
 
@@ -187,6 +222,7 @@ onActivated(() => {
 .period-name { font-weight: 600; font-size: 14px; }
 .period-time { font-size: 12px; color: var(--color-text-muted, var(--color-text-muted)); }
 .main-pane { min-width: 0; }
+.view-toggle { display: flex; justify-content: center; margin-bottom: 14px; }
 
 @media (max-width: 768px) {
   .reports-layout { grid-template-columns: 1fr; }

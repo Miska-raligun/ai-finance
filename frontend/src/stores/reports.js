@@ -18,12 +18,27 @@ export const useReportsStore = defineStore('reports', {
     /** 'pending' | 'running' | 'done' | 'failed' | '' */
     genStatus: '',
     genError: '',
+    /** 本月回顾卡片数据（亮点 + 文案），按月即时拉取 */
+    recap: null,
+    recapLoading: false,
   }),
 
   actions: {
     async fetchList() {
       const res = await api.get('/api/reports')
       this.list = res.data || []
+    },
+
+    async fetchRecap(month) {
+      this.recapLoading = true
+      try {
+        const url = month ? `/api/reports/recap?month=${month}` : '/api/reports/recap'
+        const res = await api.get(url)
+        this.recap = res.data
+        return res.data
+      } finally {
+        this.recapLoading = false
+      }
     },
 
     async fetchOne(period) {

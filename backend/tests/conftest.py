@@ -63,10 +63,11 @@ def app(temp_db, monkeypatch):
     from routes.receipts import receipts_bp
     from routes.tips import tips_bp
     from routes.decide import decide_bp
+    from routes.checkup import checkup_bp
 
     for bp in [auth_bp, records_bp, income_bp, categories_bp, budgets_bp, stats_bp, admin_bp,
                investment_bp, reports_bp, export_bp, health_bp, recurring_bp, receipts_bp,
-               tips_bp, decide_bp]:
+               tips_bp, decide_bp, checkup_bp]:
         flask_app.register_blueprint(bp)
 
     yield flask_app

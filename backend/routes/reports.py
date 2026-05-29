@@ -1,10 +1,13 @@
-"""月度报告路由：列表 / 生成 / 详情。"""
+"""月度报告路由：列表 / 生成 / 详情 / 本月回顾。"""
 from __future__ import annotations
+
+from datetime import datetime
 
 from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
 from db import get_db
+from services.recap import compute_recap
 from services.reports import (
     generate_monthly_report, get_report, get_report_status, list_reports,
 )
@@ -38,6 +41,16 @@ def api_generate_report():
     llm_cfg = _load_llm_cfg(data)
     result = generate_monthly_report(g.user_id, period=period, llm=llm_cfg)
     return jsonify(result)
+
+
+@reports_bp.route("/api/reports/recap", methods=["GET"])
+@login_required
+def api_recap():
+    """本月回顾卡片数据：亮点指标 + 俏皮文案。month 缺省取当月。"""
+    period = (request.args.get("month") or "").strip() or datetime.now().strftime("%Y-%m")
+    if len(period) != 7:
+        return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
+    return jsonify(compute_recap(g.user_id, period, llm=_load_llm_cfg({})))
 
 
 @reports_bp.route("/api/reports/<period>/status", methods=["GET"])

@@ -93,6 +93,7 @@ WHITELIST_PREFIXES = (
     "/api/export", "/api/admin",
     # 第二/三轮新增端点：避免被 LLM-WAF 误判 block
     "/api/recurring", "/api/receipts", "/api/anon", "/api/decide",
+    "/api/checkup",
 )
 
 def is_whitelisted(path):

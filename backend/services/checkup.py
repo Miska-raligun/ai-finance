@@ -1,0 +1,262 @@
+"""财务体检：聚合财务画像 → LLM 直接打分(0-100) + 四维拆解 + 报告 → 存档。
+
+按产品要求不写死评分公式，分数由 LLM 基于**真实**数据给出；无 key / 解析失败时
+退回本地规则估算（带 source 标记）。结果 upsert 到 checkup_scores，供历史趋势线复用。
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+from datetime import datetime
+
+from db import get_db
+from services.llm import _call_llm
+from services.reports import _aggregate
+
+logger = logging.getLogger(__name__)
+
+_GRADES = [(80, "健康"), (60, "良好"), (40, "亚健康"), (0, "需调理")]
+
+
+def grade_of(score: int) -> str:
+    for lo, name in _GRADES:
+        if score >= lo:
+            return name
+    return "需调理"
+
+
+def _recent_months(period: str, n: int) -> list[str]:
+    y, m = int(period[:4]), int(period[5:7])
+    out = []
+    for _ in range(n):
+        out.append(f"{y}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    return out
+
+
+def _gather(user_id: int, period: str) -> dict:
+    """采集体检所需画像：储蓄率 / 预算执行 / 应急储备 / 消费结构。"""
+    db = get_db()
+    agg = _aggregate(user_id, period)
+
+    cash = db.execute(
+        "SELECT COALESCE(SUM(a.current_value), 0) AS s FROM assets a "
+        "LEFT JOIN asset_types t ON t.user_id = a.user_id AND t.name = a.type "
+        "WHERE a.user_id = ? AND (t.shape = 'cash' OR a.type = 'cash')",
+        (user_id,),
+    ).fetchone()["s"]
+
+    months = _recent_months(period, 3)
+    placeholders = ",".join("?" * len(months))
+    spend_3m = db.execute(
+        f"SELECT COALESCE(SUM(amount), 0) AS s FROM records "
+        f"WHERE user_id = ? AND strftime('%Y-%m', date) IN ({placeholders})",
+        (user_id, *months),
+    ).fetchone()["s"]
+    avg_monthly_spend = round(spend_3m / 3, 2)
+
+    spend_map = {s["category"]: s["total"] for s in agg["by_category_spend"]}
+    budget_overrun = []
+    for b in agg["budgets"]:
+        spent = spend_map.get(b["category"], 0)
+        if spent > b["amount"]:
+            budget_overrun.append({
+                "category": b["category"],
+                "budget": round(b["amount"], 2),
+                "spent": round(spent, 2),
+            })
+
+    income = agg["income_total"]
+    savings_rate = round(agg["net"] / income * 100, 1) if income > 0 else None
+    emergency_months = round(cash / avg_monthly_spend, 1) if avg_monthly_spend > 0 else None
+    top_cat_share = (
+        round(agg["by_category_spend"][0]["total"] / agg["spend_total"] * 100, 1)
+        if agg["spend_total"] > 0 and agg["by_category_spend"] else None
+    )
+
+    return {
+        "period": period,
+        "income_total": agg["income_total"],
+        "spend_total": agg["spend_total"],
+        "net": agg["net"],
+        "savings_rate_pct": savings_rate,
+        "avg_monthly_spend_3m": avg_monthly_spend,
+        "cash_reserve": round(cash, 2),
+        "emergency_fund_months": emergency_months,
+        "budget_total": round(sum(b["amount"] for b in agg["budgets"]), 2),
+        "budget_set": bool(agg["budgets"]),
+        "budget_overrun": budget_overrun,
+        "top_category": agg["by_category_spend"][0] if agg["by_category_spend"] else None,
+        "top_category_share_pct": top_cat_share,
+        "by_category_spend": agg["by_category_spend"][:8],
+        "portfolio": agg.get("portfolio", {}),
+    }
+
+
+def compute_checkup(user_id: int, period: str, llm: dict | None = None) -> dict:
+    ctx = _gather(user_id, period)
+    has_data = bool(ctx["spend_total"] or ctx["income_total"])
+    llm = llm or {}
+    has_key = bool(llm.get("apikey")) or bool(os.getenv("DEEPSEEK_API_KEY"))
+
+    if not has_data:
+        result = {
+            "score": 0, "dimensions": [],
+            "summary": "本月暂无收支数据，记几笔后再来体检吧。",
+            "report": "", "source": "empty",
+        }
+    elif not has_key:
+        result = _fallback(ctx)
+    else:
+        result = _llm_score(ctx, llm) or _fallback(ctx)
+
+    result["period"] = period
+    result["grade"] = grade_of(int(result.get("score") or 0))
+    result["context"] = ctx
+    if result["source"] != "empty":
+        _save(user_id, period, result)
+    return result
+
+
+def _llm_score(ctx: dict, llm: dict) -> dict | None:
+    system = (
+        "你是「智能记账助手 Anon」的财务体检模块。基于用户**真实**财务数据，给出 0-100 的"
+        "财务健康总分，并从四个维度评分：储蓄率、预算执行、应急储备、消费结构。\n"
+        "严格按 JSON 返回，不要 markdown 围栏，不要任何额外文字：\n"
+        '{ "score": 0到100的整数, '
+        '"dimensions": [ {"name":"储蓄率","score":0到25,"max":25,"comment":"≤40字点评"}, '
+        '{"name":"预算执行","score":0到25,"max":25,"comment":"..."}, '
+        '{"name":"应急储备","score":0到25,"max":25,"comment":"..."}, '
+        '{"name":"消费结构","score":0到25,"max":25,"comment":"..."} ], '
+        '"summary":"一句话总评 ≤40字", '
+        '"report":"分维度诊断 + 改进建议，纯文本，可换行分段，≤300字" }\n'
+        "评分参考：储蓄率越高越好(≥30%给满分)；当月有预算且不超支得分高，未设预算给中性偏低分并提示设预算；"
+        "应急储备=现金÷月均支出，≥6个月满分；单一分类占比越低越均衡。"
+        "总分应约等于四个维度之和。禁止编造未提供的数字。"
+    )
+    user = "我的财务数据：\n```json\n" + json.dumps(ctx, ensure_ascii=False) + "\n```"
+    try:
+        result = _call_llm(
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            llm=llm, temperature=0.3, timeout=30, endpoint="checkup.score",
+        )
+        if not result or "error" in result or "choices" not in result:
+            return None
+        raw = (result["choices"][0]["message"].get("content") or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`").lstrip("json").strip()
+        parsed = json.loads(raw)
+        score = int(max(0, min(100, int(parsed.get("score") or 0))))
+        dims = []
+        for d in (parsed.get("dimensions") or [])[:4]:
+            dims.append({
+                "name": str(d.get("name") or "")[:10],
+                "score": round(float(d.get("score") or 0), 1),
+                "max": round(float(d.get("max") or 25), 1),
+                "comment": str(d.get("comment") or "")[:120],
+            })
+        return {
+            "score": score,
+            "dimensions": dims,
+            "summary": str(parsed.get("summary") or "")[:120],
+            "report": str(parsed.get("report") or "")[:1000],
+            "source": "llm",
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning("checkup LLM 失败，回退本地: %s", e)
+        return None
+
+
+def _fallback(ctx: dict) -> dict:
+    def clamp(v, lo, hi):
+        return max(lo, min(hi, v))
+
+    sr = ctx["savings_rate_pct"]
+    sr_score = round(clamp((sr or 0) / 30, 0, 1) * 25, 1)
+
+    if not ctx["budget_set"]:
+        bud_score = 12.0
+        bud_comment = "尚未设置预算，建议先给主要分类设月预算。"
+    else:
+        cats = ctx.get("by_category_spend") or []
+        n_over = len(ctx["budget_overrun"])
+        bud_score = round(clamp(1 - n_over / max(1, len(cats)), 0, 1) * 25, 1)
+        bud_comment = "预算执行良好。" if n_over == 0 else f"{n_over} 个分类超支，注意收敛。"
+
+    em = ctx["emergency_fund_months"]
+    em_score = round(clamp((em or 0) / 6, 0, 1) * 25, 1)
+
+    share = ctx["top_category_share_pct"]
+    struct_score = round(clamp(1 - max(0, (share or 0) - 40) / 60, 0, 1) * 25, 1)
+
+    dims = [
+        {"name": "储蓄率", "score": sr_score, "max": 25,
+         "comment": (f"储蓄率 {sr}%。" if sr is not None else "本月无收入，难评估储蓄率。")},
+        {"name": "预算执行", "score": bud_score, "max": 25, "comment": bud_comment},
+        {"name": "应急储备", "score": em_score, "max": 25,
+         "comment": (f"现金可覆盖约 {em} 个月支出。" if em is not None else "暂无现金类资产记录。")},
+        {"name": "消费结构", "score": struct_score, "max": 25,
+         "comment": (f"最大分类占比 {share}%。" if share is not None else "本月暂无支出。")},
+    ]
+    total = int(round(sum(d["score"] for d in dims)))
+    return {
+        "score": total,
+        "dimensions": dims,
+        "summary": "（本地规则估算，配置 AI 后可获得更精准的体检）",
+        "report": "未调用 AI，按基础规则给出分数：\n"
+                  + "\n".join(f"· {d['name']}：{d['comment']}" for d in dims),
+        "source": "fallback",
+    }
+
+
+def _save(user_id: int, period: str, result: dict) -> None:
+    get_db().execute(
+        """
+        INSERT INTO checkup_scores
+            (user_id, period, score, dimensions_json, report, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, period) DO UPDATE SET
+            score = excluded.score,
+            dimensions_json = excluded.dimensions_json,
+            report = excluded.report,
+            source = excluded.source,
+            created_at = excluded.created_at
+        """,
+        (user_id, period, int(result.get("score") or 0),
+         json.dumps(result.get("dimensions") or [], ensure_ascii=False),
+         result.get("report") or "", result.get("source") or "llm",
+         datetime.now().isoformat(timespec="seconds")),
+    )
+    get_db().commit()
+
+
+def get_checkup_history(user_id: int, months: int = 12) -> list[dict]:
+    rows = get_db().execute(
+        "SELECT period, score FROM checkup_scores WHERE user_id = ? "
+        "ORDER BY period DESC LIMIT ?",
+        (user_id, months),
+    ).fetchall()
+    return list(reversed([dict(r) for r in rows]))
+
+
+def get_checkup(user_id: int, period: str) -> dict | None:
+    row = get_db().execute(
+        "SELECT period, score, dimensions_json, report, source, created_at "
+        "FROM checkup_scores WHERE user_id = ? AND period = ?",
+        (user_id, period),
+    ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["dimensions"] = json.loads(d.pop("dimensions_json") or "[]")
+    except json.JSONDecodeError:
+        d.pop("dimensions_json", None)
+        d["dimensions"] = []
+    d["grade"] = grade_of(int(d.get("score") or 0))
+    return d
