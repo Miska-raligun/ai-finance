@@ -38,17 +38,36 @@ def _recent_months(period: str, n: int) -> list[str]:
     return out
 
 
+def _month_value_change(db, user_id: int, period: str) -> float:
+    """当月市值变动估算：月末持仓总市值 − 月前持仓总市值（按 asset_value_history 最新快照）。
+
+    月内新建/清仓也会反映进来，作为「投资情况」打分的粗粒度信号，足够 LLM/规则定向。
+    """
+    prev = _recent_months(period, 2)[1]
+
+    def total_at_or_before(p: str) -> float:
+        # 每个 asset 取「<=p 月份」的最新一条快照（id 作单调时间代理）
+        row = db.execute(
+            """
+            SELECT COALESCE(SUM(value), 0) AS s FROM asset_value_history h
+            WHERE h.user_id = ? AND substr(h.recorded_at, 1, 7) <= ?
+              AND h.id = (
+                  SELECT MAX(id) FROM asset_value_history
+                  WHERE asset_id = h.asset_id AND user_id = ?
+                    AND substr(recorded_at, 1, 7) <= ?
+              )
+            """,
+            (user_id, p, user_id, p),
+        ).fetchone()
+        return float(row["s"] or 0)
+
+    return round(total_at_or_before(period) - total_at_or_before(prev), 2)
+
+
 def _gather(user_id: int, period: str) -> dict:
-    """采集体检所需画像：储蓄率 / 预算执行 / 应急储备 / 消费结构。"""
+    """采集体检所需画像：储蓄率 / 预算执行 / 投资情况 / 消费结构。"""
     db = get_db()
     agg = _aggregate(user_id, period)
-
-    cash = db.execute(
-        "SELECT COALESCE(SUM(a.current_value), 0) AS s FROM assets a "
-        "LEFT JOIN asset_types t ON t.user_id = a.user_id AND t.name = a.type "
-        "WHERE a.user_id = ? AND (t.shape = 'cash' OR a.type = 'cash')",
-        (user_id,),
-    ).fetchone()["s"]
 
     months = _recent_months(period, 3)
     placeholders = ",".join("?" * len(months))
@@ -72,11 +91,20 @@ def _gather(user_id: int, period: str) -> dict:
 
     income = agg["income_total"]
     savings_rate = round(agg["net"] / income * 100, 1) if income > 0 else None
-    emergency_months = round(cash / avg_monthly_spend, 1) if avg_monthly_spend > 0 else None
     top_cat_share = (
         round(agg["by_category_spend"][0]["total"] / agg["spend_total"] * 100, 1)
         if agg["spend_total"] > 0 and agg["by_category_spend"] else None
     )
+
+    # 投资情况：在 _aggregate_portfolio 给出的累计快照（pnl / return_pct）上叠加当月市值变动
+    portfolio = dict(agg.get("portfolio") or {})
+    portfolio["month_value_change"] = _month_value_change(db, user_id, period)
+    if portfolio.get("has_portfolio") and (portfolio.get("total_value") or 0) > 0:
+        portfolio["month_change_pct"] = round(
+            portfolio["month_value_change"] / portfolio["total_value"] * 100, 2
+        )
+    else:
+        portfolio["month_change_pct"] = None
 
     return {
         "period": period,
@@ -85,15 +113,13 @@ def _gather(user_id: int, period: str) -> dict:
         "net": agg["net"],
         "savings_rate_pct": savings_rate,
         "avg_monthly_spend_3m": avg_monthly_spend,
-        "cash_reserve": round(cash, 2),
-        "emergency_fund_months": emergency_months,
         "budget_total": round(sum(b["amount"] for b in agg["budgets"]), 2),
         "budget_set": bool(agg["budgets"]),
         "budget_overrun": budget_overrun,
         "top_category": agg["by_category_spend"][0] if agg["by_category_spend"] else None,
         "top_category_share_pct": top_cat_share,
         "by_category_spend": agg["by_category_spend"][:8],
-        "portfolio": agg.get("portfolio", {}),
+        "portfolio": portfolio,
     }
 
 
@@ -125,17 +151,19 @@ def compute_checkup(user_id: int, period: str, llm: dict | None = None) -> dict:
 def _llm_score(ctx: dict, llm: dict) -> dict | None:
     system = (
         "你是「智能记账助手 Anon」的财务体检模块。基于用户**真实**财务数据，给出 0-100 的"
-        "财务健康总分，并从四个维度评分：储蓄率、预算执行、应急储备、消费结构。\n"
+        "财务健康总分，并从四个维度评分：储蓄率、预算执行、投资情况、消费结构。\n"
         "严格按 JSON 返回，不要 markdown 围栏，不要任何额外文字：\n"
         '{ "score": 0到100的整数, '
         '"dimensions": [ {"name":"储蓄率","score":0到25,"max":25,"comment":"≤40字点评"}, '
         '{"name":"预算执行","score":0到25,"max":25,"comment":"..."}, '
-        '{"name":"应急储备","score":0到25,"max":25,"comment":"..."}, '
+        '{"name":"投资情况","score":0到25,"max":25,"comment":"..."}, '
         '{"name":"消费结构","score":0到25,"max":25,"comment":"..."} ], '
         '"summary":"一句话总评 ≤40字", '
         '"report":"分维度诊断 + 改进建议，纯文本，可换行分段，≤300字" }\n'
         "评分参考：储蓄率越高越好(≥30%给满分)；当月有预算且不超支得分高，未设预算给中性偏低分并提示设预算；"
-        "应急储备=现金÷月均支出，≥6个月满分；单一分类占比越低越均衡。"
+        "投资情况看 portfolio：优先用 month_change_pct（当月市值变动比例）评估本月表现，"
+        "若无则用 return_pct（累计收益率）兜底——当月或累计为正给高分、深度回撤给低分、"
+        "未建仓给中性偏低并建议小额起步；单一分类占比越低越均衡。"
         "总分应约等于四个维度之和。禁止编造未提供的数字。"
     )
     user = "我的财务数据：\n```json\n" + json.dumps(ctx, ensure_ascii=False) + "\n```"
@@ -188,8 +216,32 @@ def _fallback(ctx: dict) -> dict:
         bud_score = round(clamp(1 - n_over / max(1, len(cats)), 0, 1) * 25, 1)
         bud_comment = "预算执行良好。" if n_over == 0 else f"{n_over} 个分类超支，注意收敛。"
 
-    em = ctx["emergency_fund_months"]
-    em_score = round(clamp((em or 0) / 6, 0, 1) * 25, 1)
+    inv = ctx.get("portfolio") or {}
+    if not inv.get("has_portfolio"):
+        inv_score = 10.0
+        inv_comment = "尚未录入投资资产，建议开个小仓位先动起来。"
+    else:
+        mc_pct = inv.get("month_change_pct")
+        if mc_pct is not None:
+            # 当月市值变动率（首选信号）
+            if mc_pct >= 5: inv_score = 25.0
+            elif mc_pct >= 2: inv_score = 22.0
+            elif mc_pct >= 0: inv_score = 18.0
+            elif mc_pct >= -2: inv_score = 14.0
+            elif mc_pct >= -5: inv_score = 9.0
+            else: inv_score = 4.0
+            mvc = inv.get("month_value_change") or 0
+            inv_comment = f"本月市值变动 {mc_pct:+.1f}%（¥{mvc:+,.0f}）。"
+        else:
+            # 累计收益率兜底
+            rpct = float(inv.get("return_pct") or 0)
+            if rpct >= 10: inv_score = 25.0
+            elif rpct >= 5: inv_score = 22.0
+            elif rpct >= 0: inv_score = 18.0
+            elif rpct >= -5: inv_score = 12.0
+            elif rpct >= -10: inv_score = 7.0
+            else: inv_score = 3.0
+            inv_comment = f"累计收益率 {rpct}%（暂无当月快照）。"
 
     share = ctx["top_category_share_pct"]
     struct_score = round(clamp(1 - max(0, (share or 0) - 40) / 60, 0, 1) * 25, 1)
@@ -198,8 +250,7 @@ def _fallback(ctx: dict) -> dict:
         {"name": "储蓄率", "score": sr_score, "max": 25,
          "comment": (f"储蓄率 {sr}%。" if sr is not None else "本月无收入，难评估储蓄率。")},
         {"name": "预算执行", "score": bud_score, "max": 25, "comment": bud_comment},
-        {"name": "应急储备", "score": em_score, "max": 25,
-         "comment": (f"现金可覆盖约 {em} 个月支出。" if em is not None else "暂无现金类资产记录。")},
+        {"name": "投资情况", "score": inv_score, "max": 25, "comment": inv_comment},
         {"name": "消费结构", "score": struct_score, "max": 25,
          "comment": (f"最大分类占比 {share}%。" if share is not None else "本月暂无支出。")},
     ]
