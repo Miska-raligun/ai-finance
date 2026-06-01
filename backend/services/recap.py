@@ -45,6 +45,7 @@ def compute_recap(user_id: int, period: str, llm: dict | None = None) -> dict:
     hi = db.execute(
         "SELECT date, SUM(amount) AS total FROM records "
         "WHERE user_id = ? AND strftime('%Y-%m', date) = ? "
+        "AND deleted_at IS NULL "
         "GROUP BY date ORDER BY total DESC LIMIT 1",
         (user_id, period),
     ).fetchone()
@@ -53,6 +54,7 @@ def compute_recap(user_id: int, period: str, llm: dict | None = None) -> dict:
     lg = db.execute(
         "SELECT date, category, amount, note FROM records "
         "WHERE user_id = ? AND strftime('%Y-%m', date) = ? "
+        "AND deleted_at IS NULL "
         "ORDER BY amount DESC LIMIT 1",
         (user_id, period),
     ).fetchone()
@@ -61,8 +63,10 @@ def compute_recap(user_id: int, period: str, llm: dict | None = None) -> dict:
         largest_txn["amount"] = round(largest_txn["amount"], 2)
 
     day_rows = db.execute(
-        "SELECT date FROM records WHERE user_id = ? AND strftime('%Y-%m', date) = ? "
-        "UNION SELECT date FROM income WHERE user_id = ? AND strftime('%Y-%m', date) = ?",
+        "SELECT date FROM records "
+        "WHERE user_id = ? AND strftime('%Y-%m', date) = ? AND deleted_at IS NULL "
+        "UNION SELECT date FROM income "
+        "WHERE user_id = ? AND strftime('%Y-%m', date) = ? AND deleted_at IS NULL",
         (user_id, period, user_id, period),
     ).fetchall()
     days = [r["date"] for r in day_rows]
@@ -75,7 +79,8 @@ def compute_recap(user_id: int, period: str, llm: dict | None = None) -> dict:
     prev = _prev_period(period)
     prev_spend = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS s FROM records "
-        "WHERE user_id = ? AND strftime('%Y-%m', date) = ?",
+        "WHERE user_id = ? AND strftime('%Y-%m', date) = ? "
+        "AND deleted_at IS NULL",
         (user_id, prev),
     ).fetchone()["s"]
     cur_spend = agg["spend_total"]

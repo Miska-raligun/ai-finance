@@ -29,6 +29,16 @@
         <el-skeleton :rows="5" animated />
       </div>
 
+      <AiThinking
+        v-if="store.computing"
+        :steps="[
+          '🐾 正在汇总你的真实财务数据',
+          '🩺 Anon 在打健康分',
+          '✍️ 整理四维体检报告…',
+        ]"
+        @cancel="cancel"
+      />
+
       <template v-else-if="result && result.dimensions && result.dimensions.length">
         <div class="ck-gauge-row">
           <VChart theme="animal" :option="gaugeOption" class="ck-gauge" autoresize />
@@ -81,6 +91,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { useCheckupStore } from '@/stores/checkup'
 import { useUserStore } from '@/stores/user'
 import EmptyHint from '@/components/EmptyHint.vue'
+import AiThinking from '@/components/AiThinking.vue'
 
 use([GaugeChart, LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
@@ -107,6 +118,7 @@ function curMonth() {
 }
 const month = ref(curMonth())
 const result = computed(() => store.current)
+const controller = ref(null)
 
 async function onOpen() {
   await Promise.all([
@@ -120,11 +132,22 @@ async function onMonthChange() {
   await store.fetchCurrent(month.value).catch(() => {})
 }
 
+function cancel() {
+  controller.value?.abort()
+}
+
 async function run() {
+  controller.value = new AbortController()
   try {
-    await store.compute(month.value, userStore.llmPayload)
+    await store.compute(month.value, userStore.llmPayload, {
+      signal: controller.value.signal,
+    })
   } catch (e) {
+    // 用户取消：静默
+    if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return
     ElMessage.error(e?.response?.data?.error || '体检失败，请稍后再试')
+  } finally {
+    controller.value = null
   }
 }
 

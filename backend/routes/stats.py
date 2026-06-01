@@ -55,14 +55,16 @@ def comparison_stats():
             """SELECT
                  COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as cur,
                  COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as prev
-               FROM records WHERE user_id=? AND strftime('%Y',date) IN (?,?)""",
+               FROM records WHERE user_id=? AND strftime('%Y',date) IN (?,?)
+                 AND deleted_at IS NULL""",
             (year, prev_year, g.user_id, year, prev_year),
         ).fetchone()
         income_row = db.execute(
             """SELECT
                  COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as cur,
                  COALESCE(SUM(CASE WHEN strftime('%Y',date)=? THEN amount END), 0) as prev
-               FROM income WHERE user_id=? AND strftime('%Y',date) IN (?,?)""",
+               FROM income WHERE user_id=? AND strftime('%Y',date) IN (?,?)
+                 AND deleted_at IS NULL""",
             (year, prev_year, g.user_id, year, prev_year),
         ).fetchone()
     else:
@@ -74,14 +76,16 @@ def comparison_stats():
             """SELECT
                  COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
                  COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
-               FROM records WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
+               FROM records WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)
+                 AND deleted_at IS NULL""",
             (month, prev_month, g.user_id, month, prev_month),
         ).fetchone()
         income_row = db.execute(
             """SELECT
                  COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as cur,
                  COALESCE(SUM(CASE WHEN strftime('%Y-%m',date)=? THEN amount END), 0) as prev
-               FROM income WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)""",
+               FROM income WHERE user_id=? AND strftime('%Y-%m',date) IN (?,?)
+                 AND deleted_at IS NULL""",
             (month, prev_month, g.user_id, month, prev_month),
         ).fetchone()
 
@@ -120,6 +124,7 @@ def _monthly_stats_compute(year):
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
             FROM records WHERE strftime('%Y', date) = ? AND user_id = ?
+              AND deleted_at IS NULL
             GROUP BY month
             """,
             (year, g.user_id),
@@ -128,6 +133,7 @@ def _monthly_stats_compute(year):
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
             FROM income WHERE strftime('%Y', date) = ? AND user_id = ?
+              AND deleted_at IS NULL
             GROUP BY month
             """,
             (year, g.user_id),
@@ -137,7 +143,7 @@ def _monthly_stats_compute(year):
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
             FROM records
-            WHERE user_id = ?
+            WHERE user_id = ? AND deleted_at IS NULL
             GROUP BY month
             """,
             (g.user_id,)
@@ -146,7 +152,7 @@ def _monthly_stats_compute(year):
             """
             SELECT strftime('%Y-%m', date) AS month, SUM(amount) AS total
             FROM income
-            WHERE user_id = ?
+            WHERE user_id = ? AND deleted_at IS NULL
             GROUP BY month
             """,
             (g.user_id,)
@@ -177,12 +183,12 @@ def yearly_stats():
     db = get_db()
     spend_cursor = db.execute(
         "SELECT strftime('%Y', date) AS year, SUM(amount) AS total "
-        "FROM records WHERE user_id = ? GROUP BY year",
+        "FROM records WHERE user_id = ? AND deleted_at IS NULL GROUP BY year",
         (g.user_id,)
     )
     income_cursor = db.execute(
         "SELECT strftime('%Y', date) AS year, SUM(amount) AS total "
-        "FROM income WHERE user_id = ? GROUP BY year",
+        "FROM income WHERE user_id = ? AND deleted_at IS NULL GROUP BY year",
         (g.user_id,)
     )
     spend_data = {row['year']: float(row['total']) for row in spend_cursor.fetchall()}
@@ -207,29 +213,35 @@ def _category_stats_compute(month, year):
     db = get_db()
     if month:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM records "
+            "WHERE strftime('%Y-%m', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
             (month, g.user_id),
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE strftime('%Y-%m', date) = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM income "
+            "WHERE strftime('%Y-%m', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
             (month, g.user_id),
         )
     elif year:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE strftime('%Y', date) = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM records "
+            "WHERE strftime('%Y', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
             (year, g.user_id),
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE strftime('%Y', date) = ? AND user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM income "
+            "WHERE strftime('%Y', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
             (year, g.user_id),
         )
     else:
         spend_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM records WHERE user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM records "
+            "WHERE user_id = ? AND deleted_at IS NULL GROUP BY category",
             (g.user_id,)
         )
         income_cursor = db.execute(
-            "SELECT category AS name, SUM(amount) AS total FROM income WHERE user_id = ? GROUP BY category",
+            "SELECT category AS name, SUM(amount) AS total FROM income "
+            "WHERE user_id = ? AND deleted_at IS NULL GROUP BY category",
             (g.user_id,)
         )
 
@@ -255,6 +267,7 @@ def summary_stats():
         SELECT SUM(amount) AS total
         FROM records
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+          AND deleted_at IS NULL
     """,
         (month, g.user_id)
     )
@@ -265,6 +278,7 @@ def summary_stats():
         SELECT SUM(amount) AS total
         FROM income
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+          AND deleted_at IS NULL
     """,
         (month, g.user_id)
     )
@@ -295,6 +309,7 @@ def _daily_stats_compute(month):
         SELECT date, SUM(amount) AS total
         FROM records
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+          AND deleted_at IS NULL
         GROUP BY date
     """,
         (month, g.user_id)
@@ -306,6 +321,7 @@ def _daily_stats_compute(month):
         SELECT date, SUM(amount) AS total
         FROM income
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+          AND deleted_at IS NULL
         GROUP BY date
     """,
         (month, g.user_id)
@@ -345,12 +361,14 @@ def calendar_stats():
     spend_rows = db.execute(
         "SELECT date, SUM(amount) AS total FROM records "
         "WHERE user_id = ? AND date >= date('now', ?) "
+        "AND deleted_at IS NULL "
         "GROUP BY date",
         (g.user_id, f"-{days} days"),
     ).fetchall()
     income_rows = db.execute(
         "SELECT date, SUM(amount) AS total FROM income "
         "WHERE user_id = ? AND date >= date('now', ?) "
+        "AND deleted_at IS NULL "
         "GROUP BY date",
         (g.user_id, f"-{days} days"),
     ).fetchall()

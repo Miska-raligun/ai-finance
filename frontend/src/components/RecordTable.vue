@@ -298,6 +298,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import api from '@/api'
+import bus from '@/event-bus'
 import { useCategoryStore } from '@/stores/categories'
 
 const props = defineProps({
@@ -381,6 +382,9 @@ function startDrawerEdit() {
   drawerMode.value = 'edit'
 }
 
+// 表格 CRUD 后，向事件总线广播数据变更，让报告/回顾/统计/体检在 onActivated 时刷新。
+const _dataEvent = () => (props.type === 'expense' ? 'data:records' : 'data:income')
+
 async function saveDrawerEdit() {
   const url = props.type === 'expense'
     ? `/api/records/${editingRow.value.id}`
@@ -392,6 +396,7 @@ async function saveDrawerEdit() {
     popoverRow.value = { ...editingRow.value }
     drawerMode.value = 'view'
     categoryStore.bumpRefresh()
+    bus.emit(_dataEvent(), { id: editingRow.value.id, op: 'edit' })
   } catch {
     ElMessage.error('保存失败，请重试')
   }
@@ -406,11 +411,13 @@ async function deleteFromDrawer() {
   const url = props.type === 'expense'
     ? `/api/records/${popoverRow.value.id}`
     : `/api/income/${popoverRow.value.id}`
+  const removedId = popoverRow.value.id
   await api.delete(url)
-  records.value = records.value.filter(r => r.id !== popoverRow.value.id)
+  records.value = records.value.filter(r => r.id !== removedId)
   totalRecords.value = Math.max(0, totalRecords.value - 1)
   showPopover.value = false
   categoryStore.bumpRefresh()
+  bus.emit(_dataEvent(), { id: removedId, op: 'delete' })
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize)))
@@ -450,6 +457,7 @@ async function saveEdit(row) {
   editingId.value = null
   await fetchData()
   categoryStore.bumpRefresh()
+  bus.emit(_dataEvent(), { id: row.id, op: 'edit' })
 }
 
 function cancelEdit() {
@@ -470,6 +478,7 @@ async function deleteSelected() {
   totalRecords.value = Math.max(0, totalRecords.value - toDelete.length)
   selectedRows.value = []
   categoryStore.bumpRefresh()
+  bus.emit(_dataEvent(), { ids: [...deletedIds], op: 'delete-batch' })
 }
 
 function applyFilter() {

@@ -28,11 +28,11 @@ export const useCheckupStore = defineStore('checkup', {
       }
     },
 
-    async compute(month, llm = null) {
+    async compute(month, llm = null, { signal } = {}) {
       this.computing = true
       try {
         const url = month ? `/api/checkup/compute?month=${month}` : '/api/checkup/compute'
-        const res = await api.post(url, { llm })
+        const res = await api.post(url, { llm }, signal ? { signal } : undefined)
         this.current = res.data
         await this.fetchHistory()
         return res.data

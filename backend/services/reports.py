@@ -37,12 +37,15 @@ def _aggregate(user_id: int, period: str) -> dict:
     spend = [dict(r) for r in db.execute(
         "SELECT category, SUM(amount) AS total, COUNT(*) AS cnt "
         "FROM records WHERE user_id = ? AND strftime('%Y-%m', date) = ? "
+        "AND deleted_at IS NULL "
         "GROUP BY category ORDER BY total DESC",
         (user_id, period),
     ).fetchall()]
     income = [dict(r) for r in db.execute(
         "SELECT category, SUM(amount) AS total FROM income "
-        "WHERE user_id = ? AND strftime('%Y-%m', date) = ? GROUP BY category ORDER BY total DESC",
+        "WHERE user_id = ? AND strftime('%Y-%m', date) = ? "
+        "AND deleted_at IS NULL "
+        "GROUP BY category ORDER BY total DESC",
         (user_id, period),
     ).fetchall()]
     budgets = [dict(r) for r in db.execute(
@@ -52,6 +55,7 @@ def _aggregate(user_id: int, period: str) -> dict:
     anomalies = [dict(r) for r in db.execute(
         "SELECT date, category, amount, note, anomaly_score FROM records "
         "WHERE user_id = ? AND strftime('%Y-%m', date) = ? AND anomaly_flag = 1 "
+        "AND deleted_at IS NULL "
         "ORDER BY date DESC LIMIT 10",
         (user_id, period),
     ).fetchall()]
@@ -79,7 +83,7 @@ def _aggregate_portfolio(user_id: int) -> dict:
     db = get_db()
     asset_rows = db.execute(
         "SELECT name, type, symbol, holdings, cost_basis, current_value "
-        "FROM assets WHERE user_id = ?",
+        "FROM assets WHERE user_id = ? AND deleted_at IS NULL",
         (user_id,),
     ).fetchall()
     assets = [dict(r) for r in asset_rows]
@@ -87,7 +91,8 @@ def _aggregate_portfolio(user_id: int) -> dict:
 
     goal_rows = db.execute(
         "SELECT name, target_amount, current_progress, deadline, priority "
-        "FROM financial_goals WHERE user_id = ? ORDER BY priority ASC, deadline ASC",
+        "FROM financial_goals WHERE user_id = ? AND deleted_at IS NULL "
+        "ORDER BY priority ASC, deadline ASC",
         (user_id,),
     ).fetchall()
     goals = []
@@ -271,6 +276,28 @@ def list_reports(user_id: int) -> list[dict]:
         (user_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def cleanup_orphan_reports() -> int:
+    """启动时把进程崩溃 / 重启遗留的 status IN ('pending','running') 行标记为 failed。
+
+    `_inflight` 字典只在内存中维护，进程一挂这些任务永远不会再有人推进；
+    DB 里的行就一直显示 pending，前端无限轮询。启动时一次性收尸。
+
+    返回被清理的行数（≥0）。
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    cur = get_db().execute(
+        "UPDATE reports SET status = 'failed', "
+        "error_message = '进程重启，请重新生成', updated_at = ? "
+        "WHERE status IN ('pending', 'running')",
+        (now,),
+    )
+    get_db().commit()
+    n = cur.rowcount or 0
+    if n:
+        logger.warning("cleanup_orphan_reports 标记 %d 条卡死任务为 failed", n)
+    return n
 
 
 def get_report(user_id: int, period: str) -> dict | None:

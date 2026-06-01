@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import api from '@/api'
+import bus from '@/event-bus'
 
 /**
  * 月度报告 Pinia store。
@@ -21,20 +22,36 @@ export const useReportsStore = defineStore('reports', {
     /** 本月回顾卡片数据（亮点 + 文案），按月即时拉取 */
     recap: null,
     recapLoading: false,
+    /** 数据失效标记：其他页改账后置 true，ReportsView onActivated 检查并刷新。 */
+    stale: false,
   }),
 
   actions: {
+    /** 订阅一次跨页数据变更（store 实例只装载一次，handler 不重复）。 */
+    _ensureBusSub() {
+      if (this._busSubscribed) return
+      this._busSubscribed = true
+      const mark = () => { this.stale = true }
+      bus.on('data:records', mark)
+      bus.on('data:income', mark)
+      bus.on('data:budgets', mark)
+    },
+
     async fetchList() {
+      this._ensureBusSub()
       const res = await api.get('/api/reports')
       this.list = res.data || []
+      this.stale = false
     },
 
     async fetchRecap(month) {
+      this._ensureBusSub()
       this.recapLoading = true
       try {
         const url = month ? `/api/reports/recap?month=${month}` : '/api/reports/recap'
         const res = await api.get(url)
         this.recap = res.data
+        this.stale = false
         return res.data
       } finally {
         this.recapLoading = false

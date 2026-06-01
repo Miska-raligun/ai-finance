@@ -119,6 +119,15 @@ for bp in [auth_bp, chat_bp, records_bp, income_bp,
            recurring_bp, receipts_bp, tips_bp, decide_bp, checkup_bp]:
     app.register_blueprint(bp)
 
+# 启动时一次性收尸：进程崩溃 / 重启会让 reports 表里 pending/running 行永远卡死
+# （_inflight 字典仅内存），前端无限轮询。这里标记为 failed 让用户能重新发起。
+with app.app_context():
+    try:
+        from services.reports import cleanup_orphan_reports
+        cleanup_orphan_reports()
+    except Exception:  # noqa: BLE001
+        _logger.exception("启动时清理孤儿 pending/running 报告失败（不阻断启动）")
+
 # LLM 成本敏感端点的用户级限流（IP 级仍由 llm_security_middleware 兜底）
 apply_endpoint_limits(app, {
     "chat.chat": "60/minute",

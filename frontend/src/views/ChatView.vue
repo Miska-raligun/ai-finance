@@ -192,6 +192,7 @@ import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 import { useChatStore } from '@/stores/chat'
 import { useInvestmentStore } from '@/stores/investment'
+import bus from '@/event-bus'
 import VoiceInput from '@/components/VoiceInput.vue'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
@@ -347,6 +348,8 @@ async function confirmRecord(rec) {
       return
     }
     categoryStore.bumpRefresh()
+    // 通知其它页面（报告 / 回顾 / 统计 / 体检）这笔账本数据已变，下次激活时刷新。
+    bus.emit(rec.type === 'income' ? 'data:income' : 'data:records', { id: data.id })
     if (data.budget_warning) {
       const w = data.budget_warning
       const warnMsg = w.level === 'over'

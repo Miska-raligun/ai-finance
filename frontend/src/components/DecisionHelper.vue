@@ -55,11 +55,21 @@
           :disabled="!canSubmit"
           @click="submit"
         >
-          {{ loading ? '正在分析…' : '让 Anon 给我个建议' }}
+          {{ loading ? '分析中…' : '让 Anon 给我个建议' }}
         </el-button>
       </div>
 
-      <div v-if="result" class="dh-result" :class="verdictClass">
+      <AiThinking
+        v-if="loading"
+        :steps="[
+          '🐾 正在收集你的财务数据',
+          '🤔 Anon 在分析这笔消费',
+          '✍️ 整理建议中…',
+        ]"
+        @cancel="cancel"
+      />
+
+      <div v-if="result && !loading" class="dh-result" :class="verdictClass">
         <div class="dh-verdict">
           <span class="dh-verdict-emoji">{{ verdictEmoji }}</span>
           <span class="dh-verdict-text">{{ result.verdict }}</span>
@@ -120,6 +130,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useUserStore } from '@/stores/user'
+import AiThinking from '@/components/AiThinking.vue'
 
 const userStore = useUserStore()
 
@@ -141,6 +152,8 @@ const dialogWidth = computed(() => isMobile.value ? 'calc(100vw - 28px)' : '520p
 const form = ref({ item: '', price: null, category: '', note: '' })
 const loading = ref(false)
 const result = ref(null)
+// LLM 同步调用经常 10-30s，需要可取消，避免用户被迫等到 timeout。
+const controller = ref(null)
 
 const canSubmit = computed(() =>
   !!form.value.item.trim() && form.value.price > 0 && !loading.value
@@ -151,9 +164,15 @@ function onOpen() {
   result.value = null
 }
 
+function cancel() {
+  controller.value?.abort()
+  loading.value = false
+}
+
 async function submit() {
   if (!canSubmit.value) return
   loading.value = true
+  controller.value = new AbortController()
   try {
     const res = await api.post('/api/decide', {
       item: form.value.item.trim(),
@@ -162,13 +181,16 @@ async function submit() {
       note: form.value.note.trim() || undefined,
       // 用户在前端选了「自定义 LLM」时把 key 直接传过去；'default' 模式下为 null
       llm: userStore.llmPayload,
-    })
+    }, { signal: controller.value.signal })
     result.value = res.data
   } catch (e) {
+    // 用户主动取消：axios 把 AbortController.abort 转成 CanceledError，静默处理
+    if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return
     const msg = e?.response?.data?.error || '分析失败，稍后再试'
     ElMessage.error(msg)
   } finally {
     loading.value = false
+    controller.value = null
   }
 }
 

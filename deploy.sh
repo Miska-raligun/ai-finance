@@ -78,6 +78,29 @@ echo "  Backend      : http://localhost:5000"
 echo "  MCP SSE      : http://localhost:5001/mcp/sse"
 echo "  MiniMax MCP  : http://localhost:5002/mcp/sse"
 echo "=========================================="
+
+# 启动后健康检查：30 次 × 2s = 60s 窗口内，/api/heartbeat 任一次 200 就算通过。
+# 全失败则杀掉所有刚拉起的进程并以非零退出，避免坏版本在线却看不见。
+echo "[health] 等待后端就绪..."
+HEALTH_OK=0
+for i in $(seq 1 30); do
+  if curl -fsS -o /dev/null -m 2 http://127.0.0.1:5000/api/heartbeat 2>/dev/null; then
+    echo "[health] ✅ 后端就绪（第 $i 次探活通过）"
+    HEALTH_OK=1
+    break
+  fi
+  sleep 2
+done
+
+if [ "$HEALTH_OK" != "1" ]; then
+  echo "[health] ❌ 60s 内 /api/heartbeat 始终不响应，部署失败。"
+  echo "[health] 杀掉所有刚拉起的进程；请查看 $BACKEND_LOG 找原因。"
+  echo "[health] 若数据库出问题，最近一次备份在 backend/backups/ 下，"
+  echo "[health] 可用 scripts/backup_db.sh 的逆操作恢复。"
+  kill $BACKEND_PID $MCP_PID $MINIMAX_MCP_PID $FRONTEND_PID 2>/dev/null || true
+  exit 1
+fi
+
 echo "Press Ctrl+C to stop all services."
 echo ""
 

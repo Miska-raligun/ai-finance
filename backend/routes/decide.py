@@ -31,6 +31,7 @@ def _gather_context(user_id: int) -> dict:
     rows = db.execute(
         "SELECT category, SUM(amount) AS total "
         "FROM records WHERE user_id = ? AND date >= ? "
+        "AND deleted_at IS NULL "
         "GROUP BY category ORDER BY total DESC LIMIT 8",
         (user_id, three_mo_start),
     ).fetchall()
@@ -40,7 +41,8 @@ def _gather_context(user_id: int) -> dict:
     # 本月已花
     month_spend = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS s FROM records "
-        "WHERE user_id = ? AND substr(date, 1, 7) = ?",
+        "WHERE user_id = ? AND substr(date, 1, 7) = ? "
+        "AND deleted_at IS NULL",
         (user_id, cur_month),
     ).fetchone()["s"]
 
@@ -55,12 +57,14 @@ def _gather_context(user_id: int) -> dict:
     d30 = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     income_30 = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS s FROM income "
-        "WHERE user_id = ? AND date >= ?",
+        "WHERE user_id = ? AND date >= ? "
+        "AND deleted_at IS NULL",
         (user_id, d30),
     ).fetchone()["s"]
     spend_30 = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS s FROM records "
-        "WHERE user_id = ? AND date >= ?",
+        "WHERE user_id = ? AND date >= ? "
+        "AND deleted_at IS NULL",
         (user_id, d30),
     ).fetchone()["s"]
 
@@ -68,6 +72,7 @@ def _gather_context(user_id: int) -> dict:
     goals = db.execute(
         "SELECT name, target_amount, current_progress, deadline "
         "FROM financial_goals WHERE user_id = ? AND current_progress < target_amount "
+        "AND deleted_at IS NULL "
         "ORDER BY priority ASC LIMIT 3",
         (user_id,),
     ).fetchall()

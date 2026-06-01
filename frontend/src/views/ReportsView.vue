@@ -157,10 +157,17 @@ onMounted(async () => {
   }
 })
 
-// keep-alive 下切回本页时刷新列表，避免在别处生成 / 删除报告后回来看到陈旧
-// 数据。10 秒节流，避免来回切页造成无谓请求。
+// keep-alive 下切回本页时刷新列表 + 回顾卡：
+//   - 若 store.stale=true（其它页改账触发 bus 通知），立即重拉无视节流；
+//   - 否则 10 秒节流避免来回切页打无谓请求。
 let _lastFetchAt = 0
 onActivated(() => {
+  if (store.stale) {
+    _lastFetchAt = Date.now()
+    store.fetchList()
+    loadRecap()
+    return
+  }
   const now = Date.now()
   if (now - _lastFetchAt < 10_000) return
   _lastFetchAt = now

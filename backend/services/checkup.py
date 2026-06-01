@@ -46,11 +46,15 @@ def _month_value_change(db, user_id: int, period: str) -> float:
     prev = _recent_months(period, 2)[1]
 
     def total_at_or_before(p: str) -> float:
-        # 每个 asset 取「<=p 月份」的最新一条快照（id 作单调时间代理）
+        # 每个 asset 取「<=p 月份」的最新一条快照（id 作单调时间代理）；
+        # JOIN assets 过滤掉已软删的资产，避免遗留 history 行膨胀月差。
         row = db.execute(
             """
-            SELECT COALESCE(SUM(value), 0) AS s FROM asset_value_history h
+            SELECT COALESCE(SUM(h.value), 0) AS s
+            FROM asset_value_history h
+            JOIN assets a ON a.id = h.asset_id
             WHERE h.user_id = ? AND substr(h.recorded_at, 1, 7) <= ?
+              AND a.deleted_at IS NULL
               AND h.id = (
                   SELECT MAX(id) FROM asset_value_history
                   WHERE asset_id = h.asset_id AND user_id = ?
@@ -73,7 +77,8 @@ def _gather(user_id: int, period: str) -> dict:
     placeholders = ",".join("?" * len(months))
     spend_3m = db.execute(
         f"SELECT COALESCE(SUM(amount), 0) AS s FROM records "
-        f"WHERE user_id = ? AND strftime('%Y-%m', date) IN ({placeholders})",
+        f"WHERE user_id = ? AND strftime('%Y-%m', date) IN ({placeholders}) "
+        f"AND deleted_at IS NULL",
         (user_id, *months),
     ).fetchone()["s"]
     avg_monthly_spend = round(spend_3m / 3, 2)

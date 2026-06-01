@@ -33,34 +33,106 @@ class LLMQuotaExceeded(RuntimeError):
     """抛出后由 _call_llm 转成 {"error": ...}，路由层会回 429 类提示文案。"""
 
 
-def _check_user_quota() -> None:
-    """超额则抛 LLMQuotaExceeded。无 Flask 上下文（如 MCP 进程）时跳过。"""
+def _reserve_quota_slot(endpoint: str, model: str, provider: str) -> int | None:
+    """**原子**校验当日额度 + 预占一行（status='pending', tokens=0），返回新行 id。
+
+    旧实现 `_check_user_quota`（只读 SUM）与 `_record_usage`（事后 INSERT）分属两个事务，
+    并发下两个请求都能读到 99/100 都过检查再都 INSERT，导致越线。这里用 SQLite
+    `BEGIN IMMEDIATE` 取写锁串行化「读 SUM + 写占位行」，杜绝竞态。
+
+    返回值约定：
+      - int  —— 成功预占，调用方稍后用 `_finalize_usage_row` 写真实 tokens/status。
+      - None —— 没有 Flask 上下文 / 未登录 / 未启用配额（limit<=0）；调用方回退到
+        旧的 `_record_usage` 直接 INSERT 路径，保持 MCP 等场景的可观测性。
+      - 抛 LLMQuotaExceeded —— 已达上限。
+    """
     limit = _daily_token_limit()
     if limit <= 0:
-        return
+        return None
     try:
         from db import get_db
         from flask import g, has_request_context
         if not has_request_context():
-            return
+            return None
         user_id = getattr(g, "user_id", None)
         if not user_id:
-            return
+            return None
         today = datetime.utcnow().strftime("%Y-%m-%d")
-        row = get_db().execute(
-            "SELECT COALESCE(SUM(total_tokens),0) AS used "
-            "FROM llm_usage WHERE user_id = ? AND substr(created_at, 1, 10) = ?",
-            (user_id, today),
-        ).fetchone()
-        used = int(row["used"] or 0) if row else 0
-        if used >= limit:
-            raise LLMQuotaExceeded(
-                f"今日 LLM 调用已达上限（{used}/{limit} tokens），请明天再试或联系管理员调高额度"
+        now = datetime.utcnow().isoformat(timespec="seconds")
+        rid = getattr(g, "request_id", None)
+        db = get_db()
+        # SQLite 写锁串行化关键区。前一请求 commit/rollback 之后后一请求才进入，
+        # 因此「SUM 读 + 占位行 INSERT」对外是原子的，杜绝并发越线。
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            row = db.execute(
+                "SELECT COALESCE(SUM(total_tokens), 0) AS used "
+                "FROM llm_usage "
+                "WHERE user_id = ? AND substr(created_at, 1, 10) = ? "
+                "  AND status IN ('success', 'pending')",
+                (user_id, today),
+            ).fetchone()
+            used = int(row["used"] or 0)
+            if used >= limit:
+                db.execute("ROLLBACK")
+                raise LLMQuotaExceeded(
+                    f"今日 LLM 调用已达上限（{used}/{limit} tokens），请明天再试或联系管理员调高额度"
+                )
+            cur = db.execute(
+                """
+                INSERT INTO llm_usage
+                  (user_id, endpoint, model, prompt_tokens, completion_tokens,
+                   total_tokens, cost_usd, request_id, created_at,
+                   latency_ms, status, error_reason, provider)
+                VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?, 0, 'pending', NULL, ?)
+                """,
+                (user_id, endpoint, model, rid, now, provider),
             )
+            db.execute("COMMIT")
+            return int(cur.lastrowid)
+        except LLMQuotaExceeded:
+            raise
+        except Exception:
+            try:
+                db.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
     except LLMQuotaExceeded:
         raise
     except Exception as _e:
-        logger.debug("LLM 配额检查失败（忽略）：%s", _e)
+        logger.debug("LLM 配额预占失败（忽略）：%s", _e)
+        return None
+
+
+def _finalize_usage_row(row_id: int, data: dict | None, *, latency_ms: int,
+                        status: str, error_reason: str | None,
+                        model: str) -> None:
+    """UPDATE 之前 `_reserve_quota_slot` 预占的行：写入真实 tokens / status / cost。"""
+    usage = (data or {}).get("usage") or {}
+    p_tok = int(usage.get("prompt_tokens") or 0)
+    c_tok = int(usage.get("completion_tokens") or 0)
+    t_tok = int(usage.get("total_tokens") or (p_tok + c_tok))
+    cost_usd = 0.0
+    if status == "success" and (p_tok or c_tok):
+        try:
+            from services.llm_pricing import estimate_cost_usd
+            cost_usd = estimate_cost_usd(model, p_tok, c_tok)
+        except Exception:  # noqa: BLE001
+            cost_usd = 0.0
+    try:
+        from db import get_db
+        db = get_db()
+        db.execute(
+            "UPDATE llm_usage SET prompt_tokens=?, completion_tokens=?, "
+            "total_tokens=?, cost_usd=?, latency_ms=?, status=?, error_reason=? "
+            "WHERE id=?",
+            (p_tok, c_tok, t_tok, cost_usd, int(latency_ms or 0), status,
+             (error_reason or None) and str(error_reason)[:200], row_id),
+        )
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("LLM usage UPDATE 失败（已忽略）：%s", e)
 
 
 def _record_usage(endpoint: str, model: str, data: dict | None, *,
@@ -138,13 +210,25 @@ def _call_llm(
     url = llm.get("url") or DEFAULT_LLM_URL
     model = llm.get("model") or DEFAULT_LLM_MODEL
 
+    # 原子预占额度槽位（成功返回 row_id；超额抛；无上下文返回 None 走旧 INSERT 路径）
+    slot_id: int | None = None
     try:
-        _check_user_quota()
+        slot_id = _reserve_quota_slot(endpoint, model, provider_name)
     except LLMQuotaExceeded as e:
         logger.warning("LLM quota exceeded endpoint=%s err=%s", endpoint, e)
         _record_usage(endpoint, model, None, status="quota_exceeded",
                       error_reason=str(e), provider=provider_name)
         return {"error": {"message": str(e), "code": "quota_exceeded"}}
+
+    def _log_usage(data, *, latency_ms, status, error_reason, provider):
+        if slot_id is not None:
+            _finalize_usage_row(slot_id, data, latency_ms=latency_ms,
+                                status=status, error_reason=error_reason,
+                                model=model)
+        else:
+            _record_usage(endpoint, model, data, latency_ms=latency_ms,
+                          status=status, error_reason=error_reason,
+                          provider=provider)
 
     provider = _resolve_provider(provider_name)
     import time as _time
@@ -159,8 +243,8 @@ def _call_llm(
         elapsed_ms = int((_time.perf_counter() - t0) * 1000)
         logger.error("LLM 调用失败（provider=%s endpoint=%s latency=%dms）: %s",
                      provider.name, endpoint, elapsed_ms, e)
-        _record_usage(endpoint, model, None, latency_ms=elapsed_ms,
-                      status="error", error_reason=str(e), provider=provider.name)
+        _log_usage(None, latency_ms=elapsed_ms, status="error",
+                   error_reason=str(e), provider=provider.name)
         return {"error": {"message": str(e) or "调用异常"}}
 
     elapsed_ms = int((_time.perf_counter() - t0) * 1000)
@@ -170,11 +254,11 @@ def _call_llm(
         st = "timeout" if "超时" in err_msg or "timeout" in err_msg.lower() else "error"
         logger.error("LLM API 错误（provider=%s endpoint=%s latency=%dms）：%s",
                      provider.name, endpoint, elapsed_ms, data["error"])
-        _record_usage(endpoint, model, None, latency_ms=elapsed_ms,
-                      status=st, error_reason=err_msg, provider=provider.name)
+        _log_usage(None, latency_ms=elapsed_ms, status=st,
+                   error_reason=err_msg, provider=provider.name)
         return data
-    _record_usage(endpoint, model, data, latency_ms=elapsed_ms,
-                  status="success", provider=provider.name)
+    _log_usage(data, latency_ms=elapsed_ms, status="success",
+               error_reason=None, provider=provider.name)
     return data
 
 
