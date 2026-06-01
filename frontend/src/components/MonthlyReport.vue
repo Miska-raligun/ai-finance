@@ -3,23 +3,23 @@
     <template #header>
       <div class="header-row">
         <span class="title">📑 {{ report.period }} 月度报告</span>
-        <span class="ts">生成于 {{ formatTime(report.created_at) }}</span>
+        <span class="ts">生成于 {{ fmtDate(report.created_at) }}</span>
       </div>
     </template>
 
     <div v-if="report.insights" class="kpis">
       <div class="kpi">
         <div class="kpi-label">总支出</div>
-        <div class="kpi-value spend">¥{{ fmt(report.insights.spend_total) }}</div>
+        <div class="kpi-value spend">¥{{ fmtMoney(report.insights.spend_total) }}</div>
       </div>
       <div class="kpi">
         <div class="kpi-label">总收入</div>
-        <div class="kpi-value income">¥{{ fmt(report.insights.income_total) }}</div>
+        <div class="kpi-value income">¥{{ fmtMoney(report.insights.income_total) }}</div>
       </div>
       <div class="kpi">
         <div class="kpi-label">净结余</div>
         <div class="kpi-value" :class="report.insights.net >= 0 ? 'income' : 'spend'">
-          ¥{{ fmt(report.insights.net) }}
+          ¥{{ fmtMoney(report.insights.net) }}
         </div>
       </div>
       <div v-if="report.insights.anomalies?.length" class="kpi">
@@ -36,20 +36,11 @@
 
 <script setup>
 import { computed } from 'vue'
+import { fmtMoney, fmtDate } from '@/utils/format'
 
 const props = defineProps({
   report: { type: Object, default: null },
 })
-
-function fmt(n) {
-  if (n == null) return '0.00'
-  return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function formatTime(iso) {
-  if (!iso) return ''
-  return iso.replace('T', ' ').slice(0, 16)
-}
 
 // 简易 Markdown 渲染（标题/列表/强调/表格/换行）
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

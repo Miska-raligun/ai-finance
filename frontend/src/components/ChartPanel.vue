@@ -71,6 +71,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api'
+import { fmtMoney } from '@/utils/format'
 import { use } from 'echarts/core'
 import VChart from 'vue-echarts'
 import { PieChart, LineChart } from 'echarts/charts'
@@ -97,7 +98,8 @@ const totalBalance = computed(() => totalIncome.value - totalExpense.value)
 const incomeChangePct = ref(null)
 const expenseChangePct = ref(null)
 const balanceChangePct = ref(null)
-const fmtNum = v => Math.abs(v).toFixed(2)
+// 涨/跌幅卡片用：先取绝对值（正负号由相邻箭头 ↑↓ 表达），再走全站统一的金额千分位格式化。
+const fmtNum = v => fmtMoney(Math.abs(v))
 
 // Animal Island 主色 + NookPhone 13 色调色板
 const PRIMARY = '#19c8b9'

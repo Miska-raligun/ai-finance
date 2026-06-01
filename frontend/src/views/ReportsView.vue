@@ -40,7 +40,7 @@
           @click="select(r.period)"
         >
           <div class="period-name">{{ r.period }}</div>
-          <div class="period-time">{{ formatTime(r.created_at) }}</div>
+          <div class="period-time">{{ fmtDate(r.created_at) }}</div>
           <el-button
             link
             type="danger"
@@ -81,6 +81,7 @@ import MonthlyReport from '@/components/MonthlyReport.vue'
 import ExportMenu from '@/components/ExportMenu.vue'
 import EmptyHint from '@/components/EmptyHint.vue'
 import RecapCard from '@/components/RecapCard.vue'
+import { fmtDate } from '@/utils/format'
 
 const store = useReportsStore()
 const userStore = useUserStore()
@@ -103,11 +104,6 @@ async function loadRecap() {
 
 // 切月份即刷新回顾卡片（即时计算，无需点生成）
 watch(month, loadRecap)
-
-function formatTime(iso) {
-  if (!iso) return ''
-  return iso.replace('T', ' ').slice(0, 16)
-}
 
 async function onGenerate() {
   try {

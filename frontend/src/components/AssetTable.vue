@@ -195,7 +195,7 @@
           </div>
           <div v-if="popoverRow.updated_at" class="drawer-row">
             <span class="drawer-label">更新于</span>
-            <span class="drawer-value text-muted">{{ formatTime(popoverRow.updated_at) }}</span>
+            <span class="drawer-value text-muted">{{ fmtDate(popoverRow.updated_at) }}</span>
           </div>
 
           <!-- 市值历史折线（仅 hasCost && holdings>0 时显示） -->
@@ -470,6 +470,7 @@ import { useAssetTypesStore } from '@/stores/assetTypes'
 import AssetTypeManager from '@/components/AssetTypeManager.vue'
 import Chart from 'chart.js/auto'
 import api from '@/api'
+import { fmtDate } from '@/utils/format'
 
 const props = defineProps({ assets: { type: Array, default: () => [] } })
 const store = useInvestmentStore()
@@ -947,10 +948,7 @@ function sortByPnl(a, b) {
   return (pa?.pct ?? -Infinity) - (pb?.pct ?? -Infinity)
 }
 
-function formatTime(iso) {
-  if (!iso) return ''
-  return String(iso).replace('T', ' ').slice(0, 16)
-}
+// 时间格式化复用 @/utils/format 的 fmtDate（默认 minute 粒度）。
 </script>
 
 <style scoped>

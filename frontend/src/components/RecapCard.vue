@@ -116,6 +116,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { domToPng } from 'modern-screenshot'
 import EmptyHint from '@/components/EmptyHint.vue'
+import { fmtMoney } from '@/utils/format'
 // 通过 Vite 资源导入拿到 favicon 的正确 URL（dev 是 /favicon.ico，prod 是带 hash 的
 // /assets/favicon-xxxx.ico）——硬编码 '/favicon.ico' 在生产构建里会 404。
 import anonUrl from '../../favicon.ico'
@@ -156,8 +157,7 @@ onMounted(() => {
 onBeforeUnmount(() => _mq.removeEventListener('change', _onMq))
 
 function fmt(n) {
-  if (n == null) return '0.00'
-  return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return fmtMoney(n)
 }
 
 async function exportPng() {
