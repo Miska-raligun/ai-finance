@@ -1,9 +1,19 @@
 // vite.config.js
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import AutoImport from 'unplugin-auto-import/vite'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    // Element Plus 按需引入：扫 <template> 里的 <el-*> 自动注入对应组件 + CSS。
+    // ElMessage/ElMessageBox 这类命令式 API 仍然由 `import { ElMessage } from 'element-plus'`
+    // 显式引入；resolver 会顺带把它们的样式补上，主 bundle 不再扛全量 EP。
+    AutoImport({ resolvers: [ElementPlusResolver()] }),
+    Components({ resolvers: [ElementPlusResolver()] }),
+  ],
   server: {
     host: '0.0.0.0',
     port: 5173,
@@ -18,9 +28,8 @@ export default defineConfig({
     }
   },
   build: {
-    // 只把真正大的图表库拆出来按需加载（仅在 Reports / Investment / Ledger
-    // 等用到 chart 的 view 才需要拉）。view 代码本身回归主 bundle，
-    // 避免每次切路由都从网络拉 chunk 造成感知卡顿。
+    // 大图表库继续单独拆 chunk（vendor-echarts/vendor-chartjs）；
+    // EP 经按需引入后体积已显著缩小，按 rollup 默认即可与主 bundle 自然分裂。
     rollupOptions: {
       output: {
         manualChunks: {
@@ -31,4 +40,3 @@ export default defineConfig({
     }
   }
 })
-

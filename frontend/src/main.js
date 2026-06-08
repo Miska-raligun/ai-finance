@@ -3,9 +3,15 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
-import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
-// Animal Island 主题：紧跟 element-plus 默认样式之后加载以覆盖
+// Element Plus 改为按需引入：模板里的 <el-*> 标签由 unplugin-vue-components 在编译期
+// 自动注入对应组件 + CSS；命令式 API（ElMessage / ElMessageBox / ElNotification / ElLoading）
+// 各文件按需 `import { ElMessage } from 'element-plus'` 显式引入即可，
+// 但它们的 CSS 不会被自动注入——必须在这里手动 import 一次。
+import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/message-box/style/css'
+import 'element-plus/es/components/notification/style/css'
+import 'element-plus/es/components/loading/style/css'
+// Animal Island 主题：在 EP 注入的样式之后加载以覆盖。
 import '@/styles/animal-theme.css'
 // 主题色板预设：暗色 + 四季
 import '@/styles/themes.css'
@@ -81,6 +87,6 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus)
+// 不再 app.use(ElementPlus) —— 按需引入时不需要全局注册。
 
 app.mount('#app')

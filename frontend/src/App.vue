@@ -211,7 +211,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount, onErrorCaptured } from 'vue'
+import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount, onErrorCaptured, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -223,7 +223,9 @@ import iconBeaver from '@/assets/decor/avatars/beaver.svg'
 import iconFox from '@/assets/decor/avatars/fox.svg'
 import ThemePicker from '@/components/ThemePicker.vue'
 import DecisionHelper from '@/components/DecisionHelper.vue'
-import FinancialCheckup from '@/components/FinancialCheckup.vue'
+// FinancialCheckup 自带 ECharts 仪表 + 折线，挂在全局 App.vue 里会拖首屏。
+// 改成异步组件——只有用户点「🩺 财务体检」按钮 v-model 切到 true 时才网络拉。
+const FinancialCheckup = defineAsyncComponent(() => import('@/components/FinancialCheckup.vue'))
 
 const route = useRoute()
 const router = useRouter()

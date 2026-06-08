@@ -46,22 +46,27 @@ def _month_value_change(db, user_id: int, period: str) -> float:
     prev = _recent_months(period, 2)[1]
 
     def total_at_or_before(p: str) -> float:
-        # 每个 asset 取「<=p 月份」的最新一条快照（id 作单调时间代理）；
+        # 每个 asset 取「<=p 月份」的最新一条快照——用 window function (ROW_NUMBER OVER
+        # PARTITION BY asset_id ORDER BY recorded_at DESC) 直接命中现有的
+        # idx_asset_value_history_asset_time(asset_id, recorded_at DESC) 索引，
+        # 避免旧实现的相关子查询 `id = (SELECT MAX(id) ...)` 在 history 表膨胀后每行
+        # 都嵌套循环。
         # JOIN assets 过滤掉已软删的资产，避免遗留 history 行膨胀月差。
         row = db.execute(
             """
             SELECT COALESCE(SUM(h.value), 0) AS s
-            FROM asset_value_history h
+            FROM (
+                SELECT asset_id, value,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY asset_id ORDER BY recorded_at DESC
+                       ) AS rn
+                FROM asset_value_history
+                WHERE user_id = ? AND substr(recorded_at, 1, 7) <= ?
+            ) h
             JOIN assets a ON a.id = h.asset_id
-            WHERE h.user_id = ? AND substr(h.recorded_at, 1, 7) <= ?
-              AND a.deleted_at IS NULL
-              AND h.id = (
-                  SELECT MAX(id) FROM asset_value_history
-                  WHERE asset_id = h.asset_id AND user_id = ?
-                    AND substr(recorded_at, 1, 7) <= ?
-              )
+            WHERE h.rn = 1 AND a.deleted_at IS NULL
             """,
-            (user_id, p, user_id, p),
+            (user_id, p),
         ).fetchone()
         return float(row["s"] or 0)
 
