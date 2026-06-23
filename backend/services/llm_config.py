@@ -79,6 +79,23 @@ def save_llm_config(user_id: int, *, url: str, apikey: str, model: str,
     get_db().commit()
 
 
+def current_llm(request_data: dict | None = None) -> dict:
+    """取当前请求用户的有效 LLM 配置:请求体里临时传的 llm 字段优先,缺省字段
+    用 llm_config 表兜底。
+
+    各路由原本各写一份 `_load_llm_cfg`(checkup / reports / decide / investment 五处),
+    模板完全相同——集中到这里之后任何加字段(如 temperature)只改一处。
+
+    必须在 Flask 请求上下文里调用(依赖 flask.g.user_id)。
+    """
+    from flask import g
+    cfg = dict((request_data or {}).get("llm") or {})
+    stored = get_llm_config(g.user_id) or {}
+    for k, v in stored.items():
+        cfg.setdefault(k, v)
+    return cfg
+
+
 def public_view(cfg: dict[str, Any] | None) -> dict[str, Any]:
     """对外展示用：apikey 掩码处理，避免下发明文。"""
     if not cfg:

@@ -7,21 +7,13 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
 from db import get_db
+from services.llm_config import current_llm
 from services.recap import compute_recap
 from services.reports import (
     generate_monthly_report, get_report, get_report_status, list_reports,
 )
 
 reports_bp = Blueprint("reports", __name__)
-
-
-def _load_llm_cfg(data: dict) -> dict:
-    from services.llm_config import get_llm_config
-    cfg = dict(data.get("llm") or {})
-    stored = get_llm_config(g.user_id) or {}
-    for k, v in stored.items():
-        cfg.setdefault(k, v)
-    return cfg
 
 
 @reports_bp.route("/api/reports", methods=["GET"])
@@ -38,7 +30,7 @@ def api_generate_report():
     if period and len(period) != 7:
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
 
-    llm_cfg = _load_llm_cfg(data)
+    llm_cfg = current_llm(data)
     result = generate_monthly_report(g.user_id, period=period, llm=llm_cfg)
     return jsonify(result)
 
@@ -50,7 +42,8 @@ def api_recap():
     period = (request.args.get("month") or "").strip() or datetime.now().strftime("%Y-%m")
     if len(period) != 7:
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
-    return jsonify(compute_recap(g.user_id, period, llm=_load_llm_cfg({})))
+    force = str(request.args.get("force") or "").lower() in {"1", "true", "yes", "on"}
+    return jsonify(compute_recap(g.user_id, period, llm=current_llm(), force=force))
 
 
 @reports_bp.route("/api/reports/<period>/status", methods=["GET"])

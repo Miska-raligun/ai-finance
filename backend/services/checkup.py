@@ -133,7 +133,19 @@ def _gather(user_id: int, period: str) -> dict:
     }
 
 
-def compute_checkup(user_id: int, period: str, llm: dict | None = None) -> dict:
+def compute_checkup(
+    user_id: int, period: str, llm: dict | None = None, *, force: bool = False,
+) -> dict:
+    """计算或读取该用户某月的财务体检。
+
+    force=False(默认)时优先返回 checkup_scores 里已有缓存,避免每次都跑 3-5s 的 LLM
+    调用。force=True 时绕过缓存重新算并 upsert(对应前端"重新体检"按钮)。
+    """
+    if not force:
+        cached = _load_cached(user_id, period)
+        if cached is not None:
+            return cached
+
     ctx = _gather(user_id, period)
     has_data = bool(ctx["spend_total"] or ctx["income_total"])
     llm = llm or {}
@@ -156,6 +168,33 @@ def compute_checkup(user_id: int, period: str, llm: dict | None = None) -> dict:
     if result["source"] != "empty":
         _save(user_id, period, result)
     return result
+
+
+def _load_cached(user_id: int, period: str) -> dict | None:
+    """读 checkup_scores 缓存,把 dimensions / context 反序列化回内存结构。
+    空记录(source=empty)不当作缓存——用户后续记账后应能立即体检。"""
+    row = get_db().execute(
+        "SELECT period, score, dimensions_json, report, source, created_at, context_json "
+        "FROM checkup_scores WHERE user_id = ? AND period = ?",
+        (user_id, period),
+    ).fetchone()
+    if not row:
+        return None
+    if (row["source"] or "") == "empty":
+        return None
+    d = dict(row)
+    try:
+        d["dimensions"] = json.loads(d.pop("dimensions_json") or "[]")
+    except json.JSONDecodeError:
+        d.pop("dimensions_json", None)
+        d["dimensions"] = []
+    try:
+        d["context"] = json.loads(d.pop("context_json") or "{}")
+    except json.JSONDecodeError:
+        d.pop("context_json", None)
+        d["context"] = {}
+    d["grade"] = grade_of(int(d.get("score") or 0))
+    return d
 
 
 def _llm_score(ctx: dict, llm: dict) -> dict | None:
@@ -279,19 +318,22 @@ def _save(user_id: int, period: str, result: dict) -> None:
     get_db().execute(
         """
         INSERT INTO checkup_scores
-            (user_id, period, score, dimensions_json, report, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (user_id, period, score, dimensions_json, report, source, created_at,
+             context_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, period) DO UPDATE SET
             score = excluded.score,
             dimensions_json = excluded.dimensions_json,
             report = excluded.report,
             source = excluded.source,
-            created_at = excluded.created_at
+            created_at = excluded.created_at,
+            context_json = excluded.context_json
         """,
         (user_id, period, int(result.get("score") or 0),
          json.dumps(result.get("dimensions") or [], ensure_ascii=False),
          result.get("report") or "", result.get("source") or "llm",
-         datetime.now().isoformat(timespec="seconds")),
+         datetime.now().isoformat(timespec="seconds"),
+         json.dumps(result.get("context") or {}, ensure_ascii=False)),
     )
     get_db().commit()
 

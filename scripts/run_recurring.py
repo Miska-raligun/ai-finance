@@ -51,6 +51,9 @@ def _cleanup_old_asset_history(db_file: str) -> int:
     """清理 asset_value_history 超过 N 天的快照，避免高频写入表无限膨胀。
 
     保留 90 天足够 AssetTable 抽屉里画历史折线。
+
+    清理结束后顺手做一次 WAL checkpoint(TRUNCATE):WAL 模式下 -wal 文件会持续
+    增长,只在 checkpoint 时收缩;每天 cron 跑一次刚好。
     """
     conn = sqlite3.connect(db_file)
     try:
@@ -59,6 +62,10 @@ def _cleanup_old_asset_history(db_file: str) -> int:
             (f"-{HISTORY_RETENTION_DAYS} days",),
         )
         conn.commit()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
         return cur.rowcount or 0
     finally:
         conn.close()

@@ -38,14 +38,12 @@ def list_asset_types_db() -> list[dict]:
 
 
 def load_llm_cfg(data: dict) -> dict:
-    """合并：请求体 > 用户存储的 llm_config > LLM 默认值。
-    apikey 在 services.llm_config.get_llm_config 里已经解密。"""
-    from services.llm_config import get_llm_config
-    cfg = dict(data.get("llm") or {})
-    stored = get_llm_config(g.user_id) or {}
-    for k, v in stored.items():
-        cfg.setdefault(k, v)
-    return cfg
+    """合并:请求体 > 用户存储的 llm_config > LLM 默认值。
+
+    向后兼容的薄封装——具体合并逻辑已经统一到 services.llm_config.current_llm。
+    """
+    from services.llm_config import current_llm
+    return current_llm(data)
 
 
 def fetch_assets() -> list[dict]:

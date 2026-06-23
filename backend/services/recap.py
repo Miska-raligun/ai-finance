@@ -37,8 +37,19 @@ def _longest_streak(dates: list[str]) -> int:
     return best
 
 
-def compute_recap(user_id: int, period: str, llm: dict | None = None) -> dict:
-    """返回本月回顾亮点 + 文案。period 形如 YYYY-MM。"""
+def compute_recap(
+    user_id: int, period: str, llm: dict | None = None, *, force: bool = False,
+) -> dict:
+    """返回本月回顾亮点 + 文案。period 形如 YYYY-MM。
+
+    force=False(默认)时命中 recap_cache 直接返回,避免 LedgerView 每次进入都触发
+    LLM。force=True 时绕过缓存重新生成。empty 结果不入缓存,等用户记账后再算。
+    """
+    if not force:
+        cached = _load_cached(user_id, period)
+        if cached is not None:
+            return cached
+
     db = get_db()
     agg = _aggregate(user_id, period)
 
@@ -109,7 +120,37 @@ def compute_recap(user_id: int, period: str, llm: dict | None = None) -> dict:
         caption, source = _make_caption(highlights, llm)
         highlights["caption"] = caption
         highlights["source"] = source
+        _save_cache(user_id, period, highlights)
     return highlights
+
+
+def _load_cached(user_id: int, period: str) -> dict | None:
+    row = get_db().execute(
+        "SELECT highlights_json FROM recap_cache WHERE user_id = ? AND period = ?",
+        (user_id, period),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["highlights_json"] or "{}") or None
+    except json.JSONDecodeError:
+        return None
+
+
+def _save_cache(user_id: int, period: str, highlights: dict) -> None:
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO recap_cache (user_id, period, highlights_json, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, period) DO UPDATE SET
+            highlights_json = excluded.highlights_json,
+            created_at = excluded.created_at
+        """,
+        (user_id, period, json.dumps(highlights, ensure_ascii=False),
+         datetime.now().isoformat(timespec="seconds")),
+    )
+    db.commit()
 
 
 def _make_caption(h: dict, llm: dict | None) -> tuple[str, str]:

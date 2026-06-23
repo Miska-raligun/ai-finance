@@ -7,6 +7,26 @@ DB_FILE = os.getenv('DB_FILE', 'records.db')
 logger = logging.getLogger(__name__)
 
 
+def _tune_connection(conn: sqlite3.Connection) -> None:
+    """统一在每个连接打开后开 WAL + 放宽 fsync + 设置 busy_timeout。
+
+    journal_mode=WAL 在 DB 文件层是持久设置,首次打开后即一直生效——但每次连接
+    再 PRAGMA 一遍是幂等的,无副作用。WAL 模式下 reader 不会被 writer 阻塞,
+    多端并发(REST + MCP + cron)写入的延迟尖刺会显著减少。
+
+    synchronous=NORMAL 把每次提交 fsync 改成 checkpoint 时再统一刷盘,常规
+    workload 不会丢数据但写延迟降一个量级。崩溃恢复仍由 WAL 保护。
+
+    busy_timeout 给并发写撞锁时一个温和的退避窗口,避免立刻抛 OperationalError。
+    """
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+    except sqlite3.Error as e:
+        logger.warning("PRAGMA 调优失败(已忽略):%s", e)
+
+
 def get_db():
     """在 Flask 请求上下文中复用连接并自动关闭；Flask 外返回独立连接（调用方需自行关闭）"""
     try:
@@ -15,11 +35,13 @@ def get_db():
             if 'db' not in g:
                 g.db = sqlite3.connect(DB_FILE)
                 g.db.row_factory = sqlite3.Row
+                _tune_connection(g.db)
             return g.db
     except ImportError:
         pass
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
+    _tune_connection(conn)
     return conn
 
 

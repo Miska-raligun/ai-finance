@@ -7,16 +7,9 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
 from services.checkup import compute_checkup, get_checkup, get_checkup_history
-from services.llm_config import get_llm_config
+from services.llm_config import current_llm
 
 checkup_bp = Blueprint("checkup", __name__)
-
-
-def _load_llm_cfg(data: dict) -> dict:
-    cfg = dict(data.get("llm") or {})
-    for k, v in (get_llm_config(g.user_id) or {}).items():
-        cfg.setdefault(k, v)
-    return cfg
 
 
 def _norm_period(raw: str | None) -> str | None:
@@ -31,7 +24,14 @@ def api_compute():
     period = _norm_period(request.args.get("month") or data.get("month"))
     if not period:
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
-    return jsonify(compute_checkup(g.user_id, period, llm=_load_llm_cfg(data)))
+    # POST /compute 等同于用户点「重新体检」,默认走 LLM 重算;调用方明确传
+    # use_cached=true 时才命中缓存(目前没有这种入口,留作未来扩展用)。
+    use_cached = str(
+        request.args.get("use_cached") or data.get("use_cached") or ""
+    ).lower() in {"1", "true", "yes", "on"}
+    return jsonify(compute_checkup(
+        g.user_id, period, llm=current_llm(data), force=not use_cached,
+    ))
 
 
 @checkup_bp.route("/api/checkup/current", methods=["GET"])

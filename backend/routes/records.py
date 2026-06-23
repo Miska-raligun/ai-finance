@@ -4,13 +4,9 @@ from constants import PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE, PARAM_NOTE
 from db import get_db, cleanup_empty_category
 from auth import login_required
 from cache import invalidate_user
+from services.llm_config import current_llm
 
 records_bp = Blueprint('records', __name__)
-
-
-def _load_llm_cfg() -> dict:
-    from services.llm_config import get_llm_config
-    return get_llm_config(g.user_id) or {}
 
 
 @records_bp.route('/api/records')
@@ -134,7 +130,7 @@ def create_record():
                 "error": "自动归类需要填写备注",
             }), 400
         from services.categorizer import categorize
-        pick = categorize(g.user_id, note, llm=_load_llm_cfg())
+        pick = categorize(g.user_id, note, llm=current_llm())
         category = pick["category"]
         cat_source = pick["source"]
         if not category:
