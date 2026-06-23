@@ -81,4 +81,8 @@ def apply_endpoint_limits(app: Flask, rules: dict[str, str]) -> None:
         if view is None:
             logger.warning("限流配置：未找到端点 %s，跳过", endpoint)
             continue
-        limiter.limit(rule)(view)
+        # 必须把包装后的 view 写回 app.view_functions——否则 Flask 派发的仍然是
+        # 原始函数,flask-limiter 在 before_request 钩子里走 in_middleware=True
+        # 路径,而该路径只对 _endpoint_hints 里有映射的 endpoint 才会展开装饰
+        # 限流,导致这里加的规则全部静默失效。
+        app.view_functions[endpoint] = limiter.limit(rule)(view)
