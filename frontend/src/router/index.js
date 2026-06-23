@@ -1,14 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// 首屏 / 高频路由同步引入，进入零网络往返：
-//   Login / Home / Chat / Ledger 都不挂大图表库，留主 bundle。
+// 入口三件套(Login + Home + Chat)同步引入,登录后立刻可交互;它们均不静态依赖
+// ECharts / Chart.js,主 bundle 里不会被这些大库绑住。
 import ChatView from '../views/ChatView.vue'
-import LedgerView from '../views/LedgerView.vue'
 import LoginView from '../views/LoginView.vue'
 import HomeView from '../views/HomeView.vue'
 
-// 重图表/低频路由改为异步组件，把 ECharts / Chart.js 推迟到真正进入这些页面才拉。
-// 这样首屏不再被 vendor-echarts (gzip 232 KB) + vendor-chartjs (gzip 70 KB) 拖累。
+// 含 ECharts 的视图全部异步:LedgerView 通过 ChartPanel/SpendCalendar/IncomeSankey
+// 间接吃下 vendor-echarts,如果同步加载会让主 bundle 在登录页就拽下 gzip 233 KB
+// 的图表库。改成动态 import 后,这些 chunk 只在用户真正进 /ledger 等页面时才下载。
+const LedgerView = () => import('../views/LedgerView.vue')
 const InvestmentView = () => import('../views/InvestmentView.vue')
 const ReportsView = () => import('../views/ReportsView.vue')
 const AdminView = () => import('../views/AdminView.vue')
