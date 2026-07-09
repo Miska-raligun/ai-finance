@@ -118,7 +118,7 @@ async function checkSession() {
   try {
     const res = await fetch('/api/me', { credentials: 'include' })
     if (res.ok) {
-      router.push('/chat')
+      router.push('/home')
       return
     }
   } catch { /* 网络错误，降级显示表单 */ }
@@ -159,7 +159,7 @@ async function onLogin() {
     const data = await res.json()
     if (data.success) {
       userStore.setIdentity({ username: username.value, isAdmin: data.is_admin })
-      router.push('/chat')
+      router.push('/home')
     } else {
       ElMessage.error(data.error || '登录失败')
     }

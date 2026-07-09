@@ -12,11 +12,14 @@
   <el-container style="height: 100vh; height: 100dvh">
     <!-- PC 侧边栏 -->
     <el-aside v-if="!isMobile && route.path !== '/login'" width="220px" class="app-aside">
-      <div class="brand">
+      <div class="brand brand-link" role="button" title="回到首页" @click="router.push('/home')">
         <img src="@/assets/decor/tree.svg" class="brand-tree" alt="" aria-hidden="true">
         <span class="brand-name">智能记账</span>
       </div>
       <nav class="side-nav" aria-label="主导航">
+        <router-link to="/home" class="nav-item" :class="{ active: route.path === '/home' }" :aria-current="route.path === '/home' ? 'page' : null">
+          <img src="@/assets/decor/tree.svg" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 首页
+        </router-link>
         <router-link to="/chat" class="nav-item" :class="{ active: route.path === '/chat' }" :aria-current="route.path === '/chat' ? 'page' : null">
           <img :src="iconBunny" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 聊天记账
         </router-link>
@@ -88,6 +91,9 @@
           <span class="brand-name">智能记账</span>
         </div>
         <nav class="side-nav">
+          <router-link to="/home" class="nav-item" :class="{ active: route.path === '/home' }" @click="showDrawer=false">
+            <img src="@/assets/decor/tree.svg" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 首页
+          </router-link>
           <router-link to="/chat" class="nav-item" :class="{ active: route.path === '/chat' }" @click="showDrawer=false">
             <img :src="iconBunny" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 聊天记账
           </router-link>
@@ -668,6 +674,8 @@ body {
   padding: 18px 18px 14px;
   margin-bottom: 4px;
 }
+.brand-link { cursor: pointer; }
+.brand-link:hover .brand-tree { transform: rotate(-6deg) scale(1.06); }
 .brand-icon { font-size: 22px; }
 .brand-tree {
   height: 40px;
