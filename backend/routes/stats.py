@@ -40,6 +40,43 @@ def _validate_year(value: str | None) -> str | None:
     return v
 
 
+@stats_bp.route("/api/stats/today", methods=["GET"])
+@login_required
+def today_stats():
+    """首页速览：今天已花 / 本月已花 / 本月预算总额与剩余。
+
+    专为 HomeView 设计的单端点——打开首页只发一个请求就能渲染速览条,
+    避免首页也要像 LedgerView 那样并发拉 3 个接口。"""
+    db = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    month = today[:7]
+
+    today_spend = float(db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM records "
+        "WHERE user_id = ? AND date = ? AND deleted_at IS NULL",
+        (g.user_id, today),
+    ).fetchone()[0])
+    month_spend = float(db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM records "
+        "WHERE user_id = ? AND strftime('%Y-%m', date) = ? AND deleted_at IS NULL",
+        (g.user_id, month),
+    ).fetchone()[0])
+    budget_total = float(db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM budgets WHERE user_id = ? AND month = ?",
+        (g.user_id, month),
+    ).fetchone()[0])
+
+    return jsonify({
+        "date": today,
+        "month": month,
+        "today_spend": round(today_spend, 2),
+        "month_spend": round(month_spend, 2),
+        "budget_total": round(budget_total, 2),
+        # 没设预算时返回 null,前端据此隐藏"预算剩余"而不是显示负数
+        "budget_remaining": round(budget_total - month_spend, 2) if budget_total > 0 else None,
+    })
+
+
 @stats_bp.route("/api/stats/comparison", methods=["GET"])
 @login_required
 def comparison_stats():

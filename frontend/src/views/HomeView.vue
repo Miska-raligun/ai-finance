@@ -8,6 +8,30 @@
       </div>
     </header>
 
+    <!-- 今日速览：打开 App 第一眼先看到数据,而不是一排按钮 -->
+    <transition name="glance-fade">
+      <div v-if="glance" class="home-glance" role="button" @click="go('/ledger')">
+        <div class="glance-item">
+          <span class="glance-label">今天已花</span>
+          <span class="glance-value">¥{{ fmt(glance.today_spend) }}</span>
+        </div>
+        <div class="glance-divider"></div>
+        <div class="glance-item">
+          <span class="glance-label">本月已花</span>
+          <span class="glance-value">¥{{ fmt(glance.month_spend) }}</span>
+        </div>
+        <template v-if="glance.budget_remaining !== null">
+          <div class="glance-divider"></div>
+          <div class="glance-item">
+            <span class="glance-label">预算还剩</span>
+            <span :class="['glance-value', glance.budget_remaining < 0 ? 'glance-over' : 'glance-ok']">
+              ¥{{ fmt(glance.budget_remaining) }}
+            </span>
+          </div>
+        </template>
+      </div>
+    </transition>
+
     <main class="phone-grid" aria-label="功能入口">
       <button
         v-for="(tile, idx) in visibleTiles"
@@ -31,9 +55,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import api from '@/api'
 import iconBunny from '@/assets/decor/avatars/bunny.svg'
 import iconShiba from '@/assets/decor/avatars/shiba.svg'
 import iconOwl from '@/assets/decor/avatars/owl.svg'
@@ -59,6 +84,29 @@ const visibleTiles = computed(() =>
 function go(path) {
   router.push(path)
 }
+
+// 今日速览。拉不到就整条隐藏(silent),不打扰首页
+const glance = ref(null)
+
+function fmt(n) {
+  const v = Number(n) || 0
+  return Math.abs(v) >= 10000
+    ? (v / 10000).toFixed(2) + '万'
+    : v.toFixed(2)
+}
+
+async function loadGlance() {
+  try {
+    const res = await api.get('/api/stats/today', { silent: true })
+    glance.value = res.data
+  } catch {
+    glance.value = null
+  }
+}
+
+onMounted(loadGlance)
+// keep-alive 切回首页时刷新,让刚记的账立刻反映在速览里
+onActivated(loadGlance)
 </script>
 
 <style scoped>
@@ -102,6 +150,60 @@ function go(path) {
   font-size: 13px;
   color: var(--color-text-muted);
   margin-top: 2px;
+}
+
+.home-glance {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 8px;
+  width: 100%;
+  max-width: 480px;
+  margin: -16px 0 24px;
+  padding: 14px 18px;
+  background: var(--color-surface, #fff);
+  border: 2.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-tile-large, 20px);
+  box-shadow: 0 4px 0 0 var(--shadow-anchor);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.home-glance:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0 0 var(--shadow-anchor);
+}
+.glance-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.glance-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+.glance-value {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--color-text-strong);
+  white-space: nowrap;
+}
+.glance-ok { color: #15803d; }
+.glance-over { color: #e05a5a; }
+.glance-divider {
+  width: 1.5px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+.glance-fade-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.glance-fade-enter-from { opacity: 0; transform: translateY(-6px); }
+
+@media (max-width: 380px) {
+  .glance-value { font-size: 15px; }
+  .home-glance { padding: 12px 12px; }
 }
 
 .phone-grid {

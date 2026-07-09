@@ -69,7 +69,7 @@ def get_or_compute(key: str, compute: Callable[[], Any]) -> Any:
 
 
 def invalidate_user(user_id: int) -> None:
-    """清空指定用户的所有缓存条目。"""
+    """清空指定用户的所有缓存条目(进程内 TTL 缓存 + DB 落盘的 recap 缓存)。"""
     prefix = f"u={user_id}|"
     with _lock:
         cache = _get_cache()
@@ -82,6 +82,28 @@ def invalidate_user(user_id: int) -> None:
                 del cache[k]
             except KeyError:
                 pass
+    _invalidate_recap_cache(user_id)
+
+
+def _invalidate_recap_cache(user_id: int) -> None:
+    """连带清掉 DB 里的本月回顾缓存(recap_cache 表)。
+
+    放在这里而不是各写路径:所有 records/income 写操作按约定都会调
+    invalidate_user,挂在这一个入口就覆盖 REST / MCP / chat / cron 全部路径,
+    以后新增写路径也自动生效。资产类写操作会多删一次 recap——无害,下次
+    访问重算即可。表不存在(老库未迁移)或 DB 异常时静默跳过,不影响主流程。
+    """
+    try:
+        from db import get_db
+        from flask import has_app_context
+        db = get_db()
+        db.execute("DELETE FROM recap_cache WHERE user_id = ?", (user_id,))
+        db.commit()
+        # Flask 上下文外 get_db 返回独立连接,调用方负责关闭
+        if not has_app_context():
+            db.close()
+    except Exception:  # noqa: BLE001 — 缓存失效永远不能拖垮业务写入
+        pass
 
 
 def clear_all() -> None:
