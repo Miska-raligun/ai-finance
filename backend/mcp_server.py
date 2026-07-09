@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 from fastmcp import FastMCP
-from db import get_db, cleanup_empty_category
+from db import get_db
 import handlers
 from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE
 
@@ -47,7 +47,7 @@ def add_income(category: str, amount: float, note: str = "", date: str = "") -> 
 def category_sum(category: str = "", month: str = "", start_date: str = "", end_date: str = "") -> str:
     """统计支出总额。可按分类、月份(YYYY-MM)、日期范围筛选，均可选。"""
     db = get_db()
-    q, args = "SELECT SUM(amount) FROM records WHERE user_id=?", [uid()]
+    q, args = "SELECT SUM(amount) FROM records WHERE user_id=? AND deleted_at IS NULL", [uid()]
     if category: q += " AND category=?"; args.append(category)
     if month: q += " AND strftime('%Y-%m', date)=?"; args.append(month)
     if start_date: q += " AND date>=?"; args.append(start_date)
@@ -57,28 +57,60 @@ def category_sum(category: str = "", month: str = "", start_date: str = "", end_
     return f"📊 {scope} {'「'+category+'」' if category else '全部'}支出合计：¥{total:.2f}"
 
 @mcp.tool()
-def query_records(category: str = "", month: str = "", start_date: str = "", end_date: str = "", limit: int = 20) -> str:
-    """查询支出明细。可按分类、月份、日期范围筛选，limit默认20条。"""
+def query_records(category: str = "", month: str = "", start_date: str = "", end_date: str = "", keyword: str = "", limit: int = 20) -> str:
+    """查询支出明细。可按分类、月份、日期范围、关键词(备注/分类模糊匹配)筛选，limit默认20条。"""
     db = get_db()
-    q, args = "SELECT id, date, category, amount, note FROM records WHERE user_id=?", [uid()]
+    q, args = "SELECT id, date, category, amount, note FROM records WHERE user_id=? AND deleted_at IS NULL", [uid()]
     if category: q += " AND category=?"; args.append(category)
     if month: q += " AND strftime('%Y-%m', date)=?"; args.append(month)
     if start_date: q += " AND date>=?"; args.append(start_date)
     if end_date: q += " AND date<=?"; args.append(end_date)
+    if keyword:
+        q += " AND (note LIKE ? OR category LIKE ?)"
+        args.extend([f"%{keyword}%", f"%{keyword}%"])
     q += " ORDER BY date DESC LIMIT ?"; args.append(limit)
     rows = db.execute(q, args).fetchall()
     if not rows: return "暂无符合条件的支出记录。"
     return "\n".join(f"ID:{r['id']} | {r['date']} | {r['category']} | ¥{r['amount']} | {r['note']}" for r in rows)
 
 @mcp.tool()
+def search_transactions(keyword: str, limit: int = 20) -> str:
+    """关键词全账本搜索：同时在支出和收入的备注/分类里模糊匹配。
+    适合"那顿火锅多少钱"“上次给妈妈转账是哪天"这类模糊回忆场景。"""
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return "⚠️ 请提供搜索关键词。"
+    db = get_db()
+    limit = max(1, min(int(limit), 50))
+    kw = f"%{keyword}%"
+    rows = db.execute(
+        "SELECT id, date, category, amount, note, '支出' AS kind FROM records "
+        "WHERE user_id=? AND deleted_at IS NULL AND (note LIKE ? OR category LIKE ?) "
+        "UNION ALL "
+        "SELECT id, date, category, amount, note, '收入' AS kind FROM income "
+        "WHERE user_id=? AND deleted_at IS NULL AND (note LIKE ? OR category LIKE ?) "
+        "ORDER BY date DESC LIMIT ?",
+        (uid(), kw, kw, uid(), kw, kw, limit),
+    ).fetchall()
+    if not rows:
+        return f"没有找到包含「{keyword}」的记录。"
+    spend = sum(r["amount"] for r in rows if r["kind"] == "支出")
+    lines = [f"🔍 找到 {len(rows)} 条包含「{keyword}」的记录（支出合计 ¥{spend:.2f}）："]
+    lines += [
+        f"{r['kind']} ID:{r['id']} | {r['date']} | {r['category']} | ¥{r['amount']} | {r['note']}"
+        for r in rows
+    ]
+    return "\n".join(lines)
+
+@mcp.tool()
 def query_income(source: str = "", month: str = "", show_all: bool = False) -> str:
     """查询收入。source:来源筛选, month:月份, show_all:True返回明细列表。"""
     db = get_db()
     if show_all:
-        rows = db.execute("SELECT id, date, category, amount, note FROM income WHERE user_id=? ORDER BY date DESC LIMIT 20", (uid(),)).fetchall()
-        total = db.execute("SELECT SUM(amount) FROM income WHERE user_id=?", (uid(),)).fetchone()[0] or 0
+        rows = db.execute("SELECT id, date, category, amount, note FROM income WHERE user_id=? AND deleted_at IS NULL ORDER BY date DESC LIMIT 20", (uid(),)).fetchall()
+        total = db.execute("SELECT SUM(amount) FROM income WHERE user_id=? AND deleted_at IS NULL", (uid(),)).fetchone()[0] or 0
         return f"共{len(rows)}条收入，总计¥{total:.2f}：\n" + "\n".join(f"ID:{r['id']}|{r['date']}|{r['category']}|¥{r['amount']}|{r['note']}" for r in rows)
-    q, args = "SELECT SUM(amount) FROM income WHERE user_id=?", [uid()]
+    q, args = "SELECT SUM(amount) FROM income WHERE user_id=? AND deleted_at IS NULL", [uid()]
     if source: q += " AND category=?"; args.append(source)
     if month: q += " AND strftime('%Y-%m', date)=?"; args.append(month)
     total = db.execute(q, args).fetchone()[0] or 0.0
@@ -93,7 +125,7 @@ def budget_remain(month: str = "", category: str = "") -> str:
         "SELECT b.category,b.amount FROM budgets b JOIN categories c ON b.category=c.name AND c.user_id=b.user_id WHERE b.month=? AND b.user_id=? AND c.type='支出'",
         (month, uid())).fetchall()}
     spend_map = {r["category"]: float(r["total"]) for r in db.execute(
-        "SELECT category,SUM(amount) as total FROM records WHERE strftime('%Y-%m', date)=? AND user_id=? GROUP BY category", (month, uid())).fetchall()}
+        "SELECT category,SUM(amount) as total FROM records WHERE strftime('%Y-%m', date)=? AND user_id=? AND deleted_at IS NULL GROUP BY category", (month, uid())).fetchall()}
     if category:
         if category not in budget_map: return f"❌ 分类「{category}」在{month}没有设置预算。"
         spent = spend_map.get(category, 0)
@@ -106,8 +138,8 @@ def analyze_spend(month: str = "") -> str:
     """消费分析，返回指定月份支出/收入排行。month:YYYY-MM(默认当月)。"""
     if not month: month = datetime.now().strftime("%Y-%m")
     db = get_db()
-    spend = db.execute("SELECT category,SUM(amount) as t FROM records WHERE strftime('%Y-%m', date)=? AND user_id=? GROUP BY category ORDER BY t DESC LIMIT 5", (month, uid())).fetchall()
-    income = db.execute("SELECT category,SUM(amount) as t FROM income WHERE strftime('%Y-%m', date)=? AND user_id=? GROUP BY category ORDER BY t DESC LIMIT 5", (month, uid())).fetchall()
+    spend = db.execute("SELECT category,SUM(amount) as t FROM records WHERE strftime('%Y-%m', date)=? AND user_id=? AND deleted_at IS NULL GROUP BY category ORDER BY t DESC LIMIT 5", (month, uid())).fetchall()
+    income = db.execute("SELECT category,SUM(amount) as t FROM income WHERE strftime('%Y-%m', date)=? AND user_id=? AND deleted_at IS NULL GROUP BY category ORDER BY t DESC LIMIT 5", (month, uid())).fetchall()
     r = f"📊 {month}财务分析：\n\n💸 支出排行：\n"
     r += "\n".join(f"  {x['category']}：¥{x['t']:.2f}" for x in spend) if spend else "  暂无支出"
     r += "\n\n💰 收入排行：\n"
@@ -126,35 +158,37 @@ def list_categories() -> str:
 
 @mcp.tool()
 def delete_record(record_id: int) -> str:
-    """删除一条支出记录。请先用 query_records 查询获取 ID，再传入删除。"""
+    """软删除一条支出记录(可在 Web 账本页恢复)。请先用 query_records 查询获取 ID。"""
+    from db import soft_delete
+    from cache import invalidate_user
     db = get_db()
     row = db.execute(
-        "SELECT id, category, amount, date, note FROM records WHERE id=? AND user_id=?",
+        "SELECT id, category, amount, date, note FROM records "
+        "WHERE id=? AND user_id=? AND deleted_at IS NULL",
         (record_id, uid())
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{record_id} 的支出记录。"
-    category = row['category']
-    db.execute("DELETE FROM records WHERE id=? AND user_id=?", (record_id, uid()))
-    db.commit()
-    cleanup_empty_category(uid(), category)
-    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
+    soft_delete("records", user_id=uid(), row_id=record_id)
+    invalidate_user(uid())
+    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
 def delete_income(income_id: int) -> str:
-    """删除一条收入记录。请先用 query_income(show_all=True) 查询获取 ID，再传入删除。"""
+    """软删除一条收入记录(可在 Web 账本页恢复)。请先用 query_income(show_all=True) 查询获取 ID。"""
+    from db import soft_delete
+    from cache import invalidate_user
     db = get_db()
     row = db.execute(
-        "SELECT id, category, amount, date, note FROM income WHERE id=? AND user_id=?",
+        "SELECT id, category, amount, date, note FROM income "
+        "WHERE id=? AND user_id=? AND deleted_at IS NULL",
         (income_id, uid())
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{income_id} 的收入记录。"
-    category = row['category']
-    db.execute("DELETE FROM income WHERE id=? AND user_id=?", (income_id, uid()))
-    db.commit()
-    cleanup_empty_category(uid(), category)
-    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
+    soft_delete("income", user_id=uid(), row_id=income_id)
+    invalidate_user(uid())
+    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
 
 @mcp.tool()
 def list_asset_types() -> str:

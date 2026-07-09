@@ -37,7 +37,7 @@ def get_income():
         start_date = f"{month}-01"
         end_date = f"{month}-{_cal.monthrange(y, m)[1]:02d}"
 
-    conditions = ["user_id = ?"]
+    conditions = ["user_id = ?", "deleted_at IS NULL"]
     params = [g.user_id]
     if category:
         conditions.append("category = ?")
@@ -48,6 +48,12 @@ def get_income():
     if end_date:
         conditions.append("date <= ?")
         params.append(end_date)
+    # 关键词搜索,与 records 一致:note / category 模糊匹配,转义通配符
+    q_kw = (request.args.get("q") or "").strip()
+    if q_kw:
+        esc = q_kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append(r"(note LIKE ? ESCAPE '\' OR category LIKE ? ESCAPE '\')")
+        params.extend([f"%{esc}%", f"%{esc}%"])
     where = " AND ".join(conditions)
 
     total = db.execute(f"SELECT COUNT(*) FROM income WHERE {where}", params).fetchone()[0]
@@ -71,18 +77,25 @@ def get_income():
 @income_bp.route('/api/income/<int:income_id>', methods=['DELETE'])
 @login_required
 def delete_income(income_id):
+    """软删除,与 records 一致,支持撤销;过期软删行由每日 cron 物理清理。"""
+    from db import soft_delete
+    hit = soft_delete("income", user_id=g.user_id, row_id=income_id)
+    invalidate_user(g.user_id)
+    return jsonify({"success": True, "undoable": hit})
+
+
+@income_bp.route('/api/income/<int:income_id>/restore', methods=['POST'])
+@login_required
+def restore_income(income_id):
     db = get_db()
-    row = db.execute(
-        "SELECT category FROM income WHERE id = ? AND user_id = ?",
+    cur = db.execute(
+        "UPDATE income SET deleted_at = NULL "
+        "WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
         (income_id, g.user_id),
-    ).fetchone()
-    db.execute(
-        "DELETE FROM income WHERE id = ? AND user_id = ?",
-        (income_id, g.user_id)
     )
     db.commit()
-    if row:
-        cleanup_empty_category(g.user_id, row["category"])
+    if cur.rowcount == 0:
+        return jsonify({"success": False, "error": "记录不存在或未被删除"}), 404
     invalidate_user(g.user_id)
     return jsonify({"success": True})
 

@@ -8,7 +8,7 @@ from constants import (
     CATEGORY_EXPENSE, CATEGORY_INCOME,
     PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE, PARAM_NOTE,
 )
-from db import cleanup_empty_category, get_db
+from db import get_db
 
 from ._common import today_str
 
@@ -57,7 +57,7 @@ def query_income(user_id: int, params: dict[str, Any]) -> str:
 
     if show_all:
         results = [dict(r) for r in db.execute(
-            "SELECT * FROM income WHERE user_id = ? ORDER BY date DESC",
+            "SELECT * FROM income WHERE user_id = ? AND deleted_at IS NULL ORDER BY date DESC",
             (user_id,)
         ).fetchall()]
         total = sum(float(r["amount"]) for r in results)
@@ -66,7 +66,7 @@ def query_income(user_id: int, params: dict[str, Any]) -> str:
             reply += f"📌 ID:{r['id']} {r['date']} - 来源「{r['category']}」收入 ¥{r['amount']}（备注：{r['note']}）\n"
         return reply + ("...（仅展示前10条）" if len(results) > 10 else "")
 
-    query = "SELECT SUM(amount) AS total FROM income WHERE user_id = ?"
+    query = "SELECT SUM(amount) AS total FROM income WHERE user_id = ? AND deleted_at IS NULL"
     args: list[Any] = [user_id]
 
     if time_range:
@@ -96,20 +96,19 @@ def query_income(user_id: int, params: dict[str, Any]) -> str:
 
 
 def delete_income(user_id: int, params: dict[str, Any]) -> str:
-    """按记录 ID 删除一条收入记录。"""
+    """按记录 ID 软删除一条收入记录(可从账本页撤销恢复)。"""
+    from db import soft_delete
     db = get_db()
     income_id = params.get("收入ID")
     if not income_id:
         return "⚠️ 请提供「收入ID」。可先调用 query_income（全部=是）查询获取ID。"
     row = db.execute(
-        "SELECT id, category, amount, date, note FROM income WHERE id=? AND user_id=?",
+        "SELECT id, category, amount, date, note FROM income "
+        "WHERE id=? AND user_id=? AND deleted_at IS NULL",
         (int(income_id), user_id)
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{income_id} 的收入记录（或不属于当前用户）。"
-    category = row['category']
-    db.execute("DELETE FROM income WHERE id=? AND user_id=?", (int(income_id), user_id))
-    db.commit()
-    cleanup_empty_category(user_id, category)
+    soft_delete("income", user_id=user_id, row_id=int(income_id))
     invalidate_user(user_id)
-    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
+    return f"✅ 已删除收入 ID:{income_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"

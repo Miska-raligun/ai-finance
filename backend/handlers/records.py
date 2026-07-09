@@ -8,7 +8,7 @@ from constants import (
     CATEGORY_EXPENSE, CATEGORY_INCOME,
     PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE, PARAM_NOTE,
 )
-from db import cleanup_empty_category, get_db
+from db import get_db
 
 from ._common import today_str
 
@@ -89,7 +89,7 @@ def search_records(user_id: int, params: dict[str, Any]) -> str:
     time_range = params.get("时间范围", "").strip()
     limit = min(20, int(params.get("条数", 10)))
 
-    q = "SELECT id, date, category, amount, note FROM records WHERE user_id=?"
+    q = "SELECT id, date, category, amount, note FROM records WHERE user_id=? AND deleted_at IS NULL"
     args: list[Any] = [user_id]
     if category:
         q += " AND category=?"; args.append(category)
@@ -114,23 +114,22 @@ def search_records(user_id: int, params: dict[str, Any]) -> str:
 
 
 def delete_record(user_id: int, params: dict[str, Any]) -> str:
-    """按记录 ID 删除一条支出记录。"""
+    """按记录 ID 软删除一条支出记录(可从账本页撤销恢复)。"""
+    from db import soft_delete
     db = get_db()
     record_id = params.get("记录ID")
     if not record_id:
         return "⚠️ 请提供「记录ID」。可先调用 search_records 查询获取ID。"
     row = db.execute(
-        "SELECT id, category, amount, date, note FROM records WHERE id=? AND user_id=?",
+        "SELECT id, category, amount, date, note FROM records "
+        "WHERE id=? AND user_id=? AND deleted_at IS NULL",
         (int(record_id), user_id)
     ).fetchone()
     if not row:
         return f"❌ 未找到 ID:{record_id} 的支出记录（或不属于当前用户）。"
-    category = row['category']
-    db.execute("DELETE FROM records WHERE id=? AND user_id=?", (int(record_id), user_id))
-    db.commit()
-    cleanup_empty_category(user_id, category)
+    soft_delete("records", user_id=user_id, row_id=int(record_id))
     invalidate_user(user_id)
-    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{category}」¥{row['amount']}（备注：{row['note']}）"
+    return f"✅ 已删除支出 ID:{record_id}，{row['date']} 「{row['category']}」¥{row['amount']}（备注：{row['note']}）"
 
 
 def category_sum(user_id: int, params: dict[str, Any]) -> str:
@@ -139,7 +138,7 @@ def category_sum(user_id: int, params: dict[str, Any]) -> str:
     end_date = params.get("结束时间")
 
     db = get_db()
-    query = "SELECT SUM(amount) FROM records WHERE user_id = ?"
+    query = "SELECT SUM(amount) FROM records WHERE user_id = ? AND deleted_at IS NULL"
     args: list[Any] = [user_id]
 
     if category:

@@ -3,6 +3,17 @@
   <div class="record-table-wrap">
     <div class="table-toolbar">
       <el-form :inline="true" size="small" class="filter-form">
+        <el-form-item label="搜索">
+          <el-input
+            v-model="searchKeyword"
+            placeholder="备注 / 分类关键词"
+            clearable
+            style="width: 150px"
+            @keyup.enter="applyFilter"
+            @clear="applyFilter"
+          />
+        </el-form-item>
+
         <el-form-item label="类型">
           <el-select v-model="filterCategory" placeholder="全部" clearable style="width: 120px">
             <el-option
@@ -294,7 +305,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import api from '@/api'
@@ -317,6 +328,7 @@ const categories = computed(() =>
   props.type === 'expense' ? categoryStore.expenseNames : categoryStore.incomeNames
 )
 const filterCategory = ref('')
+const searchKeyword = ref('')
 const today = new Date().toISOString().slice(0, 10)
 
 // 桌面端 daterange
@@ -324,6 +336,20 @@ const dateRange = ref([today, today])
 // 移动端独立 date
 const startDate = ref(today)
 const endDate = ref(today)
+
+// 带关键词搜索时,如果日期还停在"今天"的默认值,自动放宽到全部时间——
+// 用户搜"火锅"是想找那笔账,而不是想找"今天的火锅"
+function _relaxDefaultDateForSearch() {
+  if (!searchKeyword.value.trim()) return
+  const d = dateRange.value
+  const untouchedDesktop = Array.isArray(d) && d[0] === today && d[1] === today
+  const untouchedMobile = startDate.value === today && endDate.value === today
+  if (isNarrow.value ? untouchedMobile : untouchedDesktop) {
+    dateRange.value = []
+    startDate.value = ''
+    endDate.value = ''
+  }
+}
 
 const selectedRows = ref([])
 const editingId = ref(null)
@@ -402,6 +428,34 @@ async function saveDrawerEdit() {
   }
 }
 
+// 删除后弹 5 秒可撤销的 toast。后端是软删除,点「撤销」调 restore 恢复原行。
+function _showUndoToast(ids) {
+  const base = props.type === 'expense' ? '/api/records' : '/api/income'
+  const msg = ElMessage({
+    message: h('span', { style: 'display:flex;align-items:center;gap:12px' }, [
+      h('span', `已删除 ${ids.length > 1 ? ids.length + ' 条记录' : ''}`),
+      h('a', {
+        style: 'color:var(--el-color-primary);font-weight:700;cursor:pointer;white-space:nowrap',
+        onClick: async () => {
+          msg.close()
+          try {
+            await Promise.all(ids.map(id => api.post(`${base}/${id}/restore`)))
+            ElMessage.success('已恢复')
+            await fetchData()
+            categoryStore.bumpRefresh()
+            bus.emit(_dataEvent(), { ids, op: 'restore' })
+          } catch {
+            ElMessage.error('恢复失败，请到账本刷新重试')
+          }
+        },
+      }, '撤销'),
+    ]),
+    type: 'info',
+    duration: 5000,
+    showClose: true,
+  })
+}
+
 async function deleteFromDrawer() {
   try {
     await ElMessageBox.confirm('确定删除这条记录吗？', '删除确认', {
@@ -418,6 +472,7 @@ async function deleteFromDrawer() {
   showPopover.value = false
   categoryStore.bumpRefresh()
   bus.emit(_dataEvent(), { id: removedId, op: 'delete' })
+  _showUndoToast([removedId])
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / pageSize)))
@@ -429,6 +484,7 @@ function handlePageChange(val) {
 
 function resetFilters() {
   filterCategory.value = ''
+  searchKeyword.value = ''
   dateRange.value = []
   startDate.value = ''
   endDate.value = ''
@@ -479,9 +535,11 @@ async function deleteSelected() {
   selectedRows.value = []
   categoryStore.bumpRefresh()
   bus.emit(_dataEvent(), { ids: [...deletedIds], op: 'delete-batch' })
+  _showUndoToast([...deletedIds])
 }
 
 function applyFilter() {
+  _relaxDefaultDateForSearch()
   currentPage.value = 1
   fetchData()
 }
@@ -492,6 +550,7 @@ async function fetchData() {
     if (sortBy.value) params.sort_by = sortBy.value
     if (sortOrder.value) params.sort_order = sortOrder.value
     if (filterCategory.value) params.category = filterCategory.value
+    if (searchKeyword.value.trim()) params.q = searchKeyword.value.trim()
 
     // 统一处理日期范围：窄屏用独立字段，桌面用 dateRange
     const sd = isNarrow.value ? startDate.value : (dateRange.value && dateRange.value[0])

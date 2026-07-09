@@ -61,6 +61,16 @@ def _cleanup_old_asset_history(db_file: str) -> int:
             "DELETE FROM asset_value_history WHERE recorded_at < datetime('now', ?)",
             (f"-{HISTORY_RETENTION_DAYS} days",),
         )
+        # 软删超过 30 天的 records / income 物理清除——撤销窗口早已过去,
+        # 留着只会让所有查询多背一个 deleted_at 过滤的代价。
+        for tbl in ("records", "income"):
+            try:
+                conn.execute(
+                    f"DELETE FROM {tbl} WHERE deleted_at IS NOT NULL "
+                    "AND deleted_at < datetime('now', '-30 days')"
+                )
+            except sqlite3.OperationalError:
+                pass  # 老库还没跑 0007 迁移时无 deleted_at 列
         conn.commit()
         try:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

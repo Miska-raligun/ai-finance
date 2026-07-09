@@ -51,11 +51,22 @@ def get_records():
     if end_date:
         outer_conditions.append("date <= ?")
         outer_params.append(end_date)
+    # 关键词搜索：note / category 模糊匹配。% _ 转义防止用户输入被当通配符
+    q_kw = (request.args.get("q") or "").strip()
+    if q_kw:
+        esc = q_kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        outer_conditions.append(
+            r"(note LIKE ? ESCAPE '\' OR category LIKE ? ESCAPE '\')"
+        )
+        outer_params.extend([f"%{esc}%", f"%{esc}%"])
     outer_where = ("WHERE " + " AND ".join(outer_conditions)) if outer_conditions else ""
 
     total = db.execute(
         f"""
-        WITH base AS (SELECT id, category, date FROM records WHERE user_id = ?)
+        WITH base AS (
+            SELECT id, category, note, date FROM records
+            WHERE user_id = ? AND deleted_at IS NULL
+        )
         SELECT COUNT(*) FROM base {outer_where}
         """,
         [g.user_id] + outer_params
@@ -77,7 +88,7 @@ def get_records():
                        ORDER BY r.date, r.id
                        ROWS UNBOUNDED PRECEDING
                    ) as cumulative_spend
-            FROM records r WHERE r.user_id = ?
+            FROM records r WHERE r.user_id = ? AND r.deleted_at IS NULL
         ),
         enriched AS (
             SELECT base.id, base.category, base.amount, base.note, base.date, base.month,
@@ -160,18 +171,27 @@ def create_record():
 @records_bp.route('/api/records/<int:record_id>', methods=['DELETE'])
 @login_required
 def delete_record(record_id):
+    """软删除：标记 deleted_at,留 5 秒撤销窗口(实际可撤销更久)。
+    过期的软删行由 scripts/run_recurring.py 的每日清理物理删除。"""
+    from db import soft_delete
+    hit = soft_delete("records", user_id=g.user_id, row_id=record_id)
+    invalidate_user(g.user_id)
+    return jsonify({"success": True, "undoable": hit})
+
+
+@records_bp.route('/api/records/<int:record_id>/restore', methods=['POST'])
+@login_required
+def restore_record(record_id):
+    """撤销删除：把本人软删的记录恢复。"""
     db = get_db()
-    row = db.execute(
-        "SELECT category FROM records WHERE id = ? AND user_id = ?",
+    cur = db.execute(
+        "UPDATE records SET deleted_at = NULL "
+        "WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
         (record_id, g.user_id),
-    ).fetchone()
-    db.execute(
-        "DELETE FROM records WHERE id = ? AND user_id = ?",
-        (record_id, g.user_id)
     )
     db.commit()
-    if row:
-        cleanup_empty_category(g.user_id, row["category"])
+    if cur.rowcount == 0:
+        return jsonify({"success": False, "error": "记录不存在或未被删除"}), 404
     invalidate_user(g.user_id)
     return jsonify({"success": True})
 
