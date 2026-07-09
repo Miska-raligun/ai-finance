@@ -1,8 +1,9 @@
-"""chat_image:MiniMax MCP 不可达 / 识别失败时,接口仍要返回 200 而非 500,
-且 receipt 已归档(图片本体不丢)。"""
+"""chat_image(异步任务版):上传立即返回 task_id;OCR 失败时任务以 failed 收场
+并携带用户可读的错误文案;receipt 在上传时就已归档。"""
 from __future__ import annotations
 
 import io
+import time
 
 import pytest
 
@@ -32,6 +33,19 @@ def _png_bytes() -> bytes:
     )
 
 
+def _poll_task(client, task_id, timeout=10.0):
+    """轮询任务直到离开 pending,worker 在线程池里跑,给它最多 timeout 秒。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = client.get(f"/api/chat/image/tasks/{task_id}")
+        assert r.status_code == 200
+        data = r.get_json()
+        if data["status"] != "pending":
+            return data
+        time.sleep(0.1)
+    pytest.fail("图片识别任务超时未完成")
+
+
 def test_chat_image_rejects_missing_file(chat_client):
     r = chat_client.post("/api/chat/image")
     assert r.status_code == 400
@@ -47,9 +61,9 @@ def test_chat_image_rejects_bad_mime(chat_client):
     assert r.status_code == 400
 
 
-def test_chat_image_ocr_failure_returns_200_with_fallback(chat_client, monkeypatch):
-    """OCR 返回 None(MiniMax 不可达 / 识别失败)时,路由应返回 200 + 友好提示,
-    而不是抛 500;同时 receipt 应已归档(receipt_id 不为 None)。"""
+def test_chat_image_returns_task_then_fails_gracefully(chat_client, monkeypatch):
+    """OCR 返回 None(MiniMax 不可达)时:上传仍立即 202 + task_id + receipt_id,
+    任务最终 failed 且带用户可读 error,而不是同步 500 或干等 30 秒。"""
     monkeypatch.setattr("routes.chat.recognize_image", lambda b64, mime: None)
 
     r = chat_client.post(
@@ -57,9 +71,44 @@ def test_chat_image_ocr_failure_returns_200_with_fallback(chat_client, monkeypat
         data={"image": (io.BytesIO(_png_bytes()), "bill.png", "image/png")},
         content_type="multipart/form-data",
     )
-    assert r.status_code == 200
+    assert r.status_code == 202
     body = r.get_json()
-    assert "识别失败" in body["reply"]
-    assert body["pending_records"] == []
-    # 即便 OCR 挂了,小票归档应已落地,前端可关联到手填记录
+    assert body["status"] == "pending"
+    assert body["task_id"]
+    # 即便 OCR 挂了,小票归档应已落地
     assert body.get("receipt_id") is not None
+
+    final = _poll_task(chat_client, body["task_id"])
+    assert final["status"] == "failed"
+    assert "识别" in final["error"]
+
+
+def test_chat_image_task_is_user_scoped(chat_client, monkeypatch, app):
+    """别人的 task_id 查不到——防止横向读取他人识别结果。"""
+    monkeypatch.setattr("routes.chat.recognize_image", lambda b64, mime: None)
+    r = chat_client.post(
+        "/api/chat/image",
+        data={"image": (io.BytesIO(_png_bytes()), "bill.png", "image/png")},
+        content_type="multipart/form-data",
+    )
+    task_id = r.get_json()["task_id"]
+
+    # 换一个用户的 session 再查
+    from werkzeug.security import generate_password_hash
+    from db import get_db
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 0)",
+            ("other", generate_password_hash("pwd")),
+        )
+        db.commit()
+        other_id = db.execute(
+            "SELECT id FROM users WHERE username = 'other'"
+        ).fetchone()[0]
+    with chat_client.session_transaction() as s:
+        s["user_id"] = other_id
+        s["username"] = "other"
+
+    r2 = chat_client.get(f"/api/chat/image/tasks/{task_id}")
+    assert r2.status_code == 404

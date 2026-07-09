@@ -26,7 +26,17 @@
         <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="msg-body">
           <img v-if="msg.image" :src="msg.image" class="chat-image" alt="uploaded" />
-          <div v-if="msg.content" class="bubble">{{ msg.content }}</div>
+          <div v-if="msg.content" :class="['bubble', msg._recognizing ? 'bubble-recognizing' : '']">
+            {{ msg.content }}
+            <el-button
+              v-if="msg._retryFile"
+              size="small"
+              type="primary"
+              plain
+              class="bubble-retry-btn"
+              @click="retryImage(msg)"
+            >🔄 重试识别</el-button>
+          </div>
 
           <!-- 可编辑确认卡片 -->
           <template v-if="msg.pending_records && msg.pending_records.length">
@@ -185,7 +195,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -296,12 +306,27 @@ function handleImageSelect(e) {
   e.target.value = ''
 }
 
+// 图片识别改异步任务:上传立即返回 task_id + "识别中"气泡,轮询取结果。
+// 识别期间输入框不锁,可以继续打字记账。
 async function sendImage(file) {
   const previewUrl = URL.createObjectURL(file)
   chatStore.pushMessage({ sender: 'user', content: '', image: previewUrl })
-  loading.value = true
+  const placeholder = reactive({ sender: 'assistant', content: '', _recognizing: false })
+  chatStore.pushMessage(placeholder)
   await scrollToBottom()
+  await recognizeInto(placeholder, file)
+}
 
+async function retryImage(msg) {
+  const file = msg._retryFile
+  msg._retryFile = null
+  await recognizeInto(msg, file)
+}
+
+async function recognizeInto(msg, file) {
+  msg._recognizing = true
+  msg.content = '🔍 正在识别图片…通常需要十几秒,你可以先继续聊天'
+  msg.pending_records = msg.pending_assets = msg.pending_goals = undefined
   try {
     const formData = new FormData()
     formData.append('image', file)
@@ -311,15 +336,32 @@ async function sendImage(file) {
       body: formData
     })
     const data = await res.json()
-    const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
-    decoratePending(data, assistantMsg)
-    chatStore.pushMessage(assistantMsg)
-  } catch {
-    chatStore.pushMessage({ sender: 'assistant', content: '❌ 图片识别失败，请重试或手动输入。' })
+    if (!res.ok || !data.task_id) throw new Error(data.message || `上传失败 (${res.status})`)
+
+    const result = await pollImageTask(data.task_id)
+    msg.content = result.reply || '⚠️ 无法解析'
+    decoratePending(result, msg)
+  } catch (e) {
+    msg.content = `❌ ${e.message || '图片识别失败，请重试或手动输入。'}`
+    msg._retryFile = file
   } finally {
-    loading.value = false
+    msg._recognizing = false
     await scrollToBottom()
   }
+}
+
+async function pollImageTask(taskId) {
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1500))
+    const res = await fetch(`/api/chat/image/tasks/${taskId}`, { credentials: 'include' })
+    if (res.status === 404) throw new Error('识别任务已过期，请重试')
+    if (!res.ok) continue  // 瞬时网络抖动:下一轮再试
+    const data = await res.json()
+    if (data.status === 'done') return data
+    if (data.status === 'failed') throw new Error(data.error || '识别失败')
+  }
+  throw new Error('识别超时（>90 秒），服务可能繁忙，请稍后重试')
 }
 
 async function confirmRecord(rec) {
@@ -648,6 +690,18 @@ onActivated(() => {
 }
 
 /* 图片消息 */
+.bubble-recognizing {
+  animation: bubble-pulse 1.6s ease-in-out infinite;
+}
+@keyframes bubble-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.bubble-retry-btn {
+  display: block;
+  margin-top: 8px;
+}
+
 .chat-image {
   max-width: 200px;
   max-height: 200px;

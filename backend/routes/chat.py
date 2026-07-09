@@ -1,12 +1,15 @@
 """对话相关路由：文本聊天、图片识别、记录确认"""
 import os
 import json
+import time
+import uuid
 import base64
 import asyncio
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, current_app, request, jsonify, g
 from db import get_db, add_chat_message, get_chat_history
 from auth import login_required
 from tools import handlers, FINANCE_TOOLS
@@ -65,6 +68,15 @@ def recognize_image(image_b64: str, mime_type: str) -> str | None:
     except Exception:
         logger.exception("图片识别失败（mime=%s）", mime_type)
         return None
+
+
+def _quota_reply(response) -> str | None:
+    """LLM 每日配额耗尽时给出明确的用户可读回复,而不是落到"暂时无法回复"。
+    调用方在拿到 _call_llm 结果后先过一遍这里,命中就直接短路返回。"""
+    if isinstance(response, dict) and (response.get("error") or {}).get("code") == "quota_exceeded":
+        return ("⏳ 今日 AI 额度已用完,明天 0 点自动重置。"
+                "你仍然可以在「账本管理」页手动记账,或明天再来找我聊。")
+    return None
 
 
 # ── 工具调用处理（chat 和 chat_image 共用） ──────────────────────
@@ -162,6 +174,12 @@ def chat():
 
     response = call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS, extra_system=profile_ctx)
 
+    quota_msg = _quota_reply(response)
+    if quota_msg:
+        add_chat_message(g.user_id, "assistant", quota_msg)
+        return jsonify({"reply": quota_msg, "pending_records": [],
+                        "pending_assets": [], "pending_goals": []})
+
     reply = None
     pending_records = []
     pending_assets = []
@@ -191,10 +209,98 @@ def chat():
     })
 
 
+# ── 图片识别异步任务 ────────────────────────────────────────────
+# OCR + LLM 全链路可能 30-60s。以前同步扛在请求里,用户干等、还容易撞反代
+# 超时;现在上传立即返回 task_id,识别在线程池里跑,前端轮询取结果。
+# 任务存进程内 dict(waitress 单进程多线程,够用);进程重启丢任务,前端轮询
+# 超时后提示重试即可。
+_IMG_TASK_TTL = 600  # 完成的任务保留 10 分钟,给前端慢轮询留余量
+_img_tasks: dict[str, dict] = {}
+_img_tasks_lock = threading.Lock()
+_img_executor = ThreadPoolExecutor(
+    max_workers=int(os.getenv("IMAGE_WORKERS", "2")),
+    thread_name_prefix="img-task",
+)
+
+
+def _img_task_set(task_id: str, payload: dict) -> None:
+    with _img_tasks_lock:
+        _img_tasks[task_id] = payload
+        # 顺手清理过期任务,避免长期运行后 dict 无限膨胀
+        cutoff = time.time() - _IMG_TASK_TTL
+        for k in [k for k, v in _img_tasks.items() if v.get("created_at", 0) < cutoff]:
+            _img_tasks.pop(k, None)
+
+
+def _run_image_task(app, task_id: str, user_id: int, image_b64: str,
+                    mime_type: str, llm_cfg: dict, receipt_id) -> None:
+    """线程池 worker:OCR → 意图识别 → 待确认卡片 → 总结。"""
+    base = {"user_id": user_id, "created_at": time.time(), "receipt_id": receipt_id}
+    with app.app_context():
+        g.user_id = user_id  # _process_tool_calls 里的 handler 依赖 g.user_id
+        try:
+            recognized_text = recognize_image(image_b64, mime_type)
+            if not recognized_text:
+                _img_task_set(task_id, {
+                    **base, "status": "failed",
+                    "error": "图片识别服务无响应，请重试或手动输入记账信息。",
+                })
+                return
+
+            user_msg = f"[图片识别结果] {recognized_text}"
+            add_chat_message(user_id, "user", "[用户上传了一张图片]")
+
+            response = call_llm_intent(user_msg, llm_cfg, FINANCE_TOOLS)
+
+            quota_msg = _quota_reply(response)
+            if quota_msg:
+                add_chat_message(user_id, "assistant", quota_msg)
+                _img_task_set(task_id, {
+                    **base, "status": "done", "reply": quota_msg,
+                    "pending_records": [], "pending_assets": [], "pending_goals": [],
+                })
+                return
+
+            reply = None
+            pending_records, pending_assets, pending_goals = [], [], []
+            if response and "choices" in response:
+                msg_obj = response["choices"][0].get("message", {})
+                tool_calls = msg_obj.get("tool_calls")
+                if tool_calls:
+                    results, pending_records, pending_assets, pending_goals = \
+                        _process_tool_calls(tool_calls, llm_cfg)
+                    if results:
+                        llm_logger.info("[图片识别] Tools: %s",
+                                        [tc['function']['name'] for tc in tool_calls])
+                        reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
+                else:
+                    reply = msg_obj.get("content")
+
+            if not reply:
+                reply = call_llm_chat(get_chat_history(user_id), llm_cfg)
+
+            add_chat_message(user_id, "assistant", reply)
+            if receipt_id and pending_records:
+                for rec in pending_records:
+                    rec["receipt_id"] = receipt_id
+            _img_task_set(task_id, {
+                **base, "status": "done", "reply": reply,
+                "pending_records": pending_records,
+                "pending_assets": pending_assets,
+                "pending_goals": pending_goals,
+            })
+        except Exception:  # noqa: BLE001
+            logger.exception("图片识别任务失败 task=%s user=%s", task_id, user_id)
+            _img_task_set(task_id, {
+                **base, "status": "failed",
+                "error": "识别过程出错，请重试或手动输入。",
+            })
+
+
 @chat_bp.route("/api/chat/image", methods=["POST"])
 @login_required
 def chat_image():
-    """接收图片，调用 MiniMax 识别后走记账流程"""
+    """接收图片：校验 + 归档后立即返回 task_id,识别在后台线程池跑。"""
     if "image" not in request.files:
         return jsonify({"success": False, "message": "未收到图片文件"}), 400
 
@@ -207,7 +313,7 @@ def chat_image():
     if len(image_bytes) > MAX_IMAGE_SIZE:
         return jsonify({"success": False, "message": "图片大小超过 10MB 限制"}), 400
 
-    # 1. 落盘归档：哪怕后续 OCR 失败，账单图本身也已保留供用户回查
+    # 落盘归档：哪怕后续 OCR 失败，账单图本身也已保留供用户回查
     receipt_id = None
     try:
         from services.receipts import store_receipt
@@ -219,57 +325,32 @@ def chat_image():
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
     del image_bytes
 
-    recognized_text = recognize_image(image_b64, mime_type)
-    del image_b64
-
-    if not recognized_text:
-        return jsonify({
-            "reply": "图片识别失败，请重试或手动输入记账信息。",
-            "pending_records": [],
-            "receipt_id": receipt_id,  # 即便识别失败也可以让前端关联到手填记账
-        })
-
+    # llm 配置要在请求上下文里取好快照,worker 线程里没有 g
     from services.llm_config import get_llm_config
     llm_cfg = get_llm_config(g.user_id) or {}
 
-    user_msg = f"[图片识别结果] {recognized_text}"
-    add_chat_message(g.user_id, "user", "[用户上传了一张图片]")
-
-    response = call_llm_intent(user_msg, llm_cfg, FINANCE_TOOLS)
-
-    reply = None
-    pending_records = []
-    pending_assets = []
-    pending_goals = []
-    tool_calls = None
-    if response and "choices" in response:
-        msg_obj = response["choices"][0].get("message", {})
-        tool_calls = msg_obj.get("tool_calls")
-
-        if tool_calls:
-            results, pending_records, pending_assets, pending_goals = _process_tool_calls(tool_calls, llm_cfg)
-            if results:
-                llm_logger.info("[图片识别] Tools: %s", [tc['function']['name'] for tc in tool_calls])
-                reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
-        else:
-            reply = msg_obj.get("content")
-
-    if not reply:
-        chat_history = get_chat_history(g.user_id)
-        reply = call_llm_chat(chat_history, llm_cfg)
-
-    add_chat_message(g.user_id, "assistant", reply)
-    # receipt_id 透传给前端，下一步 commit_record 时带上即可把图片关联到记录
-    if receipt_id and pending_records:
-        for rec in pending_records:
-            rec["receipt_id"] = receipt_id
-    return jsonify({
-        "reply": reply,
-        "pending_records": pending_records,
-        "pending_assets": pending_assets,
-        "pending_goals": pending_goals,
-        "receipt_id": receipt_id,
+    task_id = uuid.uuid4().hex
+    _img_task_set(task_id, {
+        "user_id": g.user_id, "created_at": time.time(),
+        "status": "pending", "receipt_id": receipt_id,
     })
+    _img_executor.submit(
+        _run_image_task, current_app._get_current_object(),
+        task_id, g.user_id, image_b64, mime_type, llm_cfg, receipt_id,
+    )
+    return jsonify({"task_id": task_id, "status": "pending", "receipt_id": receipt_id}), 202
+
+
+@chat_bp.route("/api/chat/image/tasks/<task_id>", methods=["GET"])
+@login_required
+def chat_image_task_status(task_id: str):
+    """图片识别任务轮询端点。done/failed 后任务保留 10 分钟供重复拉取。"""
+    with _img_tasks_lock:
+        task = _img_tasks.get(task_id)
+    if not task or task.get("user_id") != g.user_id:
+        return jsonify({"error": "任务不存在或已过期"}), 404
+    out = {k: v for k, v in task.items() if k not in ("user_id", "created_at")}
+    return jsonify(out)
 
 
 @chat_bp.route("/api/chat/history", methods=["GET"])
