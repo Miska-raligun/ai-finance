@@ -221,6 +221,7 @@ import { ref, computed, watchEffect, onMounted, watch, onBeforeUnmount, onErrorC
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import bus from '@/event-bus'
 // 原创小动物头像 — 替代 sidebar nav 与 Phone 磁贴的 emoji，避免任天堂版权问题
 import iconBunny from '@/assets/decor/avatars/bunny.svg'
 import iconShiba from '@/assets/decor/avatars/shiba.svg'
@@ -320,13 +321,10 @@ watchEffect(() => { active.value = route.path })
 onMounted(() => userStore.fetchMe())
 watch(() => route.path, () => userStore.fetchMe())
 
-function checkConfig() {
-  if (route.path !== '/login' && userStore.needLlmConfig()) {
-    showConfig.value = true
-  }
-}
-onMounted(checkConfig)
-watch(() => route.path, checkConfig)
+// 未配置 LLM 不再强弹模态框拦路(首页会显示温和的提示条,见 HomeView);
+// 这里只监听提示条/其它入口发来的打开请求。
+onMounted(() => bus.on('open-llm-config', openConfigPanel))
+onBeforeUnmount(() => bus.off('open-llm-config', openConfigPanel))
 
 // ===== Sidebar 中间装饰：实时时钟 + LLM 生成的随机小贴士 =====
 const _now = ref(new Date())

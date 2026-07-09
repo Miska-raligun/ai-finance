@@ -9,6 +9,19 @@
         </div>
       </header>
 
+      <!-- 未配置 AI 时的温和提示:代替以前拦路的模态框 -->
+      <transition name="glance-fade">
+        <div v-if="showLlmHint" class="llm-hint">
+          <img src="/favicon.ico" class="llm-hint-avatar" alt="" aria-hidden="true">
+          <div class="llm-hint-text">
+            <span class="llm-hint-title">还没配置 AI 模型</span>
+            <span class="llm-hint-sub">聊天记账、月报、财务体检都靠它;也可以直接用系统默认。</span>
+          </div>
+          <el-button size="small" type="primary" round @click="openLlmConfig">去配置</el-button>
+          <button class="llm-hint-close" aria-label="暂不配置" @click="dismissLlmHint">×</button>
+        </div>
+      </transition>
+
       <!-- 今日速览：打开 App 第一眼先看到数据,而不是一排按钮 -->
       <transition name="glance-fade">
         <div v-if="glance" class="home-glance" role="button" @click="go('/ledger')">
@@ -67,6 +80,7 @@ import { computed, ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
+import bus from '@/event-bus'
 import iconBunny from '@/assets/decor/avatars/bunny.svg'
 import iconShiba from '@/assets/decor/avatars/shiba.svg'
 import iconOwl from '@/assets/decor/avatars/owl.svg'
@@ -129,6 +143,20 @@ async function loadGlance() {
 onMounted(loadGlance)
 // keep-alive 切回首页时刷新,让刚记的账立刻反映在速览里
 onActivated(loadGlance)
+
+// ── 未配置 AI 的温和提示 ──
+// llmConfig 为 null 表示用户还没做过选择(既没自配也没点"用系统默认")。
+// 「×」只在本次会话内静音,下次打开还会轻轻提醒一次。
+const llmHintDismissed = ref(!!sessionStorage.getItem('llmHintDismissed'))
+const showLlmHint = computed(() => !llmHintDismissed.value && !userStore.llmConfig)
+
+function openLlmConfig() {
+  bus.emit('open-llm-config')
+}
+function dismissLlmHint() {
+  llmHintDismissed.value = true
+  try { sessionStorage.setItem('llmHintDismissed', '1') } catch { /* ignore */ }
+}
 </script>
 
 <style scoped>
@@ -177,6 +205,60 @@ onActivated(loadGlance)
   font-size: 13px;
   color: var(--color-text-muted);
   margin-top: 3px;
+}
+
+.llm-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 11px 14px;
+  background: #fff7df;
+  border: 2px solid rgba(199, 151, 44, 0.25);
+  border-radius: var(--radius-tile-large, 20px);
+  box-shadow: 0 3px 0 0 rgba(199, 151, 44, 0.18);
+}
+.llm-hint-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
+}
+.llm-hint-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.llm-hint-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #7a5b1e;
+}
+.llm-hint-sub {
+  font-size: 12px;
+  color: rgba(122, 91, 30, 0.75);
+}
+.llm-hint-close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: rgba(122, 91, 30, 0.55);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+}
+.llm-hint-close:hover {
+  background: rgba(199, 151, 44, 0.12);
+  color: #7a5b1e;
+}
+@media (max-width: 560px) {
+  .llm-hint-sub { display: none; }  /* 手机上一行放不下,留标题即可 */
 }
 
 .home-glance {
