@@ -697,7 +697,8 @@ body {
   gap: 6px;
 }
 
-/* 中间装饰区 */
+/* 中间装饰区。overflow:hidden 兜底——无论贴士多长都不允许压到下方
+   footer 的用户名/按钮区;正常情况由行数钳制 + 高度媒体查询保证不触发裁切 */
 .side-mid {
   flex: 1;
   display: flex;
@@ -707,6 +708,7 @@ body {
   padding: 12px 12px 0;
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
 }
 .side-tip {
   display: flex;
@@ -777,6 +779,11 @@ body {
 }
 .side-tip-text {
   word-break: break-word;
+  /* 最多 3 行,再长省略——LLM 偶尔话痨,不能让气泡无限长高 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .side-clock {
@@ -801,6 +808,37 @@ body {
   font-size: 11px;
   color: var(--color-text-muted);
   font-weight: 600;
+}
+
+/* ── 竖向空间分级收纳(PC 侧边栏) ──
+   brand+nav+footer 固定内容实测 ≈720px,贴士(3 行钳制)≈85px、时钟 ≈80px。
+   矮视口按优先级让路:先缩海浪 → 收时钟 → 收贴士 → 整栏可滚动。
+   阈值都留了 ~20px 余量,保证贴士永远不会和 footer 的用户名挤在一起 */
+@media (max-height: 940px) {
+  .side-wave { height: 34px; background-size: 150px 34px; margin-top: 10px; }
+  .side-mid { gap: 8px; }
+}
+@media (max-height: 890px) {
+  .side-clock { display: none; }
+}
+@media (max-height: 820px) {
+  .side-tip { display: none; }
+}
+@media (max-height: 740px) {
+  /* 固定内容本身都放不下了:允许整栏滚动,好过按钮被裁掉 */
+  .app-aside { overflow-y: auto; }
+}
+
+/* ── 移动端抽屉:时钟是纯装饰(手机自带时钟),直接不放;
+   贴士钳到 2 行,矮屏(横屏/小手机)连贴士一起收,再矮允许抽屉滚动 ── */
+.drawer-inner .side-clock { display: none; }
+.drawer-inner .side-tip-text { -webkit-line-clamp: 2; }
+.drawer-inner .side-wave { height: 32px; background-size: 150px 32px; margin-top: 10px; }
+@media (max-height: 800px) {
+  .drawer-inner .side-tip { display: none; }
+}
+@media (max-height: 740px) {
+  .drawer-inner { overflow-y: auto; }
 }
 .nav-item {
   display: flex;
