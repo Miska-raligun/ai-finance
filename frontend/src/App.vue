@@ -821,23 +821,33 @@ body {
 @media (max-height: 890px) {
   .side-clock { display: none; }
 }
-@media (max-height: 820px) {
-  .side-tip { display: none; }
+/* 紧凑模式:优先压缩品牌/导航/按钮的留白来保贴士(Anon 的小发言是招牌,
+   能不砍就不砍),同时贴士降到 2 行 */
+@media (max-height: 840px) {
+  .brand { padding: 10px 18px 8px; margin-bottom: 0; }
+  .side-nav { gap: 4px; padding: 8px 14px 4px; }
+  .nav-item { padding: 7px 12px; }
+  .side-footer { padding-top: 8px; }
+  .side-actions { gap: 4px; }
+  .user-info { margin-bottom: 8px; }
+  .side-tip-text { -webkit-line-clamp: 2; }
 }
-@media (max-height: 740px) {
-  /* 固定内容本身都放不下了:允许整栏滚动,好过按钮被裁掉 */
-  .app-aside { overflow-y: auto; }
+@media (max-height: 750px) {
+  /* 紧凑完仍放不下(<750px 的桌面视口不多见):收贴士 + 整栏可滚动兜底。
+     注意 :not(.drawer-inner) 隔离——手机抽屉的高度阈值单独管理(见下),
+     不能被 PC 的规则连带误杀(真机浏览器视口普遍 650-750px) */
+  .app-aside:not(.drawer-inner) .side-tip { display: none; }
+  .app-aside:not(.drawer-inner) { overflow-y: auto; }
 }
 
-/* ── 移动端抽屉:时钟是纯装饰(手机自带时钟),直接不放;
-   贴士钳到 2 行,矮屏(横屏/小手机)连贴士一起收,再矮允许抽屉滚动 ── */
+/* ── 移动端抽屉:时钟是纯装饰(手机自带时钟),直接不放;贴士钳到 2 行。
+   抽屉固定内容 ≈600px,贴士到 ~660px 视口都放得下——真机浏览器扣掉
+   地址栏一般还有 650-750px,正常都能看到贴士;只有横屏才收 ── */
 .drawer-inner .side-clock { display: none; }
 .drawer-inner .side-tip-text { -webkit-line-clamp: 2; }
 .drawer-inner .side-wave { height: 32px; background-size: 150px 32px; margin-top: 10px; }
-@media (max-height: 800px) {
+@media (max-height: 620px) {
   .drawer-inner .side-tip { display: none; }
-}
-@media (max-height: 740px) {
   .drawer-inner { overflow-y: auto; }
 }
 .nav-item {
