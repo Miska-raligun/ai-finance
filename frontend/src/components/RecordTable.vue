@@ -69,6 +69,17 @@
       </div>
     </div>
 
+    <!-- 筛选结果合计:搜什么合计什么,没筛就是默认(今天)的合计。
+         0 笔也显示(¥0.00),搜索无结果时用户才有明确反馈 -->
+    <div class="table-summary">
+      <span class="summary-scope">{{ summaryScope }}</span>
+      合计
+      <b :class="props.type === 'expense' ? 'sum-expense' : 'sum-income'">
+        {{ props.type === 'expense' ? '-' : '+' }}¥{{ fmtSum(sumAmount) }}
+      </b>
+      <span class="summary-count">共 {{ totalRecords }} 笔</span>
+    </div>
+
     <el-table
       :data="records"
       stripe
@@ -323,6 +334,29 @@ const { refreshCounter } = storeToRefs(categoryStore)
 
 const records = ref([])
 const totalRecords = ref(0)
+const sumAmount = ref(0)
+
+function fmtSum(n) {
+  return (Number(n) || 0).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })
+}
+
+// 合计行前面的范围说明。在 fetchData 成功后快照,保证文字口径和拿回来的
+// 合计数值严格一致(输入框里没点「筛选」的草稿不影响它)
+const summaryScope = ref('今天')
+
+function _buildScopeLabel(params) {
+  const parts = []
+  if (params.q) parts.push(`「${params.q}」`)
+  if (params.category) parts.push(params.category)
+  const sd = params.start_date, ed = params.end_date
+  if (sd && ed) parts.push(sd === ed ? (sd === today ? '今天' : sd) : `${sd} ~ ${ed}`)
+  else if (sd) parts.push(`${sd} 起`)
+  else if (ed) parts.push(`截至 ${ed}`)
+  if (!parts.length) parts.push('全部')
+  return parts.join(' · ')
+}
 // 分类列表：从 store 派生，按当前 type 挑选对应数组
 const categories = computed(() =>
   props.type === 'expense' ? categoryStore.expenseNames : categoryStore.incomeNames
@@ -466,9 +500,11 @@ async function deleteFromDrawer() {
     ? `/api/records/${popoverRow.value.id}`
     : `/api/income/${popoverRow.value.id}`
   const removedId = popoverRow.value.id
+  const removedAmount = Number(popoverRow.value.amount) || 0
   await api.delete(url)
   records.value = records.value.filter(r => r.id !== removedId)
   totalRecords.value = Math.max(0, totalRecords.value - 1)
+  sumAmount.value = Math.max(0, +(sumAmount.value - removedAmount).toFixed(2))
   showPopover.value = false
   categoryStore.bumpRefresh()
   bus.emit(_dataEvent(), { id: removedId, op: 'delete' })
@@ -532,6 +568,8 @@ async function deleteSelected() {
   )
   records.value = records.value.filter(r => !deletedIds.has(r.id))
   totalRecords.value = Math.max(0, totalRecords.value - toDelete.length)
+  const removedSum = toDelete.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  sumAmount.value = Math.max(0, +(sumAmount.value - removedSum).toFixed(2))
   selectedRows.value = []
   categoryStore.bumpRefresh()
   bus.emit(_dataEvent(), { ids: [...deletedIds], op: 'delete-batch' })
@@ -565,6 +603,8 @@ async function fetchData() {
     ])
     records.value = recRes.data.data
     totalRecords.value = recRes.data.total
+    sumAmount.value = recRes.data.sum_amount || 0
+    summaryScope.value = _buildScopeLabel(params)
   } catch (err) {
     console.error('❌ 记录加载失败：', err)
   }
@@ -584,6 +624,31 @@ watch(refreshCounter, () => {
 </script>
 
 <style scoped>
+.table-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 4px 8px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.summary-scope {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-summary b {
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.sum-expense { color: #e05a5a; }
+.sum-income { color: #15803d; }
+.summary-count {
+  font-size: 12px;
+}
+
 .record-table-wrap {
   display: flex;
   flex-direction: column;

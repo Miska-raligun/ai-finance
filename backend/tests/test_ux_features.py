@@ -88,6 +88,34 @@ def test_records_keyword_search(app, auth_client):
     assert hits["total"] == 0
 
 
+# ── 筛选结果合计(sum_amount 跟随当前筛选口径) ──────────────────
+
+def test_sum_amount_follows_filters(app, auth_client):
+    _add_record(auth_client, "餐饮", 38.5, note="盒马买菜", date="2026-06-01")
+    _add_record(auth_client, "餐饮", 61.5, note="盒马鲜生", date="2026-06-15")
+    _add_record(auth_client, "交通", 12.0, note="地铁", date="2026-06-15")
+
+    # 关键词筛选:合计只算命中的
+    r = auth_client.get("/api/records", query_string={"q": "盒马"}).get_json()
+    assert r["total"] == 2
+    assert r["sum_amount"] == pytest.approx(100.0)
+
+    # 日期范围:合计是该范围的总额(与分页无关)
+    r = auth_client.get("/api/records", query_string={
+        "start_date": "2026-06-10", "end_date": "2026-06-30", "limit": 1,
+    }).get_json()
+    assert len(r["data"]) == 1          # 分页只回 1 条
+    assert r["sum_amount"] == pytest.approx(73.5)  # 合计仍是范围内 61.5+12
+
+    # 软删后合计同步减少
+    rid = auth_client.get("/api/records", query_string={"q": "地铁"}).get_json()["data"][0]["id"]
+    auth_client.delete(f"/api/records/{rid}")
+    r = auth_client.get("/api/records", query_string={
+        "start_date": "2026-06-10", "end_date": "2026-06-30",
+    }).get_json()
+    assert r["sum_amount"] == pytest.approx(61.5)
+
+
 # ── recap 缓存失效 ───────────────────────────────────────────────
 
 def test_recap_cache_invalidated_on_write(app, auth_client):

@@ -11,7 +11,7 @@ def test_records_empty_after_login(auth_client):
     r = auth_client.get("/api/records")
     assert r.status_code == 200
     body = r.get_json()
-    assert body == {"data": [], "total": 0, "page": 1, "limit": 50}
+    assert body == {"data": [], "total": 0, "sum_amount": 0.0, "page": 1, "limit": 50}
 
 
 def test_stats_summary_zero(auth_client):

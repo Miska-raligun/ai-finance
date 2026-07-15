@@ -56,7 +56,11 @@ def get_income():
         params.extend([f"%{esc}%", f"%{esc}%"])
     where = " AND ".join(conditions)
 
-    total = db.execute(f"SELECT COUNT(*) FROM income WHERE {where}", params).fetchone()[0]
+    # 条数 + 合计一次算完;合计始终对应当前筛选范围(与 records 一致)
+    total_row = db.execute(
+        f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM income WHERE {where}", params
+    ).fetchone()
+    total, sum_amount = total_row[0], round(float(total_row[1]), 2)
 
     rows = db.execute(
         f"SELECT id, category, amount, note, date, strftime('%Y-%m', date) as month "
@@ -71,7 +75,8 @@ def get_income():
             r["date"] = (r.get("month") or "") + "-01"
         results.append(r)
 
-    return jsonify({"data": results, "total": total, "page": page, "limit": limit})
+    return jsonify({"data": results, "total": total, "sum_amount": sum_amount,
+                    "page": page, "limit": limit})
 
 
 @income_bp.route('/api/income/<int:income_id>', methods=['DELETE'])

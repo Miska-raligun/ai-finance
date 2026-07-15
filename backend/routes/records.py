@@ -61,16 +61,19 @@ def get_records():
         outer_params.extend([f"%{esc}%", f"%{esc}%"])
     outer_where = ("WHERE " + " AND ".join(outer_conditions)) if outer_conditions else ""
 
-    total = db.execute(
+    # 一次拿到筛选结果集的条数 + 金额合计(合计跟筛选走:搜索/日期/分类怎么筛,
+    # 合计就是那个范围的总额,而不是当前分页那 10 条)
+    total_row = db.execute(
         f"""
         WITH base AS (
-            SELECT id, category, note, date FROM records
+            SELECT id, category, note, date, amount FROM records
             WHERE user_id = ? AND deleted_at IS NULL
         )
-        SELECT COUNT(*) FROM base {outer_where}
+        SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM base {outer_where}
         """,
         [g.user_id] + outer_params
-    ).fetchone()[0]
+    ).fetchone()
+    total, sum_amount = total_row[0], round(float(total_row[1]), 2)
 
     if sort_by == 'left_budget':
         order_clause = f"CASE WHEN left_budget IS NULL THEN 1 ELSE 0 END, left_budget {sort_order}, id DESC"
@@ -112,7 +115,8 @@ def get_records():
         r['left_budget'] = f"{lb:.2f}" if lb is not None else '—'
         results.append(r)
 
-    return jsonify({"data": results, "total": total, "page": page, "limit": limit})
+    return jsonify({"data": results, "total": total, "sum_amount": sum_amount,
+                    "page": page, "limit": limit})
 
 
 @records_bp.route('/api/records', methods=['POST'])
