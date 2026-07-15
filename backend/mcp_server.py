@@ -103,6 +103,47 @@ def search_transactions(keyword: str, limit: int = 20) -> str:
     return "\n".join(lines)
 
 @mcp.tool()
+def query_ledger_sql(sql: str, max_rows: int = 50) -> str:
+    """用只读 SQL 灵活查询自己的账本(聚合/分组/连表都可以,一次调用出结果)。
+
+    只能 SELECT,且只能查以下视图(已按当前用户过滤、剔除已删除行):
+      my_records(id, date, category, amount, note, anomaly_flag)   -- 支出
+      my_income(id, date, category, amount, note)                  -- 收入
+      my_budgets(id, category, amount, month)                      -- 月预算, month 形如 '2026-07'
+      my_categories(id, name, type)                                -- type: '支出'/'收入'
+      my_assets(id, name, type, symbol, holdings, cost_basis, current_value, currency, notes, created_at, updated_at)
+      my_goals(id, name, target_amount, current_progress, deadline, priority, note)
+      my_asset_transactions(id, asset_id, kind, quantity, price, fee, date, note)
+      my_recurring_rules(id, kind, category, amount, day_of_month, note, active, last_run_date)
+      my_asset_value_history(id, asset_id, value, recorded_at)
+
+    date 均为 'YYYY-MM-DD' 文本,可用 strftime('%Y-%m', date) 聚合到月。
+    示例:
+      在盒马总共花了多少:
+        SELECT COUNT(*) AS 笔数, SUM(amount) AS 总额 FROM my_records WHERE note LIKE '%盒马%'
+      近半年每月餐饮支出:
+        SELECT strftime('%Y-%m', date) AS 月, SUM(amount) FROM my_records
+        WHERE category='餐饮' AND date >= date('now','-6 months') GROUP BY 月 ORDER BY 月
+    """
+    from services.sql_sandbox import run_readonly_query, SandboxError
+    try:
+        columns, rows, truncated = run_readonly_query(
+            uid(), sql, max_rows=max(1, min(int(max_rows), 200)),
+        )
+    except SandboxError as e:
+        return f"⚠️ {e}"
+    if not rows:
+        return "查询无结果。"
+    def _fmt(v):
+        return f"{v:.2f}" if isinstance(v, float) else ("" if v is None else str(v))
+    lines = [" | ".join(columns)]
+    lines += [" | ".join(_fmt(v) for v in r) for r in rows]
+    if truncated:
+        lines.append(f"…(已截断,仅显示前 {len(rows)} 行,可加 WHERE/LIMIT 缩小范围)")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def query_income(source: str = "", month: str = "", show_all: bool = False) -> str:
     """查询收入。source:来源筛选, month:月份, show_all:True返回明细列表。"""
     db = get_db()
