@@ -62,9 +62,12 @@ def test_chat_image_rejects_bad_mime(chat_client):
 
 
 def test_chat_image_returns_task_then_fails_gracefully(chat_client, monkeypatch):
-    """OCR 返回 None(MiniMax 不可达)时:上传仍立即 202 + task_id + receipt_id,
+    """OCR 失败(MiniMax 不可达)时:上传仍立即 202 + task_id + receipt_id,
     任务最终 failed 且带用户可读 error,而不是同步 500 或干等 30 秒。"""
-    monkeypatch.setattr("routes.chat.recognize_image", lambda b64, mime: None)
+    monkeypatch.setattr(
+        "routes.chat.recognize_image",
+        lambda b64, mime: (None, "无法连接图片识别服务（localhost:5002）。请检查 minimax-mcp 服务是否在运行。"),
+    )
 
     r = chat_client.post(
         "/api/chat/image",
@@ -80,12 +83,14 @@ def test_chat_image_returns_task_then_fails_gracefully(chat_client, monkeypatch)
 
     final = _poll_task(chat_client, body["task_id"])
     assert final["status"] == "failed"
-    assert "识别" in final["error"]
+    # 错误文案要能指路(连不上服务),而不是笼统的"识别失败"
+    assert "无法连接" in final["error"]
 
 
 def test_chat_image_task_is_user_scoped(chat_client, monkeypatch, app):
     """别人的 task_id 查不到——防止横向读取他人识别结果。"""
-    monkeypatch.setattr("routes.chat.recognize_image", lambda b64, mime: None)
+    monkeypatch.setattr("routes.chat.recognize_image",
+                        lambda b64, mime: (None, "mock 失败"))
     r = chat_client.post(
         "/api/chat/image",
         data={"image": (io.BytesIO(_png_bytes()), "bill.png", "image/png")},

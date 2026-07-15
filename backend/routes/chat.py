@@ -51,23 +51,41 @@ async def _recognize_image_async(image_b64: str, mime_type: str) -> str:
             return result.content[0].text
 
 
-def recognize_image(image_b64: str, mime_type: str) -> str | None:
+def _classify_ocr_error(e: BaseException, mcp_port: str) -> str:
+    """把底层异常翻译成用户/管理员能看懂的原因。
+
+    anyio 的 task group 常把真实异常包在 ExceptionGroup 里,先解包;
+    httpx 的连接异常类名都带 Connect,用类名嗅探避免顶层 import httpx。
+    """
+    while isinstance(e, BaseExceptionGroup) and e.exceptions:
+        e = e.exceptions[0]
+    name = type(e).__name__
+    if isinstance(e, (ConnectionError, OSError)) or "Connect" in name:
+        return (f"无法连接图片识别服务（localhost:{mcp_port}）。"
+                "请检查 minimax-mcp 服务是否在运行。")
+    return f"图片识别服务异常（{name}），请稍后重试或手动输入。"
+
+
+def recognize_image(image_b64: str, mime_type: str) -> tuple[str | None, str | None]:
     """同步包装：使用全局事件循环调用 MiniMax MCP。
 
-    任何异常都被吞成 None 返回到上游，但必须把 traceback 留在日志里——
-    否则 MCP 端口未启动 / 网络异常等部署问题会被静默掩盖。
+    返回 (识别文本, 错误原因)。失败时文本为 None、原因为用户可读的一句话,
+    同时把 traceback 留在日志里——否则 MCP 端口未启动 / 网络异常等部署问题
+    会被静默掩盖。
     """
+    mcp_port = os.getenv("MINIMAX_MCP_PORT", "5002")
     try:
         future = asyncio.run_coroutine_threadsafe(
             _recognize_image_async(image_b64, mime_type), _loop
         )
-        return future.result(timeout=30)
+        text = future.result(timeout=30)
+        return (text, None) if text else (None, "识别服务返回了空结果，请重试。")
     except TimeoutError:
         logger.warning("图片识别超时（>30s），可能 MiniMax MCP 服务无响应")
-        return None
-    except Exception:
-        logger.exception("图片识别失败（mime=%s）", mime_type)
-        return None
+        return None, "图片识别超时（>30 秒），服务可能繁忙，请稍后重试。"
+    except Exception as e:  # noqa: BLE001
+        logger.exception("图片识别失败（mime=%s, mcp=localhost:%s）", mime_type, mcp_port)
+        return None, _classify_ocr_error(e, mcp_port)
 
 
 def _quota_reply(response) -> str | None:
@@ -239,11 +257,11 @@ def _run_image_task(app, task_id: str, user_id: int, image_b64: str,
     with app.app_context():
         g.user_id = user_id  # _process_tool_calls 里的 handler 依赖 g.user_id
         try:
-            recognized_text = recognize_image(image_b64, mime_type)
+            recognized_text, ocr_err = recognize_image(image_b64, mime_type)
             if not recognized_text:
                 _img_task_set(task_id, {
                     **base, "status": "failed",
-                    "error": "图片识别服务无响应，请重试或手动输入记账信息。",
+                    "error": ocr_err or "图片识别服务无响应，请重试或手动输入记账信息。",
                 })
                 return
 
