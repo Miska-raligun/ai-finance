@@ -176,10 +176,8 @@ def _process_tool_calls(tool_calls: list, llm_cfg: dict) -> tuple[list[str], lis
 @login_required
 def chat():
     data = request.get_json()
-    llm_cfg = data.get("llm") or {}
-    from services.llm_config import get_llm_config
-    for k, v in (get_llm_config(g.user_id) or {}).items():
-        llm_cfg.setdefault(k, v)
+    from services.llm_config import current_llm
+    llm_cfg = current_llm(data)
 
     user_msg = data.get("message", "")
     latest_msg = user_msg.strip().split("\n")[-1] if isinstance(user_msg, str) else user_msg

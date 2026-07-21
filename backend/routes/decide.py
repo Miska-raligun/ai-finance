@@ -15,7 +15,7 @@ from auth import login_required
 from constants import LLM_TIMEOUT_LONG
 from db import get_db
 from services.llm import _call_llm
-from services.llm_config import get_llm_config
+from services.llm_config import current_llm
 
 decide_bp = Blueprint("decide", __name__)
 logger = logging.getLogger(__name__)
@@ -126,13 +126,9 @@ def decide():
     if price > 1_000_000:
         return jsonify({"error": "金额过大，请检查输入"}), 400
 
-    # 与 chat 路由保持一致：前端可显式传 llm 配置；缺字段用 DB 持久化的值兜底；
-    # 再缺则 _call_llm 内部读 DEEPSEEK_API_KEY env var（系统默认）。
-    llm_cfg = payload.get("llm") or {}
-    if not isinstance(llm_cfg, dict):
-        llm_cfg = {}
-    for k, v in (get_llm_config(g.user_id) or {}).items():
-        llm_cfg.setdefault(k, v)
+    # 前端可显式传 llm 配置；无用户自有 key 时 current_llm 会把 url/model 归到
+    # constants.py 系统默认(见 services.llm_config.current_llm)。
+    llm_cfg = current_llm(payload)
 
     ctx = _gather_context(g.user_id)
 

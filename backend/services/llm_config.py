@@ -83,16 +83,31 @@ def current_llm(request_data: dict | None = None) -> dict:
     """取当前请求用户的有效 LLM 配置:请求体里临时传的 llm 字段优先,缺省字段
     用 llm_config 表兜底。
 
-    各路由原本各写一份 `_load_llm_cfg`(checkup / reports / decide / investment 五处),
-    模板完全相同——集中到这里之后任何加字段(如 temperature)只改一处。
+    系统默认判定:用户既没在请求里、也没在 llm_config 表里提供**自己的 apikey**,
+    即视为「走系统默认」——此时 url / model / provider 一律取 constants.py
+    (+ _call_llm 内部的 DEEPSEEK_API_KEY env),**忽略 llm_config 里可能残留的旧
+    url / model**。否则改了 constants.py 也不生效(残留的旧 model 会一直盖过它)。
+    persona 属个性化,不受影响,保留。
+
+    各路由原本各写一份相同的 merge(checkup / reports / decide / chat / investment),
+    集中到这里之后所有端点口径一致,改一处即可。
 
     必须在 Flask 请求上下文里调用(依赖 flask.g.user_id)。
     """
     from flask import g
+    from constants import DEFAULT_LLM_URL, DEFAULT_LLM_MODEL
+
     cfg = dict((request_data or {}).get("llm") or {})
     stored = get_llm_config(g.user_id) or {}
     for k, v in stored.items():
         cfg.setdefault(k, v)
+
+    if not (cfg.get("apikey") or "").strip():
+        # 无用户自有 key → 系统默认:url/model 强制走 constants.py,provider 回落
+        # openai 兼容(_call_llm 对 provider 缺省即 openai)。
+        cfg["url"] = DEFAULT_LLM_URL
+        cfg["model"] = DEFAULT_LLM_MODEL
+        cfg.pop("provider", None)
     return cfg
 
 
