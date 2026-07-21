@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
+from constants import LLM_TIMEOUT_LONG
 from db import get_db
 from services.llm import _call_llm
 from services.llm_config import get_llm_config
@@ -208,7 +209,7 @@ def decide():
             ],
             llm=llm_cfg,
             temperature=0.4,
-            timeout=20,
+            timeout=LLM_TIMEOUT_LONG,
             endpoint="decide.advise",
         )
         if not result:

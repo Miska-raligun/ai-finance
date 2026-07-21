@@ -10,6 +10,7 @@ import logging
 import os
 from datetime import datetime
 
+from constants import LLM_TIMEOUT_LONG
 from db import get_db
 from services.llm import _call_llm
 from services.reports import _aggregate
@@ -220,7 +221,7 @@ def _llm_score(ctx: dict, llm: dict) -> dict | None:
         result = _call_llm(
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": user}],
-            llm=llm, temperature=0.3, timeout=30, endpoint="checkup.score",
+            llm=llm, temperature=0.3, timeout=LLM_TIMEOUT_LONG, endpoint="checkup.score",
         )
         if not result or "error" in result or "choices" not in result:
             return None
