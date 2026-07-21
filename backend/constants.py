@@ -11,7 +11,7 @@ PARAM_MONTH = "月份"
 
 # 默认 LLM 配置
 DEFAULT_LLM_URL = "https://api.siliconflow.cn/v1/chat/completions"
-DEFAULT_LLM_MODEL = "Pro/deepseek-ai/DeepSeek-V3"
+DEFAULT_LLM_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
 DEFAULT_PERSONA = "一个有点傲娇的财务顾问"
 
 # LLM 请求超时(秒,非流式:要等整段生成完才返回)。

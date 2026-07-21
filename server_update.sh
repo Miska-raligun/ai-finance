@@ -8,7 +8,7 @@ set -e
 FLASK_SERVICE="jzflask"
 MCP_SERVICE="ai-finance-mcp"              # MCP server 服务（端口 5001）
 MINIMAX_MCP_SERVICE="ai-finance-minimax-mcp"  # MiniMax MCP 图片识别服务（端口 5002）
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+DEPLOY_BRANCH="claude/project-optimization-analysis-yq70v"
 # ==========================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

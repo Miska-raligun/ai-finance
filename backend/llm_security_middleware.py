@@ -26,7 +26,7 @@ RATE_LIMIT_WINDOW = 60     # 滑动窗口大小（秒）
 
 load_dotenv()
 
-LLM_MODEL = "Pro/deepseek-ai/DeepSeek-V3"  # 如需更换，请根据实际支持的模型名称
+LLM_MODEL = "deepseek-ai/DeepSeek-V4-Pro"  # 如需更换，请根据实际支持的模型名称
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY_WAF")
 DEEPSEEK_API_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
