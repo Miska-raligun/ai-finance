@@ -14,7 +14,7 @@ from db import get_db, add_chat_message, get_chat_history
 from auth import login_required
 from tools import handlers, FINANCE_TOOLS
 from services.llm import call_llm_intent, call_llm_summary, call_llm_chat, llm_logger
-from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE
+from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE, LLM_TIMEOUT_LONG
 
 logger = logging.getLogger(__name__)
 chat_bp = Blueprint('chat', __name__)
@@ -266,7 +266,10 @@ def _run_image_task(app, task_id: str, user_id: int, image_b64: str,
             user_msg = f"[图片识别结果] {recognized_text}"
             add_chat_message(user_id, "user", "[用户上传了一张图片]")
 
-            response = call_llm_intent(user_msg, llm_cfg, FINANCE_TOOLS)
+            # OCR 文本可能很长,解析成记账条目比纯文字聊天耗时得多——给足超时,
+            # 否则慢端点上 10s 必超时,退化成"看不到图片"的尴尬闲聊。
+            response = call_llm_intent(user_msg, llm_cfg, FINANCE_TOOLS,
+                                       timeout=LLM_TIMEOUT_LONG)
 
             quota_msg = _quota_reply(response)
             if quota_msg:
@@ -277,23 +280,37 @@ def _run_image_task(app, task_id: str, user_id: int, image_b64: str,
                 })
                 return
 
+            # 识别成功但 LLM 解析报错/超时:明确告知(而不是掉进 call_llm_chat
+            # 闲聊——那只拿到"[用户上传了一张图片]"占位符,会回"我看不到图片")。
+            if not response or "choices" not in response:
+                err = (response or {}).get("error") or {}
+                emsg = err.get("message") if isinstance(err, dict) else str(err)
+                _img_task_set(task_id, {
+                    **base, "status": "failed",
+                    "error": f"图片已识别，但整理记账信息时失败（{emsg or '请稍后重试'}）。"
+                             "可点重试，或直接把识别到的内容打字发给我。",
+                    "recognized_text": recognized_text[:500],
+                })
+                return
+
             reply = None
             pending_records, pending_assets, pending_goals = [], [], []
-            if response and "choices" in response:
-                msg_obj = response["choices"][0].get("message", {})
-                tool_calls = msg_obj.get("tool_calls")
-                if tool_calls:
-                    results, pending_records, pending_assets, pending_goals = \
-                        _process_tool_calls(tool_calls, llm_cfg)
-                    if results:
-                        llm_logger.info("[图片识别] Tools: %s",
-                                        [tc['function']['name'] for tc in tool_calls])
-                        reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
-                else:
-                    reply = msg_obj.get("content")
+            msg_obj = response["choices"][0].get("message", {})
+            tool_calls = msg_obj.get("tool_calls")
+            if tool_calls:
+                results, pending_records, pending_assets, pending_goals = \
+                    _process_tool_calls(tool_calls, llm_cfg)
+                if results:
+                    llm_logger.info("[图片识别] Tools: %s",
+                                    [tc['function']['name'] for tc in tool_calls])
+                    reply = call_llm_summary(user_msg, "\n".join(results), llm_cfg)
+            else:
+                reply = msg_obj.get("content")
 
+            # 识别了但没提取出记账信息:给出可操作提示,不再闲聊兜底
             if not reply:
-                reply = call_llm_chat(get_chat_history(user_id), llm_cfg)
+                reply = ("图片我看过了，但没从里面识别出明确的消费/收入信息。"
+                         "可以直接告诉我金额和用途，我来帮你记。")
 
             add_chat_message(user_id, "assistant", reply)
             if receipt_id and pending_records:

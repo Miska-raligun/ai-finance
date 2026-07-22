@@ -87,6 +87,32 @@ def test_chat_image_returns_task_then_fails_gracefully(chat_client, monkeypatch)
     assert "无法连接" in final["error"]
 
 
+def test_ocr_ok_but_parse_error_gives_clear_message(chat_client, monkeypatch):
+    """OCR 成功、但把文本转记账的 LLM 调用超时/报错时:任务 failed 且文案说明
+    「已识别、整理失败」,而不是退化成 call_llm_chat 的「我看不到图片」。"""
+    monkeypatch.setattr("routes.chat.recognize_image",
+                        lambda b64, mime: ("星巴克 咖啡 38.5 元", None))
+    # 模拟意图解析 LLM 超时(返回 error 结构)
+    monkeypatch.setattr("routes.chat.call_llm_intent",
+                        lambda *a, **k: {"error": {"message": "请求超时（60s）"}})
+    # 若代码错误地走了闲聊兜底,这个 mock 会暴露它被调用
+    called = {"chat": False}
+    def _boom(*a, **k):
+        called["chat"] = True
+        return "我看不到图片呀"
+    monkeypatch.setattr("routes.chat.call_llm_chat", _boom)
+
+    r = chat_client.post(
+        "/api/chat/image",
+        data={"image": (io.BytesIO(_png_bytes()), "bill.png", "image/png")},
+        content_type="multipart/form-data",
+    )
+    final = _poll_task(chat_client, r.get_json()["task_id"])
+    assert final["status"] == "failed"
+    assert "已识别" in final["error"] and "整理" in final["error"]
+    assert called["chat"] is False   # 绝不能掉进"看不到图片"的闲聊
+
+
 def test_chat_image_task_is_user_scoped(chat_client, monkeypatch, app):
     """别人的 task_id 查不到——防止横向读取他人识别结果。"""
     monkeypatch.setattr("routes.chat.recognize_image",

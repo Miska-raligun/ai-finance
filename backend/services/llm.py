@@ -263,8 +263,12 @@ def _call_llm(
 
 
 def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list | None = None,
-                    extra_system: str | None = None) -> dict | None:
-    """意图识别（带工具调用）。extra_system 可注入用户长期画像等上下文。"""
+                    extra_system: str | None = None, timeout: int = 10) -> dict | None:
+    """意图识别（带工具调用）。extra_system 可注入用户长期画像等上下文。
+
+    timeout 默认 10s(纯文字聊天输入短、够用);图片识别把整段 OCR 文本转记账时
+    内容长得多,调用方应显式传更长的超时。
+    """
     today_str = datetime.now().strftime("%Y-%m-%d")
     messages = [
         {"role": "system", "content": f"今天是 {today_str}。你是智能财务助手，根据用户输入调用合适的工具完成记账操作。用户有多个操作时可同时调用多个工具。闲聊时不调用工具。"},
@@ -273,8 +277,8 @@ def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list |
         messages.append({"role": "system", "content": extra_system})
     messages.append({"role": "user", "content": message})
     return _call_llm(
-        messages, llm=llm, tools=finance_tools, tool_choice="auto", temperature=0.3, timeout=10,
-        endpoint="chat.intent",
+        messages, llm=llm, tools=finance_tools, tool_choice="auto", temperature=0.3,
+        timeout=timeout, endpoint="chat.intent",
     )
 
 
