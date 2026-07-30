@@ -159,7 +159,10 @@ const option = computed(() => ({
     itemHeight: 12,
     itemGap: 4,
     textGap: 4,
-    textStyle: { color: '#725d42', fontSize: 11, fontWeight: 600 },
+    textStyle: {
+      color: getComputedStyle(document.body).getPropertyValue('--color-text-muted').trim() || '#725d42',
+      fontSize: 11, fontWeight: 600,
+    },
     showLabel: false,
   },
   calendar: {

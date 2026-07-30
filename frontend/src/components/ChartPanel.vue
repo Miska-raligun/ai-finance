@@ -69,7 +69,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+
+// 读取当前主题的 CSS 变量,让 ECharts(canvas 无法解析 var())也能跟随
+// 四季 / 暗色主题。深色主题下标题不再用硬编码的深色而看不见。
+function cssVar(name, fallback) {
+  // 主题变量覆盖挂在 body[data-theme] 上,必须从 body(或其后代)读,
+  // 从 documentElement(html) 读只能拿到 :root 默认值,拿不到暗色/四季覆盖。
+  const v = getComputedStyle(document.body).getPropertyValue(name).trim()
+  return v || fallback
+}
+function chartColors() {
+  return {
+    title: cssVar('--color-text-strong', '#1e293b'),
+    axis: cssVar('--color-text-muted', '#64748b'),
+    split: cssVar('--color-surface-2', '#eef2f7'),
+    line: cssVar('--color-border-light', '#e5e7eb'),
+  }
+}
 import api from '@/api'
 import { fmtMoney } from '@/utils/format'
 import { use } from 'echarts/core'
@@ -174,9 +191,10 @@ const _doFetchChartData = async () => {
     }).join('<br/>')
   }
 
+  const C = chartColors()
   const makePie = (title, data, seriesName) => ({
     color: PALETTE,
-    title: { text: title, left: 'center', top: 6, textStyle: { fontSize: 13, fontWeight: 600, color: '#1e293b' } },
+    title: { text: title, left: 'center', top: 6, textStyle: { fontSize: 13, fontWeight: 600, color: C.title } },
     tooltip: pieTooltip,
     legend: { show: false },
     series: [{
@@ -198,8 +216,8 @@ const _doFetchChartData = async () => {
     legend: { data: ['收入', '支出', '结余'], bottom: 0, left: 'center', textStyle: { fontSize: 12 } },
     grid: { top: 36, bottom: 50, left: 50, right: 16 },
     tooltip: lineTooltip,
-    xAxis: { type: 'category', axisLine: { lineStyle: { color: 'var(--color-border-light)' } }, axisLabel: { color: '#64748b', fontSize: 11 } },
-    yAxis: { type: 'value', axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'var(--color-surface-2)' } } },
+    xAxis: { type: 'category', axisLine: { lineStyle: { color: C.line } }, axisLabel: { color: C.axis, fontSize: 11 } },
+    yAxis: { type: 'value', axisLabel: { color: C.axis, fontSize: 11 }, splitLine: { lineStyle: { color: C.split } } },
   }
 
   if (mode.value === 'month') {
@@ -249,6 +267,16 @@ watch(mode, () => {
     : new Date().getFullYear().toString()
   fetchChartData()
 })
+
+// 切主题(四季 / 暗色)时重算图表配色。ThemePicker 改的是 <html>/<body> 的
+// data-theme,监听它变化后重跑一次 build,让标题/坐标轴颜色跟上。
+let _themeObserver = null
+onMounted(() => {
+  _themeObserver = new MutationObserver(() => fetchChartData())
+  _themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  _themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] })
+})
+onBeforeUnmount(() => _themeObserver && _themeObserver.disconnect())
 </script>
 
 <style scoped>
@@ -267,10 +295,11 @@ watch(mode, () => {
   gap: 4px;
   background: var(--color-bg);
 }
-.stat-item.income  { background: #F0FDF4; }
-.stat-item.expense { background: #FFF1F2; }
+/* 半透明色调:浅色主题是淡色块,深色主题下自动叠在深底上仍协调 */
+.stat-item.income  { background: rgba(34, 197, 94, 0.14); }
+.stat-item.expense { background: rgba(244, 63, 94, 0.12); }
 .stat-item.balance-pos { background: var(--color-bg); }
-.stat-item.balance-neg { background: #FFF7ED; }
+.stat-item.balance-neg { background: rgba(249, 115, 22, 0.14); }
 .stat-label {
   font-size: 12px;
   color: var(--color-text-muted);
@@ -312,7 +341,7 @@ watch(mode, () => {
 .pie-wrap {
   flex: 1;
   min-width: 0;
-  background: #FAFBFF;
+  background: var(--color-surface-2, rgba(0, 0, 0, 0.03));
   border-radius: 8px;
   padding: 4px;
 }
