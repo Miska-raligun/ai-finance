@@ -123,6 +123,7 @@ def budget_remain(user_id: int, params: dict[str, Any]) -> str:
         SELECT category, SUM(amount) as total
         FROM records
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+          AND deleted_at IS NULL
         GROUP BY category
     """,
         (month, user_id)
@@ -161,6 +162,7 @@ def call_deepseek_budget_advice(
         SELECT category, SUM(amount) as total
         FROM records
         WHERE user_id = ? AND strftime('%Y-%m', date) = ?
+          AND deleted_at IS NULL
           AND category IN (
               SELECT name FROM categories WHERE type = ? AND user_id = ?
           )
@@ -225,7 +227,8 @@ def suggest_budgets(
 ) -> str:
     db = get_db()
     cursor = db.execute(
-        "SELECT category, amount, date FROM records WHERE user_id = ?",
+        "SELECT category, amount, date FROM records "
+        "WHERE user_id = ? AND deleted_at IS NULL",
         (user_id,)
     )
     records = [dict(row) for row in cursor.fetchall()]

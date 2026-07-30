@@ -32,6 +32,7 @@ def get_budgets():
             SELECT category, SUM(amount) as total
             FROM records
             WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+              AND deleted_at IS NULL
             GROUP BY category
         """,
             (month, g.user_id)
@@ -64,7 +65,7 @@ def get_budgets():
             """
             SELECT category, strftime('%Y-%m', date) as month, SUM(amount) as total
             FROM records
-            WHERE user_id = ?
+            WHERE user_id = ? AND deleted_at IS NULL
             GROUP BY category, month
         """,
             (g.user_id,)
@@ -174,6 +175,7 @@ def calibrate_budgets():
                COUNT(DISTINCT strftime('%Y-%m', date)) AS active_months
         FROM records
         WHERE user_id = ?
+          AND deleted_at IS NULL
           AND strftime('%Y-%m', date) < ?
           AND strftime('%Y-%m', date) >= strftime('%Y-%m', date(?, '-3 months'))
         GROUP BY category

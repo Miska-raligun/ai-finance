@@ -29,16 +29,20 @@ def _resolve_day(target: _date, day_of_month: int) -> _date:
     return _date(target.year, target.month, d)
 
 
-def list_due_rules(conn, on_date: _date) -> list[dict]:
+def list_due_rules(conn, on_date: _date, user_id: int | None = None) -> list[dict]:
     """返回当月所有应执行但还没执行的规则。
 
     应执行 = active=1 AND _resolve_day(on_date, day_of_month) <= on_date
     未执行 = last_run_date 不在 on_date 的当月
+    user_id 传入时只扫该用户(前台手动触发用);None 为全量(cron 用)。
     """
-    rows = conn.execute(
-        "SELECT id, user_id, kind, category, amount, day_of_month, note, "
-        "last_run_date FROM recurring_rules WHERE active = 1",
-    ).fetchall()
+    sql = ("SELECT id, user_id, kind, category, amount, day_of_month, note, "
+           "last_run_date FROM recurring_rules WHERE active = 1")
+    args: list = []
+    if user_id is not None:
+        sql += " AND user_id = ?"
+        args.append(user_id)
+    rows = conn.execute(sql, args).fetchall()
     due = []
     cur_month_prefix = on_date.strftime("%Y-%m")
     for r in rows:
@@ -52,15 +56,17 @@ def list_due_rules(conn, on_date: _date) -> list[dict]:
     return due
 
 
-def run_due(on_date: _date | None = None) -> dict:
-    """展开所有到期规则，返回 {executed, skipped, errors}。
+def run_due(on_date: _date | None = None, user_id: int | None = None) -> dict:
+    """展开到期规则，返回 {executed, skipped, errors}。
 
-    `on_date` 默认今天。展开操作通过 handlers 走完整的"添加一笔记账"链路，
-    保证一致性（自动建分类 / 缓存失效 / 异常检测）。
+    `on_date` 默认今天。`user_id` 传入时只展开该用户的规则(前台「立即执行」用,
+    避免一个用户触发全站展开);None 为全量(后台 cron 用)。
+    展开操作通过 handlers 走完整的"添加一笔记账"链路,保证一致性
+    (自动建分类 / 缓存失效 / 异常检测)。
     """
     on_date = on_date or _date.today()
     db = get_db()
-    due = list_due_rules(db, on_date)
+    due = list_due_rules(db, on_date, user_id=user_id)
     if not due:
         return {"executed": 0, "skipped": 0, "errors": [], "as_of": on_date.isoformat()}
 

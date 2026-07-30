@@ -127,7 +127,6 @@ def run_now():
     管理员可在调度未生效或想立刻补单时使用。后台 cron 是面向所有用户的。
     """
     from services.recurring import run_due
-    # services.run_due 当前是全量扫描；按 user 限定时直接过滤——这里图简单
-    # 调用全量后只回报本用户的结果。生产规模大时再优化。
-    result = run_due()
+    # 只展开当前用户自己的规则,避免一个用户触发全站展开(全量扫描是 cron 的活)。
+    result = run_due(user_id=g.user_id)
     return jsonify(result)

@@ -28,7 +28,8 @@ def detect(user_id: int, category: str, amount: float, date: Optional[str] = Non
     start = (today - timedelta(days=WINDOW_DAYS)).isoformat()
 
     rows = get_db().execute(
-        "SELECT amount FROM records WHERE user_id = ? AND category = ? AND date >= ? AND date <= ?",
+        "SELECT amount FROM records WHERE user_id = ? AND category = ? "
+        "AND date >= ? AND date <= ? AND deleted_at IS NULL",
         (user_id, category, start, today.isoformat()),
     ).fetchall()
     samples = [float(r["amount"]) for r in rows if (r["amount"] or 0) > 0]

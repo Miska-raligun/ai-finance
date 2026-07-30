@@ -63,7 +63,8 @@ def add_record(user_id: int, params: dict[str, Any]) -> str:
         budget_amount = float(budget_row["amount"])
         spent_total = float(db.execute(
             "SELECT COALESCE(SUM(amount),0) FROM records "
-            "WHERE user_id = ? AND category = ? AND strftime('%Y-%m', date) = ?",
+            "WHERE user_id = ? AND category = ? AND strftime('%Y-%m', date) = ? "
+            "AND deleted_at IS NULL",
             (user_id, category, month),
         ).fetchone()[0])
         remaining = budget_amount - spent_total

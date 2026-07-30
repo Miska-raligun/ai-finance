@@ -94,6 +94,69 @@ def _parse_sina_payload(code: str, payload: str) -> tuple[str | None, float | No
     return name, round(price, 4)
 
 
+def _currency_of_code(code: str) -> str:
+    """按新浪代码前缀判断计价币种。gb_ = 美股(USD),hk = 港股(HKD),其余 A 股(CNY)。"""
+    c = (code or "").lower()
+    if c.startswith("gb_"):
+        return "USD"
+    if c.startswith("hk"):
+        return "HKD"
+    return "CNY"
+
+
+# ---------- 汇率(折算成 CNY) ----------
+# 非 CNY 资产在「组合汇总」时需要折成 CNY 再相加,否则美股按 USD 数值裸加进人民币
+# 总市值,占比 / 回报率全错。汇率走新浪外汇接口,缓存 1h;抓不到用兜底常量,
+# 好过退回 1.0(=不换算的老 bug)。
+_FX_FALLBACK = {"USD": 7.2, "HKD": 0.92}
+_FX_CACHE: dict[str, tuple[float, int]] = {}   # currency -> (rate_to_cny, epoch)
+_FX_TTL = 3600
+
+
+def get_fx_to_cny(currency: str | None) -> float:
+    """1 单位 currency = ? CNY。CNY / 空 → 1.0。失败退兜底常量。"""
+    cur = (currency or "CNY").upper()
+    if cur == "CNY":
+        return 1.0
+    now = int(time.time())
+    hit = _FX_CACHE.get(cur)
+    if hit and now - hit[1] < _FX_TTL:
+        return hit[0]
+    rate = _fetch_fx_to_cny(cur)
+    if rate is None:
+        # 缓存里有旧值就用旧值,否则兜底常量
+        rate = hit[0] if hit else _FX_FALLBACK.get(cur, 1.0)
+    else:
+        _FX_CACHE[cur] = (rate, now)
+    return rate
+
+
+def _fetch_fx_to_cny(cur: str) -> float | None:
+    """新浪外汇:var hq_str_fx_susdcny="...,买入价,卖出价,中间价,...";取中间价。"""
+    code = f"fx_s{cur.lower()}cny"
+    try:
+        resp = requests.get(_SINA_URL.format(codes=code),
+                            headers=_SINA_HEADERS, timeout=HTTP_TIMEOUT)
+        resp.encoding = "gbk"
+        m = re.search(r'hq_str_%s="([^"]*)"' % re.escape(code), resp.text)
+        if not m:
+            return None
+        parts = m.group(1).split(",")
+        # 新浪外汇中间价通常在索引 3;取第一个 >0 的价格字段兜底
+        for idx in (3, 1, 2):
+            if len(parts) > idx:
+                try:
+                    v = float(parts[idx])
+                    if v > 0:
+                        return round(v, 4)
+                except ValueError:
+                    continue
+        return None
+    except (requests.RequestException, OSError) as e:
+        logger.warning("[fx] fetch %s failed: %s", cur, e)
+        return None
+
+
 def _fetch_stock_quote(symbol: str) -> QuoteResult | None:
     """单条抓取：内部仅供 fetch_quote 使用，批量场景请走 _fetch_stock_quotes_batch。"""
     res = _fetch_stock_quotes_batch([symbol])
@@ -141,7 +204,8 @@ def _fetch_stock_quotes_batch(symbols: list[str]) -> dict[str, QuoteResult]:
             name, price = _parse_sina_payload(code, payload)
             if price is None:
                 continue
-            out[orig] = QuoteResult(symbol=orig, price=price, name=name)
+            out[orig] = QuoteResult(symbol=orig, price=price, name=name,
+                                    currency=_currency_of_code(code))
     return out
 
 
@@ -329,7 +393,7 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
             if q.stale:
                 stale += 1
             new_value = round(q.price * holdings, 2)
-            _apply_new_value(db, user_id, asset_id, new_value)
+            _apply_new_value(db, user_id, asset_id, new_value, currency=q.currency)
             updated += 1
 
     for asset_id, q in cached_apply:
@@ -337,7 +401,7 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
         holdings_row = db.execute("SELECT holdings FROM assets WHERE id = ?", (asset_id,)).fetchone()
         holdings = float(holdings_row["holdings"] or 0) if holdings_row else 0.0
         new_value = round(q.price * holdings, 2)
-        _apply_new_value(db, user_id, asset_id, new_value)
+        _apply_new_value(db, user_id, asset_id, new_value, currency=q.currency)
         updated += 1
 
     db.commit()
@@ -349,18 +413,26 @@ def refresh_user_assets(db, user_id: int, *, force: bool = False) -> dict:
     }
 
 
-def _apply_new_value(db, user_id: int, asset_id: int, new_value: float) -> None:
-    """更新 assets.current_value + 同步写一条 asset_value_history 快照。
+def _apply_new_value(db, user_id: int, asset_id: int, new_value: float,
+                     currency: str | None = None) -> None:
+    """更新 assets.current_value(原币金额)+ 同步写一条 asset_value_history 快照。
+    行情已知币种时一并回填 assets.currency,供组合汇总折算 CNY。
 
     历史快照逻辑被 services/asset_history.snapshot 抽走，让所有改 current_value
     的入口（create / update / sell / refresh-prices）共用一处去重 / 写入逻辑。
     """
     from services.asset_history import snapshot
     now = _iso_now()
-    db.execute(
-        "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
-        (new_value, now, asset_id),
-    )
+    if currency:
+        db.execute(
+            "UPDATE assets SET current_value = ?, currency = ?, updated_at = ? WHERE id = ?",
+            (new_value, currency, now, asset_id),
+        )
+    else:
+        db.execute(
+            "UPDATE assets SET current_value = ?, updated_at = ? WHERE id = ?",
+            (new_value, now, asset_id),
+        )
     snapshot(db, user_id, asset_id, new_value, recorded_at=now)
 
 

@@ -17,12 +17,14 @@ _UTF8_BOM = "\ufeff"
 
 _KIND_QUERIES = {
     "records": (
-        "SELECT date, category, amount, note FROM records WHERE user_id = ? "
+        "SELECT date, category, amount, note FROM records "
+        "WHERE user_id = ? AND deleted_at IS NULL "
         "ORDER BY date DESC, id DESC",
         ["日期", "分类", "金额", "备注"],
     ),
     "income": (
-        "SELECT date, category, amount, note FROM income WHERE user_id = ? "
+        "SELECT date, category, amount, note FROM income "
+        "WHERE user_id = ? AND deleted_at IS NULL "
         "ORDER BY date DESC, id DESC",
         ["日期", "来源", "金额", "备注"],
     ),

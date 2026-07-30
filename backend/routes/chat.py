@@ -463,7 +463,8 @@ def commit_record():
                 budget_amt = float(budget_row["amount"])
                 spent = float(db.execute(
                     "SELECT COALESCE(SUM(amount),0) FROM records "
-                    "WHERE user_id = ? AND category = ? AND strftime('%Y-%m', date) = ?",
+                    "WHERE user_id = ? AND category = ? AND strftime('%Y-%m', date) = ? "
+                    "AND deleted_at IS NULL",
                     (g.user_id, category, month),
                 ).fetchone()[0])
                 remaining = budget_amt - spent

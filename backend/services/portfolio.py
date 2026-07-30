@@ -10,6 +10,33 @@ from datetime import datetime
 from typing import Iterable
 
 
+# 汇率解析器:把某币种折算成 CNY 的倍率。默认调 services.quotes.get_fx_to_cny
+# (带缓存 + 兜底),测试可替换成固定汇率。抽成模块级 hook 是为了让下面的
+# compute_* 汇总函数保持"接收 asset dict 即可"的调用签名不变。
+def _default_fx(currency: str | None) -> float:
+    try:
+        from services.quotes import get_fx_to_cny
+        return get_fx_to_cny(currency)
+    except Exception:  # noqa: BLE001 — 汇率不可用不应阻断组合计算
+        return 1.0
+
+
+_fx_resolver = _default_fx
+
+
+def _cny(value, currency: str | None) -> float:
+    """把原币金额折算成 CNY。"""
+    return float(value or 0) * _fx_resolver(currency)
+
+
+def _asset_cny(a: dict) -> float:
+    return _cny(a.get("current_value"), a.get("currency"))
+
+
+def _cost_cny(a: dict) -> float:
+    return _cny(a.get("cost_basis"), a.get("currency"))
+
+
 def _ensure_dict(rows: Iterable) -> list[dict]:
     """sqlite3.Row 可能传进来，统一转成 dict 方便操作。"""
     out = []
@@ -27,12 +54,14 @@ def compute_allocation(assets: Iterable) -> dict:
     返回：{total_value, by_type:[{type,value,pct}], by_asset:[{name,type,value,pct}]}
     """
     items = _ensure_dict(assets)
-    total = float(sum((a.get("current_value") or 0) for a in items))
+    # 全部折算成 CNY 再算占比,否则美股(USD)/港股(HKD)数值裸加会让总市值和
+    # 占比失真。单笔展示的原币金额由前端另行处理,这里的 value 统一是 CNY。
+    total = float(sum(_asset_cny(a) for a in items))
 
     by_type_map: dict[str, float] = {}
     for a in items:
         t = (a.get("type") or "other").strip() or "other"
-        by_type_map[t] = by_type_map.get(t, 0.0) + float(a.get("current_value") or 0)
+        by_type_map[t] = by_type_map.get(t, 0.0) + _asset_cny(a)
 
     by_type = []
     for t, v in sorted(by_type_map.items(), key=lambda x: x[1], reverse=True):
@@ -44,7 +73,7 @@ def compute_allocation(assets: Iterable) -> dict:
 
     by_asset = []
     for a in items:
-        v = float(a.get("current_value") or 0)
+        v = _asset_cny(a)
         by_asset.append({
             "id": a.get("id"),
             "name": a.get("name"),
@@ -94,10 +123,11 @@ def compute_drift(allocation: dict, target: dict) -> list[dict]:
 
 
 def compute_return(assets: Iterable) -> dict:
-    """简化总回报：(current_value 之和 - cost_basis 之和) / cost_basis 之和。"""
+    """简化总回报：(current_value 之和 - cost_basis 之和) / cost_basis 之和。
+    跨币种资产先各自折算成 CNY 再相加。"""
     items = _ensure_dict(assets)
-    total_value = float(sum((a.get("current_value") or 0) for a in items))
-    total_cost = float(sum((a.get("cost_basis") or 0) for a in items))
+    total_value = float(sum(_asset_cny(a) for a in items))
+    total_cost = float(sum(_cost_cny(a) for a in items))
     pnl = total_value - total_cost
     pct = (pnl / total_cost * 100) if total_cost > 0 else 0.0
     return {
@@ -111,7 +141,8 @@ def compute_return(assets: Iterable) -> dict:
 def build_holding_details(assets: Iterable) -> list[dict]:
     """给 LLM 用的每笔持仓明细：含 symbol / holdings / 盈亏金额+百分比 / 市值占比。"""
     items = _ensure_dict(assets)
-    total_value = float(sum((a.get("current_value") or 0) for a in items)) or 0.0
+    # 组合权重按 CNY 归一;单笔金额/盈亏保持原币(盈亏率是比值,与币种无关)。
+    total_value = float(sum(_asset_cny(a) for a in items)) or 0.0
     out = []
     for a in items:
         cost = float(a.get("cost_basis") or 0)
@@ -123,11 +154,12 @@ def build_holding_details(assets: Iterable) -> list[dict]:
             "type": a.get("type"),
             "symbol": a.get("symbol") or "",
             "holdings": a.get("holdings") or 0,
+            "currency": a.get("currency") or "CNY",
             "cost_basis": round(cost, 2),
             "current_value": round(value, 2),
             "pnl_value": round(pnl_val, 2),
             "pnl_pct": round(pnl_pct, 2),
-            "weight_pct": round((value / total_value * 100) if total_value > 0 else 0.0, 2),
+            "weight_pct": round((_asset_cny(a) / total_value * 100) if total_value > 0 else 0.0, 2),
         })
     out.sort(key=lambda x: x["current_value"], reverse=True)
     return out
