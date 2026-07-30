@@ -54,8 +54,8 @@ def _settle_pnl(db, user_id: int, *, asset_name: str, atype: str,
             (user_id, PNL_INCOME_CATEGORY),
         )
         db.execute(
-            "INSERT INTO income (user_id, category, amount, note, date) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO income (user_id, category, amount, note, date, source) "
+            "VALUES (?, ?, ?, ?, ?, 'investment')",
             (user_id, PNL_INCOME_CATEGORY, pnl, note, date),
         )
         return pnl, "income"
@@ -65,8 +65,8 @@ def _settle_pnl(db, user_id: int, *, asset_name: str, atype: str,
         (user_id, PNL_EXPENSE_CATEGORY),
     )
     db.execute(
-        "INSERT INTO records (user_id, category, amount, note, date) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO records (user_id, category, amount, note, date, source) "
+        "VALUES (?, ?, ?, ?, ?, 'investment')",
         (user_id, PNL_EXPENSE_CATEGORY, abs(pnl), note, date),
     )
     return pnl, "expense"

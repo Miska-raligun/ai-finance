@@ -9,6 +9,11 @@ from cache import make_key, get_or_compute
 
 stats_bp = Blueprint('stats', __name__)
 
+# 消费/日历/异常/预算等「消费分析」视图排除投资盈亏结算(卖出/归档写入的
+# source='investment' 行);而 summary 的总收支 / 结余仍计入,保留其对净现金流
+# 的影响(方案 A:不污染消费结构,但影响总收支)。
+NOT_INVESTMENT = "AND (source IS NULL OR source != 'investment')"
+
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _YEAR_RE = re.compile(r"^\d{4}$")
 
@@ -247,38 +252,41 @@ def category_stats():
 
 
 def _category_stats_compute(month, year):
+    # 消费/收入结构分析排除投资盈亏(source='investment'),避免"投资亏损"当消费、
+    # "投资盈利"当收入污染分类饼图。总收支仍在 summary 里计入。
     db = get_db()
+    NI = NOT_INVESTMENT
     if month:
         spend_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM records "
-            "WHERE strftime('%Y-%m', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
+            f"WHERE strftime('%Y-%m', date) = ? AND user_id = ? AND deleted_at IS NULL {NI} GROUP BY category",
             (month, g.user_id),
         )
         income_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM income "
-            "WHERE strftime('%Y-%m', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
+            f"WHERE strftime('%Y-%m', date) = ? AND user_id = ? AND deleted_at IS NULL {NI} GROUP BY category",
             (month, g.user_id),
         )
     elif year:
         spend_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM records "
-            "WHERE strftime('%Y', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
+            f"WHERE strftime('%Y', date) = ? AND user_id = ? AND deleted_at IS NULL {NI} GROUP BY category",
             (year, g.user_id),
         )
         income_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM income "
-            "WHERE strftime('%Y', date) = ? AND user_id = ? AND deleted_at IS NULL GROUP BY category",
+            f"WHERE strftime('%Y', date) = ? AND user_id = ? AND deleted_at IS NULL {NI} GROUP BY category",
             (year, g.user_id),
         )
     else:
         spend_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM records "
-            "WHERE user_id = ? AND deleted_at IS NULL GROUP BY category",
+            f"WHERE user_id = ? AND deleted_at IS NULL {NI} GROUP BY category",
             (g.user_id,)
         )
         income_cursor = db.execute(
             "SELECT category AS name, SUM(amount) AS total FROM income "
-            "WHERE user_id = ? AND deleted_at IS NULL GROUP BY category",
+            f"WHERE user_id = ? AND deleted_at IS NULL {NI} GROUP BY category",
             (g.user_id,)
         )
 
@@ -346,7 +354,7 @@ def _daily_stats_compute(month):
         SELECT date, SUM(amount) AS total
         FROM records
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
-          AND deleted_at IS NULL
+          AND deleted_at IS NULL AND (source IS NULL OR source != 'investment')
         GROUP BY date
     """,
         (month, g.user_id)
@@ -358,7 +366,7 @@ def _daily_stats_compute(month):
         SELECT date, SUM(amount) AS total
         FROM income
         WHERE strftime('%Y-%m', date) = ? AND user_id = ?
-          AND deleted_at IS NULL
+          AND deleted_at IS NULL AND (source IS NULL OR source != 'investment')
         GROUP BY date
     """,
         (month, g.user_id)
@@ -398,14 +406,14 @@ def calendar_stats():
     spend_rows = db.execute(
         "SELECT date, SUM(amount) AS total FROM records "
         "WHERE user_id = ? AND date >= date('now', ?) "
-        "AND deleted_at IS NULL "
+        "AND deleted_at IS NULL AND (source IS NULL OR source != 'investment') "
         "GROUP BY date",
         (g.user_id, f"-{days} days"),
     ).fetchall()
     income_rows = db.execute(
         "SELECT date, SUM(amount) AS total FROM income "
         "WHERE user_id = ? AND date >= date('now', ?) "
-        "AND deleted_at IS NULL "
+        "AND deleted_at IS NULL AND (source IS NULL OR source != 'investment') "
         "GROUP BY date",
         (g.user_id, f"-{days} days"),
     ).fetchall()
