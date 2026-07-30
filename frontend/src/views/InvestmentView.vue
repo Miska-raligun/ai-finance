@@ -129,6 +129,10 @@
         <AssetTable :assets="assets" />
       </el-tab-pane>
 
+      <el-tab-pane label="交易流水" name="txns" lazy>
+        <TransactionLog :assets="assets" />
+      </el-tab-pane>
+
       <el-tab-pane label="理财目标" name="goals" lazy>
         <GoalProgress :goals="goals" />
       </el-tab-pane>
@@ -149,6 +153,7 @@ import { useUserStore } from '@/stores/user'
 import { useAssetTypesStore } from '@/stores/assetTypes'
 import PortfolioPie from '@/components/PortfolioPie.vue'
 import AssetTable from '@/components/AssetTable.vue'
+import TransactionLog from '@/components/TransactionLog.vue'
 import GoalProgress from '@/components/GoalProgress.vue'
 import RiskQuestionnaire from '@/components/RiskQuestionnaire.vue'
 import AdvisorChat from '@/components/AdvisorChat.vue'

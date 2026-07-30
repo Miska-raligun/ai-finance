@@ -16,16 +16,20 @@ from ._common import investment_bp, now_iso, TX_KINDS
 def list_transactions():
     asset_id = request.args.get("asset_id")
     db = get_db()
+    cols = ("t.id, t.asset_id, a.name AS asset_name, t.kind, t.quantity, t.price, "
+            "t.fee, t.date, t.note, t.created_at")
     if asset_id:
         rows = db.execute(
-            "SELECT * FROM asset_transactions WHERE user_id = ? AND asset_id = ? "
-            "ORDER BY date DESC, id DESC",
+            f"SELECT {cols} FROM asset_transactions t "
+            "JOIN assets a ON a.id = t.asset_id "
+            "WHERE t.user_id = ? AND t.asset_id = ? ORDER BY t.date DESC, t.id DESC",
             (g.user_id, asset_id),
         ).fetchall()
     else:
         rows = db.execute(
-            "SELECT * FROM asset_transactions WHERE user_id = ? "
-            "ORDER BY date DESC, id DESC LIMIT 100",
+            f"SELECT {cols} FROM asset_transactions t "
+            "JOIN assets a ON a.id = t.asset_id "
+            "WHERE t.user_id = ? ORDER BY t.date DESC, t.id DESC LIMIT 200",
             (g.user_id,),
         ).fetchall()
     return jsonify([dict(r) for r in rows])
