@@ -2,7 +2,10 @@
   <div class="ledger-page">
     <div class="page-header">
       <h2 class="page-title">📒 账本管理</h2>
-      <ExportMenu scope="ledger" />
+      <div class="page-header-actions">
+        <ImportButton />
+        <ExportMenu scope="ledger" />
+      </div>
     </div>
 
     <!-- 本月成就 / 警示 banner —— 数据驱动 -->
@@ -68,6 +71,7 @@ import RecordTable from '@/components/RecordTable.vue'
 import BudgetAndCategoryPanel from '@/components/BudgetAndCategoryPanel.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 import ExportMenu from '@/components/ExportMenu.vue'
+import ImportButton from '@/components/ImportButton.vue'
 import RecurringRules from '@/components/RecurringRules.vue'
 import SpendCalendar from '@/components/SpendCalendar.vue'
 import IncomeSankey from '@/components/IncomeSankey.vue'
@@ -274,6 +278,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .page-title {
   font-size: 20px;
