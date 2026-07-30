@@ -202,24 +202,53 @@ def _render_report_html(period: str, created_at: str, markdown: str) -> str:
             out.append("</ul>")
             in_list = False
 
-    for line in lines:
-        s = line.rstrip()
+    def _is_table_row(x: str) -> bool:
+        return x.strip().startswith("|") and x.strip().endswith("|")
+
+    def _is_separator(x: str) -> bool:
+        # |---|:--:|---| 这种分隔行
+        cells = [c.strip() for c in x.strip().strip("|").split("|")]
+        return bool(cells) and all(set(c) <= set("-: ") and "-" in c for c in cells)
+
+    def _cells(x: str) -> list[str]:
+        return [c.strip() for c in x.strip().strip("|").split("|")]
+
+    i = 0
+    while i < len(lines):
+        s = lines[i].rstrip()
+
+        # Markdown 表格:表头行 + 分隔行 + 若干数据行
+        if _is_table_row(s) and i + 1 < len(lines) and _is_separator(lines[i + 1]):
+            close_list()
+            header = _cells(s)
+            out.append("<table><thead><tr>"
+                       + "".join(f"<th>{_bold(_html.escape(h))}</th>" for h in header)
+                       + "</tr></thead><tbody>")
+            i += 2
+            while i < len(lines) and _is_table_row(lines[i]):
+                row = _cells(lines[i])
+                out.append("<tr>" + "".join(
+                    f"<td>{_bold(_html.escape(c))}</td>" for c in row) + "</tr>")
+                i += 1
+            out.append("</tbody></table>")
+            continue
+
+        if s.strip() in ("---", "***", "___"):
+            close_list(); out.append("<hr>"); i += 1; continue
         if s.startswith("### "):
-            close_list(); out.append(f"<h3>{_html.escape(s[4:])}</h3>"); continue
+            close_list(); out.append(f"<h3>{_bold(_html.escape(s[4:]))}</h3>"); i += 1; continue
         if s.startswith("## "):
-            close_list(); out.append(f"<h2>{_html.escape(s[3:])}</h2>"); continue
+            close_list(); out.append(f"<h2>{_bold(_html.escape(s[3:]))}</h2>"); i += 1; continue
         if s.startswith("# "):
-            close_list(); out.append(f"<h1>{_html.escape(s[2:])}</h1>"); continue
+            close_list(); out.append(f"<h1>{_bold(_html.escape(s[2:]))}</h1>"); i += 1; continue
         if s.startswith("- ") or s.startswith("* "):
             if not in_list:
                 out.append("<ul>"); in_list = True
-            item = _html.escape(s[2:])
-            item = _bold(item)
-            out.append(f"<li>{item}</li>"); continue
+            out.append(f"<li>{_bold(_html.escape(s[2:]))}</li>"); i += 1; continue
         close_list()
         if not s.strip():
-            out.append(""); continue
-        out.append(f"<p>{_bold(_html.escape(s))}</p>")
+            out.append(""); i += 1; continue
+        out.append(f"<p>{_bold(_html.escape(s))}</p>"); i += 1
     close_list()
     body = "\n".join(out)
 
@@ -233,6 +262,11 @@ def _render_report_html(period: str, created_at: str, markdown: str) -> str:
   h2 {{ font-size: 18px; color: #2563EB; margin-top: 22px; }}
   h3 {{ font-size: 15px; margin-top: 16px; }}
   ul {{ padding-left: 22px; }}
+  hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 18px 0; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13px; }}
+  th, td {{ border: 1px solid #d1d5db; padding: 6px 10px; text-align: left; }}
+  th {{ background: #f3f4f6; font-weight: 700; }}
+  tbody tr:nth-child(even) {{ background: #fafafa; }}
   .meta {{ color: #6b7280; font-size: 12px; margin-bottom: 18px; }}
   @media print {{
     .no-print {{ display: none; }}
