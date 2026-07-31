@@ -192,8 +192,14 @@ const _doFetchChartData = async () => {
   }
 
   const C = chartColors()
+  // 悬停右上角出现下载按钮,一键存 PNG(白底,避免透明背景在相册里看不清)
+  const saveTool = (name) => ({
+    feature: { saveAsImage: { title: '下载图片', name, backgroundColor: '#ffffff', pixelRatio: 2 } },
+    right: 8, top: 2,
+  })
   const makePie = (title, data, seriesName) => ({
     color: PALETTE,
+    toolbox: saveTool(title),
     title: { text: title, left: 'center', top: 6, textStyle: { fontSize: 13, fontWeight: 600, color: C.title } },
     tooltip: pieTooltip,
     legend: { show: false },
@@ -213,6 +219,7 @@ const _doFetchChartData = async () => {
 
   const lineCommon = {
     color: [PRIMARY, '#fc736d', '#82d5bb'],
+    toolbox: saveTool('收支趋势'),
     legend: { data: ['收入', '支出', '结余'], bottom: 0, left: 'center', textStyle: { fontSize: 12 } },
     grid: { top: 36, bottom: 50, left: 50, right: 16 },
     tooltip: lineTooltip,
