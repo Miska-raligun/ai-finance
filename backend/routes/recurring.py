@@ -20,8 +20,8 @@ _VALID_KINDS = {"expense", "income"}
 def list_recurring():
     rows = get_db().execute(
         "SELECT id, kind, category, amount, day_of_month, note, active, "
-        "last_run_date, created_at, updated_at FROM recurring_rules "
-        "WHERE user_id = ? ORDER BY day_of_month ASC, id ASC",
+        "last_run_date, freq, day_of_week, month_of_year, created_at, updated_at "
+        "FROM recurring_rules WHERE user_id = ? ORDER BY id ASC",
         (g.user_id,),
     ).fetchall()
     return jsonify([dict(r) for r in rows])
@@ -43,21 +43,45 @@ def create_recurring():
         return jsonify({"error": "金额必须为数字"}), 400
     if amount <= 0:
         return jsonify({"error": "金额必须大于 0"}), 400
-    try:
-        day = int(data.get("day_of_month") or 0)
-    except (TypeError, ValueError):
-        return jsonify({"error": "day_of_month 必须为整数"}), 400
-    if not 1 <= day <= 31:
-        return jsonify({"error": "day_of_month 必须在 1-31 之间"}), 400
+    freq = (data.get("freq") or "monthly").strip().lower()
+    if freq not in ("monthly", "weekly", "yearly"):
+        return jsonify({"error": "freq 必须是 monthly / weekly / yearly"}), 400
+
+    # 各频率所需字段:monthly/yearly 用 day_of_month(1-31),weekly 用 day_of_week(0-6),
+    # yearly 额外用 month_of_year(1-12)。无关字段存 NULL。
+    day = 1
+    dow = None
+    moy = None
+    if freq == "weekly":
+        try:
+            dow = int(data.get("day_of_week"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "weekly 需 day_of_week 0-6"}), 400
+        if not 0 <= dow <= 6:
+            return jsonify({"error": "day_of_week 必须在 0-6"}), 400
+    else:
+        try:
+            day = int(data.get("day_of_month") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"error": "day_of_month 必须为整数"}), 400
+        if not 1 <= day <= 31:
+            return jsonify({"error": "day_of_month 必须在 1-31 之间"}), 400
+        if freq == "yearly":
+            try:
+                moy = int(data.get("month_of_year") or 0)
+            except (TypeError, ValueError):
+                return jsonify({"error": "month_of_year 必须为整数"}), 400
+            if not 1 <= moy <= 12:
+                return jsonify({"error": "month_of_year 必须在 1-12"}), 400
 
     note = (data.get("note") or "").strip() or None
     db = get_db()
     cur = db.execute(
         "INSERT INTO recurring_rules "
         "(user_id, kind, category, amount, day_of_month, note, active, "
-        " created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))",
-        (g.user_id, kind, category, amount, day, note),
+        " freq, day_of_week, month_of_year, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, datetime('now'), datetime('now'))",
+        (g.user_id, kind, category, amount, day, note, freq, dow, moy),
     )
     db.commit()
     return jsonify({"id": cur.lastrowid, "success": True}), 201
@@ -67,12 +91,15 @@ def create_recurring():
 @login_required
 def update_recurring(rule_id: int):
     data = request.get_json() or {}
-    allowed = {"kind", "category", "amount", "day_of_month", "note", "active"}
+    allowed = {"kind", "category", "amount", "day_of_month", "note", "active",
+               "freq", "day_of_week", "month_of_year"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return jsonify({"error": "无可更新字段"}), 400
     if "kind" in updates and updates["kind"] not in _VALID_KINDS:
         return jsonify({"error": "kind 必须是 expense / income"}), 400
+    if "freq" in updates and updates["freq"] not in ("monthly", "weekly", "yearly"):
+        return jsonify({"error": "freq 必须是 monthly / weekly / yearly"}), 400
     if "day_of_month" in updates:
         try:
             d = int(updates["day_of_month"])
@@ -81,6 +108,22 @@ def update_recurring(rule_id: int):
         if not 1 <= d <= 31:
             return jsonify({"error": "day_of_month 必须在 1-31 之间"}), 400
         updates["day_of_month"] = d
+    if "day_of_week" in updates:
+        try:
+            w = int(updates["day_of_week"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "day_of_week 必须为整数"}), 400
+        if not 0 <= w <= 6:
+            return jsonify({"error": "day_of_week 必须在 0-6"}), 400
+        updates["day_of_week"] = w
+    if "month_of_year" in updates:
+        try:
+            m = int(updates["month_of_year"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "month_of_year 必须为整数"}), 400
+        if not 1 <= m <= 12:
+            return jsonify({"error": "month_of_year 必须在 1-12"}), 400
+        updates["month_of_year"] = m
     if "amount" in updates:
         try:
             updates["amount"] = float(updates["amount"])

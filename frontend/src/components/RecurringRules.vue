@@ -26,8 +26,8 @@
       <el-table-column label="金额" width="110" align="right">
         <template #default="{ row }">¥{{ row.amount.toFixed(2) }}</template>
       </el-table-column>
-      <el-table-column label="每月" width="80" align="center">
-        <template #default="{ row }">{{ row.day_of_month }} 日</template>
+      <el-table-column label="频率" width="120" align="center">
+        <template #default="{ row }">{{ freqText(row) }}</template>
       </el-table-column>
       <el-table-column prop="note" label="备注" min-width="160">
         <template #default="{ row }">{{ row.note || '—' }}</template>
@@ -62,7 +62,7 @@
           <span class="rc-amount">¥{{ row.amount.toFixed(2) }}</span>
         </div>
         <div class="rc-meta">
-          <span>每月 {{ row.day_of_month }} 日</span>
+          <span>{{ freqText(row) }}</span>
           <span v-if="row.last_run_date">· 上次 {{ row.last_run_date }}</span>
         </div>
         <div v-if="row.note" class="rc-note">{{ row.note }}</div>
@@ -103,14 +103,35 @@
             controls-position="right" style="width:100%"
           />
         </el-form-item>
-        <el-form-item label="每月">
-          <el-input-number
-            v-model="editing.day_of_month"
-            :min="1" :max="31" :step="1"
-            controls-position="right" style="width:100%"
-          />
-          <div class="form-hint">月不足该日时（如 2 月 31 日）自动回退到月末</div>
+        <el-form-item label="频率">
+          <el-radio-group v-model="editing.freq">
+            <el-radio-button label="monthly">每月</el-radio-button>
+            <el-radio-button label="weekly">每周</el-radio-button>
+            <el-radio-button label="yearly">每年</el-radio-button>
+          </el-radio-group>
         </el-form-item>
+
+        <el-form-item v-if="editing.freq === 'weekly'" label="星期">
+          <el-select v-model="editing.day_of_week" style="width:100%">
+            <el-option v-for="(w, i) in WEEKDAYS" :key="i" :label="w" :value="i" />
+          </el-select>
+        </el-form-item>
+
+        <template v-else>
+          <el-form-item v-if="editing.freq === 'yearly'" label="月份">
+            <el-select v-model="editing.month_of_year" style="width:100%">
+              <el-option v-for="m in 12" :key="m" :label="`${m} 月`" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="editing.freq === 'yearly' ? '日' : '每月'">
+            <el-input-number
+              v-model="editing.day_of_month"
+              :min="1" :max="31" :step="1"
+              controls-position="right" style="width:100%"
+            />
+            <div class="form-hint">月不足该日时（如 2 月 31 日）自动回退到月末</div>
+          </el-form-item>
+        </template>
         <el-form-item label="备注">
           <el-input v-model="editing.note" type="textarea" :rows="2" placeholder="可选" />
         </el-form-item>
@@ -150,13 +171,37 @@ async function load() {
 }
 onMounted(load)
 
+const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+function freqText(row) {
+  if (row.freq === 'weekly') return `每周${WEEKDAYS[row.day_of_week] || '?'}`
+  if (row.freq === 'yearly') return `每年 ${row.month_of_year || '?'}月${row.day_of_month}日`
+  return `每月 ${row.day_of_month} 日`
+}
+
 function openCreate() {
-  editing.value = { id: null, kind: 'expense', category: '', amount: 0, day_of_month: 1, note: '' }
+  editing.value = {
+    id: null, kind: 'expense', category: '', amount: 0,
+    freq: 'monthly', day_of_month: 1, day_of_week: 0, month_of_year: 1, note: '',
+  }
   showDialog.value = true
 }
 function openEdit(row) {
-  editing.value = { ...row }
+  editing.value = {
+    freq: 'monthly', day_of_week: 0, month_of_year: 1, ...row,
+  }
   showDialog.value = true
+}
+
+function _freqPayload(r) {
+  const p = { kind: r.kind, category: r.category, amount: Number(r.amount),
+              note: r.note, freq: r.freq }
+  if (r.freq === 'weekly') p.day_of_week = Number(r.day_of_week)
+  else {
+    p.day_of_month = Number(r.day_of_month)
+    if (r.freq === 'yearly') p.month_of_year = Number(r.month_of_year)
+  }
+  return p
 }
 
 async function save() {
@@ -166,15 +211,9 @@ async function save() {
   saving.value = true
   try {
     if (r.id) {
-      await api.patch(`/api/recurring/${r.id}`, {
-        kind: r.kind, category: r.category, amount: Number(r.amount),
-        day_of_month: Number(r.day_of_month), note: r.note,
-      })
+      await api.patch(`/api/recurring/${r.id}`, _freqPayload(r))
     } else {
-      await api.post('/api/recurring', {
-        kind: r.kind, category: r.category, amount: Number(r.amount),
-        day_of_month: Number(r.day_of_month), note: r.note,
-      })
+      await api.post('/api/recurring', _freqPayload(r))
     }
     ElMessage.success('已保存')
     showDialog.value = false
