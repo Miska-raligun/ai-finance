@@ -51,5 +51,55 @@ class _OpenAICompat:
             return {"error": {"message": f"HTTP {res.status_code}"}}
         return data
 
+    def call_stream(self, *, messages, api_key, url, model,
+                    temperature=0.5, timeout=60):
+        """流式:逐块 yield {"delta": str};结束 yield {"usage": {...}};
+        出错 yield {"error": str}。SSE 格式为 `data: {json}` 行 + `data: [DONE]`。"""
+        import json
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        payload = {
+            "model": model,
+            "temperature": temperature,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=payload,
+                                 timeout=timeout, stream=True)
+        except requests.exceptions.Timeout:
+            yield {"error": f"请求超时（{timeout}s）"}
+            return
+        except Exception as e:  # noqa: BLE001
+            yield {"error": str(e) or "调用异常"}
+            return
+
+        if resp.status_code >= 400:
+            body = resp.text[:200]
+            yield {"error": f"HTTP {resp.status_code}: {body}"}
+            return
+
+        for raw in resp.iter_lines(decode_unicode=True):
+            if not raw or not raw.startswith("data:"):
+                continue
+            chunk = raw[5:].strip()
+            if chunk == "[DONE]":
+                break
+            try:
+                obj = json.loads(chunk)
+            except ValueError:
+                continue
+            choices = obj.get("choices") or []
+            if choices:
+                delta = (choices[0].get("delta") or {}).get("content")
+                if delta:
+                    yield {"delta": delta}
+            if obj.get("usage"):
+                yield {"usage": obj["usage"]}
+
 
 register(_OpenAICompat())

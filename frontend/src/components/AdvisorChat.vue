@@ -29,6 +29,7 @@
           <div class="bubble-role">{{ m.role === 'user' ? '你' : 'Anon' }}</div>
           <img v-if="m.image" :src="m.image" class="msg-image" />
           <div v-if="m.content" class="bubble-content" v-html="render(m.content)"></div>
+          <span v-if="m._streaming" class="typing-caret" :class="{ empty: !m.content }">▋</span>
         </div>
         <template v-if="m.pending_assets && m.pending_assets.length">
           <PendingAssetCard
@@ -83,10 +84,11 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, reactive, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
+import { getCsrfToken, CSRF_HEADER } from '@/api'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
 
@@ -112,19 +114,64 @@ async function send() {
   draft.value = ''
   loading.value = true
   scrollToBottom()
+
+  const history = messages.value.map(m => ({ role: m.role, content: m.content }))
+  // 先插一条空的助手消息,流式增量往里追加(打字机)
+  const reply = reactive({ role: 'assistant', content: '', _streaming: true })
+  messages.value.push(reply)
   try {
-    const res = await store.askAdvisor({
-      mode: 'general',
-      history: messages.value.map(m => ({ role: m.role, content: m.content })),
-      llm: userStore.llmPayload,
-    })
-    messages.value.push({ role: 'assistant', content: res.reply || '（空回复）' })
+    await streamAdvisor(history, reply)
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '对话失败，请稍后重试')
-    messages.value.push({ role: 'assistant', content: '⚠️ 暂时无法获取回复，请稍后再试。' })
+    reply._streaming = false
+    if (!reply.content) {
+      reply.content = '⚠️ 暂时无法获取回复，请稍后再试。'
+      ElMessage.error('对话失败，请稍后重试')
+    }
   } finally {
+    reply._streaming = false
     loading.value = false
     scrollToBottom()
+  }
+}
+
+async function streamAdvisor(history, reply) {
+  const res = await fetch('/api/investment/advisor/chat/stream', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      [CSRF_HEADER]: getCsrfToken(),
+    },
+    body: JSON.stringify({ history, llm: userStore.llmPayload }),
+  })
+  if (!res.ok || !res.body) {
+    // 流式不可用(如 4xx):降级到一次性接口
+    const r = await store.askAdvisor({ mode: 'general', history, llm: userStore.llmPayload })
+    reply.content = r.reply || '（空回复）'
+    return
+  }
+  const readerDecoder = new TextDecoder()
+  const reader = res.body.getReader()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += readerDecoder.decode(value, { stream: true })
+    const lines = buffer.split('\n\n')
+    buffer = lines.pop()   // 末尾可能是半条,留到下一轮
+    for (const block of lines) {
+      const line = block.trim()
+      if (!line.startsWith('data:')) continue
+      const payload = line.slice(5).trim()
+      if (payload === '[DONE]') return
+      try {
+        const obj = JSON.parse(payload)
+        if (obj.delta) {
+          reply.content += obj.delta
+          scrollToBottom()
+        }
+      } catch { /* 半条 JSON,忽略 */ }
+    }
   }
 }
 
@@ -255,6 +302,14 @@ function render(md) {
   font-size: 12px;
   line-height: 1.6;
 }
+.typing-caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--color-primary);
+  animation: caret-blink 1s steps(1) infinite;
+}
+.typing-caret.empty { margin-left: 0; }
+@keyframes caret-blink { 50% { opacity: 0; } }
 .messages {
   height: 360px;
   overflow-y: auto;

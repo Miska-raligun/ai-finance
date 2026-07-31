@@ -262,6 +262,83 @@ def _call_llm(
     return data
 
 
+def stream_llm(messages: list[dict], llm: dict | None = None, *,
+               temperature: float = 0.5, timeout: int = 60,
+               endpoint: str = "unknown"):
+    """流式生成器:逐段 yield 文本增量。
+
+    provider 支持 call_stream 时走真流式;否则退回一次性 _call_llm 后整段 yield
+    (Anthropic/Gemini 目前走这条降级路径,体验上仍是"一次到位"但不报错)。
+    配额预占 / usage 记录与非流式一致。异常以 yield 一段错误文案收尾,不抛。
+    """
+    from services.llm_providers import resolve as _resolve_provider
+    import time as _time
+
+    llm = llm or {}
+    provider_name = (llm.get("provider") or "openai").strip().lower() or "openai"
+    api_key = llm.get("apikey") or os.getenv("DEEPSEEK_API_KEY")
+    url = llm.get("url") or DEFAULT_LLM_URL
+    model = llm.get("model") or DEFAULT_LLM_MODEL
+
+    slot_id: int | None = None
+    try:
+        slot_id = _reserve_quota_slot(endpoint, model, provider_name)
+    except LLMQuotaExceeded as e:
+        logger.warning("LLM(stream) quota exceeded endpoint=%s", endpoint)
+        _record_usage(endpoint, model, None, status="quota_exceeded",
+                      error_reason=str(e), provider=provider_name)
+        yield "⏳ 今日 AI 额度已用完，明天 0 点自动重置。"
+        return
+
+    provider = _resolve_provider(provider_name)
+    t0 = _time.perf_counter()
+    usage: dict = {}
+    err: str | None = None
+    got_any = False
+
+    def _finish(status):
+        elapsed = int((_time.perf_counter() - t0) * 1000)
+        data = {"usage": usage} if usage else None
+        if slot_id is not None:
+            _finalize_usage_row(slot_id, data, latency_ms=elapsed, status=status,
+                                error_reason=err, model=model)
+        else:
+            _record_usage(endpoint, model, data, latency_ms=elapsed, status=status,
+                          error_reason=err, provider=provider_name)
+
+    stream_fn = getattr(provider, "call_stream", None)
+    try:
+        if stream_fn is not None:
+            for ev in stream_fn(messages=messages, api_key=api_key, url=url,
+                                model=model, temperature=temperature, timeout=timeout):
+                if "delta" in ev:
+                    got_any = True
+                    yield ev["delta"]
+                elif "usage" in ev:
+                    usage = ev["usage"]
+                elif "error" in ev:
+                    err = ev["error"]
+                    break
+        else:
+            # 降级:非流式一次性调用,整段吐出
+            data = provider.call(messages=messages, api_key=api_key, url=url,
+                                 model=model, temperature=temperature, timeout=timeout)
+            if data and "choices" in data:
+                usage = data.get("usage") or {}
+                content = data["choices"][0]["message"].get("content") or ""
+                got_any = bool(content)
+                yield content
+            else:
+                err = ((data or {}).get("error") or {}).get("message") or "无响应"
+    except Exception as e:  # noqa: BLE001
+        logger.exception("stream_llm 异常 endpoint=%s", endpoint)
+        err = str(e)
+
+    if err and not got_any:
+        yield f"\n⚠️ 生成失败：{err}"
+    _finish("success" if (got_any and not err) else ("error" if err else "success"))
+
+
 def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list | None = None,
                     extra_system: str | None = None, timeout: int = 10) -> dict | None:
     """意图识别（带工具调用）。extra_system 可注入用户长期画像等上下文。
@@ -605,14 +682,28 @@ def call_llm_profile_extract(history: list[dict], old_facts: dict | None = None,
             return None
 
 
-def call_llm_advisor_chat(history: list[dict], context: dict | None = None, llm: dict | None = None) -> str:
-    """投资顾问对话：在 system 中注入用户资产/目标摘要，再接 history。"""
+def _advisor_messages(history: list[dict], context: dict | None):
     import json as _json
-    from prompts.investment import ADVISOR_CHAT_SYSTEM, DISCLAIMER
+    from prompts.investment import ADVISOR_CHAT_SYSTEM
     ctx_msg = ""
     if context:
         ctx_msg = "\n\n当前用户数据摘要：\n```json\n" + _json.dumps(context, ensure_ascii=False) + "\n```"
-    messages = [{"role": "system", "content": ADVISOR_CHAT_SYSTEM + ctx_msg}] + history[-10:]
+    return [{"role": "system", "content": ADVISOR_CHAT_SYSTEM + ctx_msg}] + history[-10:]
+
+
+def stream_advisor_chat(history: list[dict], context: dict | None = None, llm: dict | None = None):
+    """投资顾问对话的流式版:逐段 yield 文本增量,末尾附免责声明。"""
+    from prompts.investment import DISCLAIMER
+    messages = _advisor_messages(history, context)
+    yield from stream_llm(messages, llm=llm, temperature=0.5, timeout=45,
+                          endpoint="invest.advisor_chat")
+    yield DISCLAIMER
+
+
+def call_llm_advisor_chat(history: list[dict], context: dict | None = None, llm: dict | None = None) -> str:
+    """投资顾问对话：在 system 中注入用户资产/目标摘要，再接 history。"""
+    from prompts.investment import DISCLAIMER
+    messages = _advisor_messages(history, context)
     result = _call_llm(messages, llm=llm, temperature=0.5, timeout=30, endpoint="invest.advisor_chat")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"] + DISCLAIMER
