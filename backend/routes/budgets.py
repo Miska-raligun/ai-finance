@@ -8,14 +8,25 @@ from constants import CATEGORY_EXPENSE
 budgets_bp = Blueprint('budgets', __name__)
 
 
+def _cycle_of(period: str) -> str:
+    """按周期键长度判断周期:YYYY(4)=年度,YYYY-MM(7)=月度。"""
+    return "yearly" if len(period or "") == 4 else "monthly"
+
+
+def _spend_expr(period: str) -> str:
+    """该周期对应的 records 日期匹配表达式。"""
+    return "strftime('%Y', date)" if _cycle_of(period) == "yearly" else "strftime('%Y-%m', date)"
+
+
 @budgets_bp.route('/api/budgets')
 @login_required
 def get_budgets():
     db = get_db()
-    month = request.args.get('month')
+    # period 优先(YYYY-MM 月度 / YYYY 年度);兼容旧的 month 参数。
+    period = request.args.get('period') or request.args.get('month')
     result = []
 
-    if month:
+    if period:
         cursor = db.execute(
             """
             SELECT b.category, b.amount
@@ -23,22 +34,23 @@ def get_budgets():
             JOIN categories c ON b.category = c.name AND c.user_id = b.user_id
             WHERE b.month = ? AND b.user_id = ? AND c.type = ? AND b.amount > 0
         """,
-            (month, g.user_id, CATEGORY_EXPENSE)
+            (period, g.user_id, CATEGORY_EXPENSE)
         )
         budgets = cursor.fetchall()
 
         cursor = db.execute(
-            """
+            f"""
             SELECT category, SUM(amount) as total
             FROM records
-            WHERE strftime('%Y-%m', date) = ? AND user_id = ?
+            WHERE {_spend_expr(period)} = ? AND user_id = ?
               AND deleted_at IS NULL
             GROUP BY category
         """,
-            (month, g.user_id)
+            (period, g.user_id)
         )
         spend_map = {row['category']: row['total'] for row in cursor.fetchall()}
 
+        cycle = _cycle_of(period)
         for b in budgets:
             spent = spend_map.get(b['category'], 0)
             remaining = float(b['amount']) - float(spent)
@@ -46,7 +58,9 @@ def get_budgets():
                 'category': b['category'],
                 'amount': float(b['amount']),
                 'remaining': round(remaining, 2),
-                'month': month
+                'month': period,       # 向后兼容旧字段名
+                'period': period,
+                'cycle': cycle,
             })
 
     else:
@@ -61,16 +75,23 @@ def get_budgets():
         )
         all_budgets = cursor.fetchall()
 
+        # 同时按月(YYYY-MM)和按年(YYYY)聚合支出,分别匹配月度 / 年度预算的周期键。
         cursor = db.execute(
             """
-            SELECT category, strftime('%Y-%m', date) as month, SUM(amount) as total
+            SELECT category,
+                   strftime('%Y-%m', date) as m,
+                   strftime('%Y', date) as y,
+                   amount
             FROM records
             WHERE user_id = ? AND deleted_at IS NULL
-            GROUP BY category, month
         """,
             (g.user_id,)
         )
-        spend_map = {(row['category'], row['month']): row['total'] for row in cursor.fetchall()}
+        spend_map: dict = {}
+        for row in cursor.fetchall():
+            amt = float(row['amount'] or 0)
+            spend_map[(row['category'], row['m'])] = spend_map.get((row['category'], row['m']), 0) + amt
+            spend_map[(row['category'], row['y'])] = spend_map.get((row['category'], row['y']), 0) + amt
 
         for b in all_budgets:
             key = (b['category'], b['month'])
@@ -80,7 +101,9 @@ def get_budgets():
                 'category': b['category'],
                 'amount': float(b['amount']),
                 'remaining': round(remaining, 2),
-                'month': b['month']
+                'month': b['month'],
+                'period': b['month'],
+                'cycle': _cycle_of(b['month']),
             })
 
     return jsonify(result)
@@ -92,8 +115,12 @@ def set_budget_manual():
     data = request.get_json()
     category = data.get("category", "").strip()
     amount = float(data.get("amount", 0))
-    cycle = data.get("cycle", "月")
-    month = data.get("month") or datetime.now().strftime('%Y-%m')
+    # period:YYYY-MM 月度 / YYYY 年度;兼容旧 month 参数,缺省本月。
+    period = (data.get("period") or data.get("month") or "").strip() \
+        or datetime.now().strftime('%Y-%m')
+    if len(period) not in (4, 7):
+        return jsonify({"error": "period 应为 YYYY(年度)或 YYYY-MM(月度)"}), 400
+    cycle = _cycle_of(period)
 
     if not category:
         return jsonify({"error": "缺少分类名称"}), 400
@@ -114,7 +141,7 @@ def set_budget_manual():
         INSERT OR REPLACE INTO budgets (user_id, category, amount, cycle, month)
         VALUES (?, ?, ?, ?, ?)
     """,
-        (g.user_id, category, amount, cycle, month)
+        (g.user_id, category, amount, cycle, period)
     )
     db.commit()
     return jsonify({"success": True})
@@ -125,13 +152,14 @@ def set_budget_manual():
 def delete_budget_manual():
     data = request.get_json()
     category = (data.get("category") or "").strip()
-    month = data.get("month") or datetime.now().strftime('%Y-%m')
+    period = (data.get("period") or data.get("month") or "").strip() \
+        or datetime.now().strftime('%Y-%m')
     if not category:
         return jsonify({"error": "缺少分类名称"}), 400
     db = get_db()
     db.execute(
         "DELETE FROM budgets WHERE user_id = ? AND category = ? AND month = ?",
-        (g.user_id, category, month)
+        (g.user_id, category, period)
     )
     db.commit()
     return jsonify({"success": True})

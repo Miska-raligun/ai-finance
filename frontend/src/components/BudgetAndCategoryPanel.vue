@@ -7,16 +7,32 @@
       </div>
     </template>
 
-    <!-- 月份选择 -->
-    <div class="section-label">选择月份</div>
-    <el-date-picker
-      v-model="selectedMonth"
-      type="month"
-      value-format="YYYY-MM"
-      placeholder="选择月份"
-      @change="fetchBudgets"
-      style="width: 100%; margin-bottom: 14px;"
-    />
+    <!-- 周期 + 期间选择 -->
+    <div class="section-label">预算周期</div>
+    <div class="bp-period-bar">
+      <el-radio-group v-model="cycle" size="small" @change="fetchBudgets">
+        <el-radio-button label="monthly">月度</el-radio-button>
+        <el-radio-button label="yearly">年度</el-radio-button>
+      </el-radio-group>
+      <el-date-picker
+        v-if="cycle === 'monthly'"
+        v-model="selectedMonth"
+        type="month"
+        value-format="YYYY-MM"
+        placeholder="选择月份"
+        @change="fetchBudgets"
+        style="flex: 1; min-width: 130px;"
+      />
+      <el-date-picker
+        v-else
+        v-model="selectedYear"
+        type="year"
+        value-format="YYYY"
+        placeholder="选择年份"
+        @change="fetchBudgets"
+        style="flex: 1; min-width: 130px;"
+      />
+    </div>
 
     <!-- 预算表 -->
     <el-table :data="budgets" size="small" class="budget-table" style="width: 100%"
@@ -250,17 +266,23 @@ async function applyCalibration() {
 const expenseCategories = computed(() => categoryStore.expenseNames)
 
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
+const selectedYear = ref(String(new Date().getFullYear()))
+const cycle = ref('monthly')
 const budgets = ref([])
 const activeTab = ref('支出')
 const budgetForm = ref({ category: '', amount: 0 })
 const selectedBudgets = ref([])
 
+// 当前周期的期间键:月度 YYYY-MM / 年度 YYYY
+function activePeriod() {
+  return cycle.value === 'yearly' ? selectedYear.value : selectedMonth.value
+}
+
 async function fetchBudgets() {
   budgets.value = []
-  const month = selectedMonth.value
   // 分类列表从 store 取（缓存），预算仍需独立请求
   const [bRes] = await Promise.all([
-    api.get('/api/budgets', { params: { month } }),
+    api.get('/api/budgets', { params: { period: activePeriod() } }),
     categoryStore.fetchCategories('expense'),
   ])
   budgets.value = bRes.data
@@ -270,7 +292,7 @@ async function submitBudget() {
   await api.post('/api/budgets', {
     category: budgetForm.value.category,
     amount: budgetForm.value.amount,
-    month: selectedMonth.value
+    period: activePeriod(),
   })
   await fetchBudgets()
   categoryStore.bumpRefresh()
@@ -286,10 +308,10 @@ async function deleteBulk() {
   } catch {
     return
   }
-  const month = selectedMonth.value
+  const period = activePeriod()
   await Promise.all(
     selectedBudgets.value.map(row =>
-      api.delete('/api/budgets', { data: { category: row.category, month } })
+      api.delete('/api/budgets', { data: { category: row.category, period } })
     )
   )
   selectedBudgets.value = []
@@ -305,7 +327,7 @@ async function deleteBudget(category) {
   } catch {
     return
   }
-  await api.delete('/api/budgets', { data: { category, month: selectedMonth.value } })
+  await api.delete('/api/budgets', { data: { category, period: activePeriod() } })
   await fetchBudgets()
   categoryStore.bumpRefresh()
 }
@@ -316,6 +338,13 @@ watch(refreshCounter, fetchBudgets)
 
 <style scoped>
 /* AI 预算校准 */
+.bp-period-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
 .bp-header {
   display: flex;
   justify-content: space-between;
