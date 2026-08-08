@@ -1,70 +1,444 @@
 <template>
   <div class="chat-page">
-    <!-- 聊天记录区域 -->
     <div class="chat-container" ref="chatRef">
+      <!-- 欢迎头部 -->
+      <div class="chat-header-hint">
+        <span>💬 智能记账助手Anon</span>
+      </div>
+
+      <!-- 首次进入聊天页时的骨架屏：避免历史消息抓回前的空白闪烁 -->
+      <div v-if="chatStore.historyLoading && messages.length === 0" class="chat-skeleton">
+        <div class="skel-row left">
+          <div class="skel-avatar"></div>
+          <div class="skel-bubble" style="width: 60%"></div>
+        </div>
+        <div class="skel-row right">
+          <div class="skel-bubble" style="width: 40%"></div>
+          <div class="skel-avatar"></div>
+        </div>
+        <div class="skel-row left">
+          <div class="skel-avatar"></div>
+          <div class="skel-bubble" style="width: 70%"></div>
+        </div>
+      </div>
+
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.sender]">
-        <div class="bubble">{{ msg.content }}</div>
+        <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
+        <div class="msg-body">
+          <img v-if="msg.image" :src="msg.image" class="chat-image" alt="uploaded" />
+          <div v-if="msg.content" :class="['bubble', msg._recognizing ? 'bubble-recognizing' : '']">
+            {{ msg.content }}
+            <el-button
+              v-if="msg._retryFile"
+              size="small"
+              type="primary"
+              plain
+              class="bubble-retry-btn"
+              @click="retryImage(msg)"
+            >🔄 重试识别</el-button>
+          </div>
+
+          <!-- 可编辑确认卡片 -->
+          <template v-if="msg.pending_records && msg.pending_records.length">
+            <div
+              v-for="(rec, ri) in msg.pending_records"
+              :key="`r${ri}`"
+              v-show="rec._state !== 'cancelled'"
+              :class="['pending-card', rec.type === 'expense' ? 'card-expense' : 'card-income', rec._state === 'confirmed' ? 'card-confirmed' : '']"
+            >
+              <!-- 已确认：只读展示 -->
+              <template v-if="rec._state === 'confirmed'">
+                <div class="card-confirmed-header">
+                  <span :class="rec.type === 'expense' ? 'amount-expense' : 'amount-income'">
+                    {{ rec.type === 'expense' ? '-' : '+' }}¥{{ rec._edit.amount }}
+                  </span>
+                  <span class="card-category-text">{{ rec._edit.category }}</span>
+                  <span class="card-confirmed-badge">✓ 已记录</span>
+                </div>
+                <div class="card-rows">
+                  <div class="card-row">
+                    <span class="card-label">日期</span>
+                    <span class="card-value">{{ rec._edit.date }}</span>
+                  </div>
+                  <div class="card-row">
+                    <span class="card-label">备注</span>
+                    <span class="card-value">{{ rec._edit.note || '—' }}</span>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 待确认：可编辑 -->
+              <template v-else>
+                <div class="card-fields">
+                  <div class="card-field">
+                    <label class="field-label">分类</label>
+                    <el-input v-model="rec._edit.category" size="small" placeholder="分类" />
+                  </div>
+                  <div class="card-field">
+                    <label class="field-label">金额</label>
+                    <el-input-number
+                      v-model="rec._edit.amount"
+                      :min="0"
+                      size="small"
+                      style="width:100%"
+                      controls-position="right"
+                    />
+                  </div>
+                  <div class="card-field">
+                    <label class="field-label">日期</label>
+                    <el-date-picker
+                      v-model="rec._edit.date"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      size="small"
+                      style="width:100%"
+                    />
+                  </div>
+                  <div class="card-field">
+                    <label class="field-label">备注</label>
+                    <el-input v-model="rec._edit.note" size="small" placeholder="备注（可选）" />
+                  </div>
+                </div>
+                <div class="card-actions">
+                  <el-button size="small" plain @click="rec._state = 'cancelled'">取消</el-button>
+                  <el-button size="small" type="primary" @click="confirmRecord(rec)">✓ 确认记录</el-button>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- 资产待确认卡片 -->
+          <template v-if="msg.pending_assets && msg.pending_assets.length">
+            <PendingAssetCard
+              v-for="(rec, ai) in msg.pending_assets"
+              :key="`a${ai}`"
+              :rec="rec"
+              @cancel="rec._state = 'cancelled'"
+              @confirm="confirmAsset(rec)"
+            />
+          </template>
+
+          <!-- 理财目标待确认卡片 -->
+          <template v-if="msg.pending_goals && msg.pending_goals.length">
+            <PendingGoalCard
+              v-for="(rec, gi) in msg.pending_goals"
+              :key="`g${gi}`"
+              :rec="rec"
+              @cancel="rec._state = 'cancelled'"
+              @confirm="confirmGoal(rec)"
+            />
+          </template>
+        </div>
+        <div v-if="msg.sender === 'user'" class="avatar user-avatar">
+          {{ currentUser.slice(0, 1).toUpperCase() }}
+        </div>
+      </div>
+
+      <div v-if="loading" class="msg assistant">
+        <img src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
+        <div class="bubble typing">
+          <span></span><span></span><span></span>
+        </div>
       </div>
     </div>
 
-    <!-- 输入区域，固定底部 -->
-    <div class="chat-input">
+    <div class="quick-actions animal-pop" :style="{ '--i': 1 }">
+      <button
+        v-for="q in quickActions"
+        :key="q.label"
+        class="quick-card"
+        :style="{ background: q.color }"
+        :disabled="loading"
+        @click="sendQuick(q.text)"
+      >
+        <img :src="q.avatar" class="quick-avatar" alt="" aria-hidden="true">
+        <span class="quick-text">{{ q.label }}</span>
+      </button>
+    </div>
+
+    <div class="chat-input animal-pop" :style="{ '--i': 2 }">
+      <input
+        ref="imageInput"
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style="display:none"
+        @change="handleImageSelect"
+      />
+      <button class="img-btn" :disabled="loading" @click="$refs.imageInput.click()" title="上传图片识别记账">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+        </svg>
+      </button>
+      <VoiceInput
+        :disabled="loading"
+        @partial="onVoicePartial"
+        @result="onVoiceResult"
+      />
       <el-input
         v-model="userInput"
-        placeholder="请输入消费记录，如 吃饭花了20"
+        placeholder="告诉我你的消费，如：吃饭花了20元"
         @keyup.enter="sendMessage"
         size="large"
+        class="chat-text-input"
       />
-      <el-button type="primary" @click="sendMessage" :disabled="loading" size="large">
-        {{ loading ? '发送中...' : '发送' }}
+      <el-button
+        type="primary"
+        @click="sendMessage"
+        :disabled="loading"
+        size="large"
+        class="send-btn"
+      >
+        发送
       </el-button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onActivated, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import { useCategoryStore } from '@/stores/categories'
+import { useChatStore } from '@/stores/chat'
+import { useInvestmentStore } from '@/stores/investment'
+import bus from '@/event-bus'
+import VoiceInput from '@/components/VoiceInput.vue'
+import PendingAssetCard from '@/components/PendingAssetCard.vue'
+import PendingGoalCard from '@/components/PendingGoalCard.vue'
+import iconBunny from '@/assets/decor/avatars/bunny.svg'
+import iconShiba from '@/assets/decor/avatars/shiba.svg'
+import iconOwl from '@/assets/decor/avatars/owl.svg'
+import iconBeaver from '@/assets/decor/avatars/beaver.svg'
+
+const userStore = useUserStore()
+const categoryStore = useCategoryStore()
+const chatStore = useChatStore()
+const investmentStore = useInvestmentStore()
+
+// 动物建议卡：每个角色对应一个常用咨询场景
+const quickActions = [
+  { label: '本月分析',  text: '分析一下我本月的财务状况',
+    avatar: iconBeaver, color: '#fef3c7' },
+  { label: '推荐预算',  text: '根据我的消费习惯帮我推荐合适的预算',
+    avatar: iconOwl,    color: '#e6f9f6' },
+  { label: '预算余额',  text: '查询本月各分类预算余额',
+    avatar: iconShiba,  color: '#fde4e4' },
+  { label: '存钱建议',  text: '给我一个本月可以省下更多钱的小建议',
+    avatar: iconBunny,  color: '#fce7f3' },
+]
+function sendQuick(text) {
+  userInput.value = text
+  sendMessage()
+}
+
+function onVoicePartial(text) {
+  userInput.value = text
+}
+function onVoiceResult(text) {
+  userInput.value = text
+}
 
 const userInput = ref('')
-const messages = ref([{ sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }])
+const imageInput = ref(null)
+const welcomeMsg = { sender: 'assistant', content: '你好！我是你的智能记账助手 😊 你可以告诉我消费情况，例如"吃饭花了20元"，也可以点击图片按钮上传账单/小票自动识别记账。' }
+const messages = computed(() => chatStore.messages)
 const loading = ref(false)
 const chatRef = ref(null)
 const router = useRouter()
-const currentUser = ref(localStorage.getItem('username') || '')
+const currentUser = computed(() => userStore.username)
 
 async function sendMessage() {
   const msg = userInput.value.trim()
   if (!msg) return
-  messages.value.push({ sender: 'user', content: msg })
+  chatStore.pushMessage({ sender: 'user', content: msg })
   userInput.value = ''
   loading.value = true
   await scrollToBottom()
 
   try {
-    const cfgRaw = localStorage.getItem('llmConfig')
-    let llm = null
-    if (cfgRaw && cfgRaw !== 'default') {
-      try { llm = JSON.parse(cfgRaw) } catch {}
-    }
+    const llm = userStore.llmPayload
     const res = await fetch('/api/chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ message: msg, llm })
     })
     const data = await res.json()
-    messages.value.push({ sender: 'assistant', content: data.reply || '⚠️ 无法解析' })
-    if (data.reply?.startsWith('✅')) {
-      localStorage.setItem('record_added', Date.now())
-    }
+    const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
+    decoratePending(data, assistantMsg)
+    chatStore.pushMessage(assistantMsg)
   } catch {
-    messages.value.push({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
+    chatStore.pushMessage({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
   } finally {
     loading.value = false
     await scrollToBottom()
+  }
+}
+
+function decoratePending(data, assistantMsg) {
+  if (data.pending_records && data.pending_records.length > 0) {
+    assistantMsg.pending_records = data.pending_records.map(rec => ({
+      ...rec, _state: 'pending', _edit: { ...rec },
+    }))
+  }
+  if (data.pending_assets && data.pending_assets.length > 0) {
+    assistantMsg.pending_assets = data.pending_assets.map(rec => ({
+      ...rec, _state: 'pending', _edit: { ...rec },
+    }))
+  }
+  if (data.pending_goals && data.pending_goals.length > 0) {
+    assistantMsg.pending_goals = data.pending_goals.map(rec => ({
+      ...rec, _state: 'pending', _edit: { ...rec },
+    }))
+  }
+}
+
+function handleImageSelect(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过 10MB')
+    e.target.value = ''
+    return
+  }
+  sendImage(file)
+  e.target.value = ''
+}
+
+// 图片识别改异步任务:上传立即返回 task_id + "识别中"气泡,轮询取结果。
+// 识别期间输入框不锁,可以继续打字记账。
+async function sendImage(file) {
+  const previewUrl = URL.createObjectURL(file)
+  chatStore.pushMessage({ sender: 'user', content: '', image: previewUrl })
+  const placeholder = reactive({ sender: 'assistant', content: '', _recognizing: false })
+  chatStore.pushMessage(placeholder)
+  await scrollToBottom()
+  await recognizeInto(placeholder, file)
+}
+
+async function retryImage(msg) {
+  const file = msg._retryFile
+  msg._retryFile = null
+  await recognizeInto(msg, file)
+}
+
+async function recognizeInto(msg, file) {
+  msg._recognizing = true
+  msg.content = '🔍 正在识别图片…通常需要十几秒,你可以先继续聊天'
+  msg.pending_records = msg.pending_assets = msg.pending_goals = undefined
+  try {
+    const formData = new FormData()
+    formData.append('image', file)
+    const res = await fetch('/api/chat/image', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    })
+    const data = await res.json()
+    if (!res.ok || !data.task_id) throw new Error(data.message || `上传失败 (${res.status})`)
+
+    const result = await pollImageTask(data.task_id)
+    msg.content = result.reply || '⚠️ 无法解析'
+    decoratePending(result, msg)
+  } catch (e) {
+    msg.content = `❌ ${e.message || '图片识别失败，请重试或手动输入。'}`
+    msg._retryFile = file
+  } finally {
+    msg._recognizing = false
+    await scrollToBottom()
+  }
+}
+
+async function pollImageTask(taskId) {
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1500))
+    const res = await fetch(`/api/chat/image/tasks/${taskId}`, { credentials: 'include' })
+    if (res.status === 404) throw new Error('识别任务已过期，请重试')
+    if (!res.ok) continue  // 瞬时网络抖动:下一轮再试
+    const data = await res.json()
+    if (data.status === 'done') return data
+    if (data.status === 'failed') throw new Error(data.error || '识别失败')
+  }
+  throw new Error('识别超时（>90 秒），服务可能繁忙，请稍后重试')
+}
+
+async function confirmRecord(rec) {
+  // 乐观 UI：先把卡片切到"已确认"避免用户继续等转圈，请求失败再回滚到 pending。
+  const _prevState = rec._state
+  rec._state = 'confirmed'
+  try {
+    const res = await fetch('/api/commit_record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        type: rec.type,
+        category: rec._edit.category,
+        amount: rec._edit.amount,
+        date: rec._edit.date,
+        note: rec._edit.note,
+        // 若该 pending 来自图片识别，commit 时带上 receipt_id 让后端关联归档
+        receipt_id: rec.receipt_id || null,
+      })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.success) {
+      rec._state = _prevState  // 回滚
+      ElMessage.error(data.message || `记录失败 (${res.status})`)
+      return
+    }
+    categoryStore.bumpRefresh()
+    // 通知其它页面（报告 / 回顾 / 统计 / 体检）这笔账本数据已变，下次激活时刷新。
+    bus.emit(rec.type === 'income' ? 'data:income' : 'data:records', { id: data.id })
+    if (data.budget_warning) {
+      const w = data.budget_warning
+      const warnMsg = w.level === 'over'
+        ? `⚠️ 「${w.category}」本月已超预算！预算 ¥${w.budget}，已花 ¥${w.spent.toFixed(2)}，超支 ¥${Math.abs(w.remaining).toFixed(2)}`
+        : `⚠️ 「${w.category}」本月预算已用 ${(w.spent / w.budget * 100).toFixed(0)}%，剩余 ¥${w.remaining.toFixed(2)}`
+      chatStore.pushMessage({ sender: 'assistant', content: warnMsg })
+      await scrollToBottom()
+    }
+  } catch {
+    rec._state = _prevState
+    ElMessage.error('网络异常，请重试')
+  }
+}
+
+async function confirmAsset(rec) {
+  rec._state = 'saving'
+  rec._error = ''
+  try {
+    const res = await investmentStore.commitPendingAsset({ ...rec._edit })
+    if (res?.success) {
+      rec._state = 'confirmed'
+      ElMessage.success('已添加到投资理财')
+    } else {
+      rec._state = 'error'
+      rec._error = res?.message || '入库失败'
+    }
+  } catch (e) {
+    rec._state = 'error'
+    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
+  }
+}
+
+async function confirmGoal(rec) {
+  rec._state = 'saving'
+  rec._error = ''
+  try {
+    const res = await investmentStore.commitPendingGoal({ ...rec._edit })
+    if (res?.success) {
+      rec._state = 'confirmed'
+      ElMessage.success('已添加理财目标')
+    } else {
+      rec._state = 'error'
+      rec._error = res?.message || '入库失败'
+    }
+  } catch (e) {
+    rec._state = 'error'
+    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
   }
 }
 
@@ -74,83 +448,349 @@ function scrollToBottom() {
   })
 }
 
-onMounted(() => {
-  const name = localStorage.getItem('username')
-  if (!name) {
-    router.push('/login')
-  } else {
-    scrollToBottom()
+let lastUser = userStore.username
+onMounted(async () => {
+  if (!userStore.username) { router.push('/login'); return }
+  await chatStore.loadHistory()
+  if (chatStore.messages.length === 0) {
+    chatStore.pushMessage(welcomeMsg)
   }
+  await scrollToBottom()
 })
 
 onActivated(() => {
-  const name = localStorage.getItem('username') || ''
-  if (name !== currentUser.value) {
-    currentUser.value = name
-    messages.value = [
-      { sender: 'assistant', content: '你好，我是你的智能记账助手，有什么可以帮你？' }
-    ]
+  if (userStore.username !== lastUser) {
+    lastUser = userStore.username
+    chatStore.reset()
+    chatStore.pushMessage(welcomeMsg)
   }
 })
 </script>
 
 <style scoped>
 .chat-page {
-  position: relative;
-  height: 100vh;
-  height: 100dvh;
   display: flex;
   flex-direction: column;
+  height: calc(100vh - 40px);
+  height: calc(100dvh - 40px);
+  background: var(--color-bg);
 }
 
 .chat-container {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
-  padding-bottom: 70px;
-  background-color: #f9f9f9;
+  padding: 16px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-header-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 4px 12px;
+  background: rgba(37,99,235,0.08);
+  border-radius: 20px;
+  align-self: center;
+  margin-bottom: 4px;
 }
 
 .msg {
   display: flex;
-  margin: 6px 0;
+  align-items: flex-end;
+  gap: 8px;
 }
-.msg.user {
-  justify-content: flex-end;
+.msg.user { justify-content: flex-end; }
+.msg.assistant { justify-content: flex-start; }
+
+/* msg-body: 纵向堆叠 bubble + 卡片 */
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 72%;
+  gap: 6px;
 }
-.msg.assistant {
-  justify-content: flex-start;
+.msg.user .msg-body { align-items: flex-end; }
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
+.ai-avatar {
+  object-fit: cover;
+  background: transparent;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+}
+.user-avatar {
+  background: var(--color-primary);
+  color: #fff;
+}
+
 .bubble {
-  padding: 8px 12px;
-  border-radius: 6px;
-  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  width: fit-content;
+  max-width: 100%;
   word-break: break-word;
+  font-size: 14px;
+  line-height: 1.6;
 }
 .user .bubble {
-  background-color: #c6e2ff;
+  background: var(--color-primary);
+  color: #fff;
+  border-bottom-right-radius: 4px;
 }
 .assistant .bubble {
-  background-color: #eef1f6;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
 
+/* 打字动画气泡 */
+.typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px;
+}
+.typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  animation: blink 1.2s infinite;
+}
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* 确认卡片 */
+.pending-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.card-expense { border-left: 3px solid #ef4444; }
+.card-income  { border-left: 3px solid #22c55e; }
+.card-confirmed { background: var(--color-bg); opacity: 0.85; }
+
+/* 已确认只读头部 */
+.card-confirmed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.card-category-text { font-weight: 600; color: var(--color-text); flex: 1; }
+.card-confirmed-badge { font-size: 11px; color: #22c55e; font-weight: 600; flex-shrink: 0; }
+.amount-expense { color: #ef4444; font-weight: 700; font-size: 15px; }
+.amount-income  { color: #22c55e; font-weight: 700; font-size: 15px; }
+
+/* 编辑字段区：PC 2列 */
+.card-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.card-field { display: flex; flex-direction: column; gap: 3px; }
+.field-label { font-size: 11px; color: var(--color-text-muted); font-weight: 500; }
+
+/* 操作按钮 */
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 已确认只读字段行 */
+.card-rows { display: flex; flex-direction: column; }
+.card-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.card-label { color: var(--color-text-muted); }
+.card-value { color: var(--color-text); text-align: right; }
+
+/* 快捷操作 — 动物建议卡片 */
+.quick-actions {
+  display: flex;
+  gap: 10px;
+  padding: 0 12px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.quick-actions::-webkit-scrollbar { display: none; }
+.quick-card {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px 10px;
+  min-width: 78px;
+  border: 2px solid rgba(0,0,0,0.05);
+  border-radius: 16px;
+  background: var(--color-surface);
+  color: #3b2419;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 3px 0 0 var(--shadow-anchor-light);
+  transition: transform 0.18s cubic-bezier(0.25, 1.2, 0.4, 1),
+              box-shadow 0.18s cubic-bezier(0.25, 1.2, 0.4, 1);
+}
+.quick-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 0 var(--shadow-anchor);
+}
+.quick-card:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 0 var(--shadow-anchor);
+}
+.quick-card:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.quick-avatar {
+  width: 36px;
+  height: 36px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 50%;
+  padding: 2px;
+}
+.quick-card:hover:not(:disabled) .quick-avatar {
+  animation: animal-wobble 0.6s ease;
+}
+.quick-text {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* 图片消息 */
+.bubble-recognizing {
+  animation: bubble-pulse 1.6s ease-in-out infinite;
+}
+@keyframes bubble-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.bubble-retry-btn {
+  display: block;
+  margin-top: 8px;
+}
+
+.chat-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 12px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+}
+
+/* 输入区 */
 .chat-input {
   display: flex;
-  padding: 10px;
-  border-top: 1px solid #ddd;
-  background: #fff;
-  position: stricky;
-  z-index: 100;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  margin: 0 12px 12px;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
-.chat-input .el-input {
-  flex: 1;
+.img-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.chat-input .el-button {
-  margin-left: 10px;
+.img-btn:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.img-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.chat-text-input { flex: 1; }
+.send-btn {
+  flex-shrink: 0;
+  min-width: 72px;
+  font-weight: 600;
+}
+
+/* 首次加载骨架屏 */
+.chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 0;
+}
+.skel-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.skel-row.right { justify-content: flex-end; }
+.skel-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, var(--color-border-light) 25%, var(--color-surface-2) 50%, var(--color-border-light) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s infinite;
+  flex-shrink: 0;
+}
+.skel-bubble {
+  height: 36px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--color-border-light) 25%, var(--color-surface-2) 50%, var(--color-border-light) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s infinite;
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .chat-page {
+    height: calc(100dvh - var(--topbar-height) - 0px);
+  }
+  .msg-body { max-width: 85%; }
+  .card-fields { grid-template-columns: 1fr; }
+  .card-actions { gap: 6px; }
+  .card-actions .el-button { flex: 1; }
 }
 </style>
-
-
-
-
-
