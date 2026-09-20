@@ -111,8 +111,10 @@ api.interceptors.response.use(
     if (status === 401) {
       // session 过期：清栈跳登录。短时间内多次 401 只跳一次。
       if (!_redirecting && typeof window !== 'undefined') {
-        const onLogin = window.location.pathname.startsWith('/login')
-        if (!onLogin) {
+        // 登录页与公开分享页(/s/...)都不该被"登录过期"弹走
+        const path = window.location.pathname
+        const skipRedirect = path.startsWith('/login') || path.startsWith('/s/')
+        if (!skipRedirect) {
           _redirecting = true
           ElMessage.warning('登录已过期，请重新登录')
           window.location.replace('/login')

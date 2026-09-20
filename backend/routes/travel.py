@@ -277,3 +277,100 @@ def delete_pack_item(trip_id: int, item_id: int):
     if cur.rowcount == 0:
         return jsonify({"error": "条目不存在"}), 404
     return jsonify({"success": True})
+
+
+# ---------- 分享:公开只读链接 ----------
+# 安全边界:公开端点不走 login_required,因此**必须**逐字段白名单输出。
+# 明确排除:journal(手记)、打包清单、user_id、内部时间戳。
+# 只读——没有任何写入入口暴露给匿名访客。
+
+_PUBLIC_TRIP_FIELDS = ("title", "subtitle", "code", "start_date", "end_date",
+                       "accent", "cover_note")
+_PUBLIC_DAY_FIELDS = ("day_no", "date", "route", "transport", "meal")
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/share", methods=["GET"])
+@login_required
+def get_share(trip_id: int):
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    row = get_db().execute(
+        "SELECT token, created_at FROM trip_shares "
+        "WHERE trip_id = ? AND user_id = ? AND revoked_at IS NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (trip_id, g.user_id),
+    ).fetchone()
+    return jsonify({"shared": bool(row), **(dict(row) if row else {})})
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/share", methods=["POST"])
+@login_required
+def create_share(trip_id: int):
+    """生成(或复用)公开链接。已有未撤销的就直接返回,避免旧链接悄悄失效。"""
+    import secrets
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    db = get_db()
+    row = db.execute(
+        "SELECT token FROM trip_shares WHERE trip_id = ? AND user_id = ? AND revoked_at IS NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (trip_id, g.user_id),
+    ).fetchone()
+    if row:
+        return jsonify({"token": row["token"], "reused": True})
+    token = secrets.token_urlsafe(16)
+    db.execute(
+        "INSERT INTO trip_shares (trip_id, user_id, token, created_at) VALUES (?,?,?,?)",
+        (trip_id, g.user_id, token, _now()),
+    )
+    db.commit()
+    return jsonify({"token": token, "reused": False}), 201
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/share", methods=["DELETE"])
+@login_required
+def revoke_share(trip_id: int):
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    db = get_db()
+    cur = db.execute(
+        "UPDATE trip_shares SET revoked_at = ? "
+        "WHERE trip_id = ? AND user_id = ? AND revoked_at IS NULL",
+        (_now(), trip_id, g.user_id),
+    )
+    db.commit()
+    return jsonify({"success": True, "revoked": cur.rowcount})
+
+
+@travel_bp.route("/api/public/trips/<token>", methods=["GET"])
+def public_trip(token: str):
+    """公开只读行程。**无需登录**——输出严格白名单,不含手记/打包/用户信息。
+
+    token 无效、已撤销、行程已软删,一律 404(不区分,避免探测行程是否存在)。
+    """
+    if not token or len(token) > 64:
+        return jsonify({"error": "链接无效"}), 404
+    db = get_db()
+    share = db.execute(
+        "SELECT trip_id FROM trip_shares WHERE token = ? AND revoked_at IS NULL", (token,),
+    ).fetchone()
+    if not share:
+        return jsonify({"error": "链接无效或已失效"}), 404
+    trip = db.execute(
+        "SELECT * FROM trips WHERE id = ? AND deleted_at IS NULL", (share["trip_id"],),
+    ).fetchone()
+    if not trip:
+        return jsonify({"error": "链接无效或已失效"}), 404
+
+    trip_out = {k: trip[k] for k in _PUBLIC_TRIP_FIELDS}
+    days_out = []
+    for r in db.execute(
+        "SELECT * FROM trip_days WHERE trip_id = ? ORDER BY day_no ASC", (share["trip_id"],),
+    ).fetchall():
+        d = {k: r[k] for k in _PUBLIC_DAY_FIELDS}
+        try:
+            d["detail"] = json.loads(r["detail_json"]) if r["detail_json"] else {}
+        except (TypeError, ValueError):
+            d["detail"] = {}
+        days_out.append(d)          # 注意:journal 不在 _PUBLIC_DAY_FIELDS 里
+    return jsonify({"trip": trip_out, "days": days_out})

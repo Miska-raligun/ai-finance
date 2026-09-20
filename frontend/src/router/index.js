@@ -14,6 +14,8 @@ const InvestmentView = () => import('../views/InvestmentView.vue')
 const ReportsView = () => import('../views/ReportsView.vue')
 const AdminView = () => import('../views/AdminView.vue')
 const TravelView = () => import('../views/TravelView.vue')
+// 公开分享页:无需登录,不渲染应用外壳
+const PublicTripView = () => import('../views/PublicTripView.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -24,6 +26,7 @@ const routes = [
   { path: '/investment', component: InvestmentView },
   { path: '/reports', component: ReportsView },
   { path: '/travel', component: TravelView },
+  { path: '/s/:token', component: PublicTripView },
   { path: '/admin', component: AdminView }
 ]
 

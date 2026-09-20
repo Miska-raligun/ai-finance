@@ -18,6 +18,7 @@
             :value="t.id"
           />
         </el-select>
+        <el-button v-if="trip" size="small" @click="openShare">🔗 分享</el-button>
         <el-button size="small" type="primary" @click="showCreate = true">+ 新建行程</el-button>
       </div>
     </div>
@@ -87,6 +88,31 @@
         </div>
       </el-drawer>
     </template>
+
+    <!-- 分享链接 -->
+    <el-dialog v-model="showShare" title="分享这份行程" :width="dialogWidth">
+      <p class="share-note">
+        生成一个公开只读链接,拿到链接的人无需登录即可查看<b>行程安排、景点与地图</b>。
+        <br>
+        <b>不会分享</b>:你的手记、打包清单,以及记账本的任何内容。
+      </p>
+
+      <div v-if="shareUrl" class="share-box">
+        <el-input :model-value="shareUrl" readonly>
+          <template #append>
+            <el-button @click="copyShare">复制</el-button>
+          </template>
+        </el-input>
+        <div class="share-actions">
+          <el-button size="small" type="danger" plain :loading="sharing" @click="revokeShare">
+            取消分享(链接立即失效)
+          </el-button>
+        </div>
+      </div>
+      <div v-else class="share-box">
+        <el-button type="primary" :loading="sharing" @click="createShare">生成分享链接</el-button>
+      </div>
+    </el-dialog>
 
     <!-- 新建行程 -->
     <el-dialog v-model="showCreate" title="新建行程" :width="dialogWidth">
@@ -162,6 +188,11 @@ const showCreate = ref(false)
 const creating = ref(false)
 const showDrawer = ref(false)
 const leftMode = ref('calendar')   // calendar | map
+const showShare = ref(false)
+const sharing = ref(false)
+const shareToken = ref('')
+const shareUrl = computed(() =>
+  shareToken.value ? `${window.location.origin}/s/${shareToken.value}` : '')
 
 const form = reactive({ title: '', subtitle: '', code: '', range: [], accent: 'glacier' })
 
@@ -256,6 +287,49 @@ async function createTrip() {
   }
 }
 
+async function openShare() {
+  showShare.value = true
+  shareToken.value = ''
+  try {
+    const res = await api.get(`/api/trips/${trip.value.id}/share`)
+    if (res.data.shared) shareToken.value = res.data.token
+  } catch { /* 拦截器已提示 */ }
+}
+
+async function createShare() {
+  sharing.value = true
+  try {
+    const res = await api.post(`/api/trips/${trip.value.id}/share`)
+    shareToken.value = res.data.token
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '生成失败')
+  } finally {
+    sharing.value = false
+  }
+}
+
+async function revokeShare() {
+  sharing.value = true
+  try {
+    await api.delete(`/api/trips/${trip.value.id}/share`)
+    shareToken.value = ''
+    ElMessage.success('已取消分享,旧链接立即失效')
+  } catch {
+    ElMessage.error('取消失败')
+  } finally {
+    sharing.value = false
+  }
+}
+
+async function copyShare() {
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+    ElMessage.success('链接已复制')
+  } catch {
+    ElMessage.info('复制失败,请手动选中链接复制')
+  }
+}
+
 onMounted(loadTrips)
 </script>
 
@@ -298,6 +372,10 @@ onMounted(loadTrips)
   box-shadow: 0 4px 0 0 var(--shadow-anchor-light);
   padding: 14px;
 }
+
+.share-note { font-size: 13px; line-height: 1.7; color: var(--color-text); margin: 0 0 12px; }
+.share-box { display: flex; flex-direction: column; gap: 10px; }
+.share-actions { display: flex; justify-content: flex-end; }
 
 .pane-switch { display: flex; gap: 6px; margin-bottom: 12px; }
 .pane-btn {

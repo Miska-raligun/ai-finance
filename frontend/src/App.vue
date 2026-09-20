@@ -11,7 +11,7 @@
 
   <el-container style="height: 100vh; height: 100dvh">
     <!-- PC 侧边栏 -->
-    <el-aside v-if="!isMobile && route.path !== '/login'" width="220px" class="app-aside">
+    <el-aside v-if="!isMobile && !isBare" width="220px" class="app-aside">
       <div class="brand brand-link" role="button" title="回到首页" @click="router.push('/home')">
         <img src="@/assets/decor/tree.svg" class="brand-tree" alt="" aria-hidden="true">
         <span class="brand-name">智能记账</span>
@@ -81,7 +81,7 @@
 
     <!-- 移动端侧边抽屉 -->
     <el-drawer
-      v-if="isMobile && route.path !== '/login'"
+      v-if="isMobile && !isBare"
       v-model="showDrawer"
       :with-header="false"
       size="240px"
@@ -148,7 +148,7 @@
 
     <el-container style="flex-direction: column; overflow: hidden; min-width: 0;">
       <!-- 移动端顶部导航栏 -->
-      <header v-if="isMobile && route.path !== '/login'" class="mobile-topbar">
+      <header v-if="isMobile && !isBare" class="mobile-topbar">
         <button class="topbar-menu-btn" @click="showDrawer = true" aria-label="打开菜单">☰</button>
         <span class="topbar-title">{{ topbarTitle }}</span>
         <button
@@ -166,7 +166,7 @@
         <div class="topbar-user">{{ username.slice(0, 1).toUpperCase() }}</div>
       </header>
 
-      <el-main :class="{ 'has-topbar': isMobile && route.path !== '/login' }">
+      <el-main :class="{ 'has-topbar': isMobile && !isBare }">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in" appear>
             <keep-alive :max="3">
@@ -241,6 +241,16 @@ import DecisionHelper from '@/components/DecisionHelper.vue'
 const FinancialCheckup = defineAsyncComponent(() => import('@/components/FinancialCheckup.vue'))
 
 const route = useRoute()
+// 「裸页」:登录页与公开分享页都不套应用外壳——分享页的访客不该看到
+// 侧边栏里的账本/投资等入口,也不该发任何需要登录的请求。
+// 路由组件是懒加载的,App.vue 挂载时首次导航可能还没解析完(route.path 仍是 '/'),
+// 所以首帧用 location.pathname 兜底;SPA 内跳转时两者都会同步更新。
+function _isBarePath(p) {
+  return p === '/login' || p.startsWith('/s/')
+}
+const isBare = computed(() =>
+  _isBarePath(route.path) ||
+  (typeof window !== 'undefined' && _isBarePath(window.location.pathname)))
 const router = useRouter()
 const userStore = useUserStore()
 const { isAdmin } = storeToRefs(userStore)
@@ -324,8 +334,8 @@ onBeforeUnmount(() => {
 
 watchEffect(() => { active.value = route.path })
 
-onMounted(() => userStore.fetchMe())
-watch(() => route.path, () => userStore.fetchMe())
+onMounted(() => { if (!isBare.value) userStore.fetchMe() })
+watch(() => route.path, () => { if (!isBare.value) userStore.fetchMe() })
 
 // 未配置 LLM 不再强弹模态框拦路(首页会显示温和的提示条,见 HomeView);
 // 这里只监听提示条/其它入口发来的打开请求。
@@ -365,7 +375,7 @@ async function refreshTip() {
 onMounted(() => {
   _clockTimer = setInterval(() => { _now.value = new Date() }, 30_000)
   // 首次进入页面 + 用户名就绪时拉一句
-  if (userStore.username) refreshTip()
+  if (userStore.username && !isBare.value) refreshTip()
 })
 // 用户登录后再拉
 watch(() => userStore.username, (v) => { if (v) refreshTip() })

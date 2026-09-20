@@ -109,3 +109,85 @@ def test_other_user_cannot_access(app, auth_client, client):
     assert client.get(f"/api/trips/{tid}").status_code == 404
     assert client.patch(f"/api/trips/{tid}/days/1", json={"journal": "x"}).status_code == 404
     assert client.delete(f"/api/trips/{tid}").status_code == 404
+
+
+# ---------- 分享链接:安全边界 ----------
+
+def _shared_trip(auth_client):
+    """建一趟带手记和打包清单的行程,并生成分享 token。"""
+    tid = _mk_trip(auth_client).get_json()["id"]
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "route": "上海 → 赫尔辛基",
+        "detail": {"spots": [["岩石教堂", "15min"]]},
+        "journal": "这是我的私人手记，绝不能出现在分享页",
+    })
+    auth_client.post(f"/api/trips/{tid}/packing", json={"grp": "证件", "label": "护照"})
+    token = auth_client.post(f"/api/trips/{tid}/share").get_json()["token"]
+    return tid, token
+
+
+def test_public_share_excludes_journal_and_packing(app, auth_client):
+    """公开页必须只给行程本身:手记、打包清单、用户信息一律不出现。"""
+    tid, token = _shared_trip(auth_client)
+
+    # conftest 的 client 与 auth_client 是同一个对象(只是塞了 session),
+    # 必须新开一个 test_client 才是真正的匿名访客。
+    anon = app.test_client()
+    r = anon.get(f"/api/public/trips/{token}")
+    assert r.status_code == 200
+    body = r.get_json()
+
+    assert body["trip"]["title"] == "逃离地球计划"
+    assert body["days"][0]["route"] == "上海 → 赫尔辛基"
+    assert body["days"][0]["detail"]["spots"][0][0] == "岩石教堂"
+
+    # 整个响应体里不能出现手记内容或任何 journal 字段
+    raw = r.get_data(as_text=True)
+    assert "私人手记" not in raw
+    assert "journal" not in raw
+    assert "packing" not in body and "护照" not in raw
+    # 也不能泄露用户/内部字段
+    for leaked in ("user_id", "deleted_at", "detail_json"):
+        assert leaked not in raw
+
+
+def test_public_share_requires_no_login_but_others_still_protected(app, auth_client):
+    """公开端点匿名可读;但其它端点对匿名依旧是 401——分享不应打开别的门。"""
+    tid, token = _shared_trip(auth_client)
+    anon = app.test_client()
+    assert anon.get(f"/api/public/trips/{token}").status_code == 200
+    assert anon.get("/api/trips").status_code == 401
+    assert anon.get(f"/api/trips/{tid}").status_code == 401
+    assert anon.get("/api/records").status_code == 401
+    assert anon.get("/api/stats/today").status_code == 401
+
+
+def test_revoke_invalidates_link(app, auth_client):
+    tid, token = _shared_trip(auth_client)
+    anon = app.test_client()
+    assert anon.get(f"/api/public/trips/{token}").status_code == 200
+    assert auth_client.delete(f"/api/trips/{tid}/share").status_code == 200
+    assert anon.get(f"/api/public/trips/{token}").status_code == 404
+
+
+def test_soft_deleted_trip_link_dies(app, auth_client):
+    tid, token = _shared_trip(auth_client)
+    auth_client.delete(f"/api/trips/{tid}")
+    assert app.test_client().get(f"/api/public/trips/{token}").status_code == 404
+
+
+def test_bad_token_404(app):
+    anon = app.test_client()
+    assert anon.get("/api/public/trips/nope").status_code == 404
+    assert anon.get("/api/public/trips/" + "x" * 80).status_code == 404
+
+
+def test_share_token_reused_and_owner_only(app, auth_client):
+    tid, token = _shared_trip(auth_client)
+    again = auth_client.post(f"/api/trips/{tid}/share").get_json()
+    assert again["token"] == token and again["reused"] is True     # 不会悄悄换掉旧链接
+
+    # 匿名不能生成/撤销分享
+    anon = app.test_client()
+    assert anon.post(f"/api/trips/{tid}/share").status_code == 401
+    assert anon.delete(f"/api/trips/{tid}/share").status_code == 401
