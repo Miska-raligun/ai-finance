@@ -57,7 +57,7 @@
       <div class="pub-wrap">
         <!-- 地图:整个分享页的视觉主角,给满宽 -->
         <section v-if="hasAnyStop" class="card map-card">
-          <TripMap :days="days" title="全程路线" />
+          <TripMap :days="days" :share-token="String(route.params.token || '')" title="全程路线" />
         </section>
 
         <div class="cols" :class="{ solo: !facts.length }">
@@ -355,9 +355,8 @@ onBeforeUnmount(() => {
   border-radius: 14px; padding: 14px 16px;
 }
 .map-card { margin-bottom: 16px; }
-/* 地图按 760×380 的 viewBox 等比放大，满宽时会有 540px 高，几乎吃掉整屏。
-   压到半屏以内，头图、地图、第一天能同屏看到。 */
-.map-card :deep(.tmap-svg) { max-height: min(46vh, 420px); }
+/* 不再压地图高度：压扁会让 SVG 等比留白、两侧露底色。地图现在带地名标注，
+   值得给满宽。 */
 
 .cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
 .cols.solo { grid-template-columns: minmax(0, 1fr); }

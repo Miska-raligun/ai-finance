@@ -15,7 +15,7 @@
 
     <!-- 当日地图:该天有带坐标的停留点才显示 -->
     <section v-if="hasStops" class="dd-sec">
-      <TripMap :days="[day]" title="当日路线" />
+      <TripMap :days="[day]" :trip-id="tripId" title="当日路线" />
     </section>
 
     <!-- 当日时间轴 -->

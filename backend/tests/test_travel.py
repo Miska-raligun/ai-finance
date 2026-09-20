@@ -235,3 +235,79 @@ def test_public_share_respects_fact_visibility(app, auth_client):
     assert "13945079235" not in raw           # 领队手机号没泄露
     assert "护照" not in raw                  # 打包清单始终不公开
     assert "is_public" not in raw and "sort_order" not in raw
+
+
+# ---------- 景点照片 ----------
+
+# 1×1 的 PNG，够走完落盘 / 取图这条链路
+_PNG = ("data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def _share_token(client, tid):
+    return client.post(f"/api/trips/{tid}/share").get_json()["token"]
+
+
+def test_photo_upload_and_fetch(app, auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+
+    r = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG})
+    assert r.status_code == 201
+    sha = r.get_json()["sha256"]
+    assert len(sha) == 64
+
+    # 同一张图再传一次只是去重，不会多占磁盘
+    again = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG})
+    assert again.get_json() == {"sha256": sha, "deduped": True}
+
+    got = auth_client.get(f"/api/trips/{tid}/photos/{sha}")
+    assert got.status_code == 200
+    assert got.mimetype == "image/png"
+
+
+def test_photo_rejects_garbage(app, auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    assert auth_client.post(f"/api/trips/{tid}/photos", json={"image": ""}).status_code == 400
+    assert auth_client.post(f"/api/trips/{tid}/photos",
+                            json={"image": "data:image/gif;base64,R0lGODlhAQABAAAAACw="}
+                            ).status_code == 400
+
+
+def test_photo_public_only_via_valid_share(app, auth_client, tmp_path, monkeypatch):
+    """分享页要能匿名取图，但只认这趟行程的 token + 这趟行程名下的 sha。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
+    token = _share_token(auth_client, tid)
+
+    anon = app.test_client()
+    assert anon.get(f"/api/public/trips/{token}/photos/{sha}").status_code == 200
+    # 私有端点仍然要登录
+    assert anon.get(f"/api/trips/{tid}/photos/{sha}").status_code == 401
+    # 撤销后立刻取不到
+    auth_client.delete(f"/api/trips/{tid}/share")
+    assert anon.get(f"/api/public/trips/{token}/photos/{sha}").status_code == 404
+
+
+def test_photo_sha_scoped_to_trip(app, auth_client, tmp_path, monkeypatch):
+    """拿 A 行程的 sha 配 B 行程的分享链接，取不到。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    a = _mk_trip(auth_client, title="A").get_json()["id"]
+    b = _mk_trip(auth_client, title="B").get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{a}/photos", json={"image": _PNG}).get_json()["sha256"]
+    token_b = _share_token(auth_client, b)
+
+    anon = app.test_client()
+    assert anon.get(f"/api/public/trips/{token_b}/photos/{sha}").status_code == 404
+    assert auth_client.get(f"/api/trips/{b}/photos/{sha}").status_code == 404
+
+
+def test_photo_path_traversal_rejected(app, auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    token = _share_token(auth_client, tid)
+    anon = app.test_client()
+    for bad in ["../../etc/passwd", "a" * 64, "nope", "%2e%2e%2fetc%2fpasswd"]:
+        assert anon.get(f"/api/public/trips/{token}/photos/{bad}").status_code in (404, 308)

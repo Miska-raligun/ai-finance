@@ -87,7 +87,7 @@
             :selected-day-no="selectedDayNo"
             @select="onSelectDay"
           />
-          <TripMap v-else :days="days" title="全程路线" />
+          <TripMap v-else :days="days" :trip-id="trip.id" title="全程路线" />
         </div>
 
         <div v-if="isWide" class="trip-detail animal-pop" :style="{ '--i': 2 }">

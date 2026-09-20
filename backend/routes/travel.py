@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
+import os
+
 from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
@@ -283,6 +285,62 @@ def delete_pack_item(trip_id: int, item_id: int):
     return jsonify({"success": True})
 
 
+# ---------- 景点照片 ----------
+
+def _decode_data_url(raw: str):
+    """吃 `data:image/jpeg;base64,xxx`,也吃裸 base64(默认当 JPEG)。"""
+    import base64
+    if not isinstance(raw, str) or not raw:
+        return None, None
+    mime = "image/jpeg"
+    if raw.startswith("data:"):
+        head, _, body = raw.partition(",")
+        if not body:
+            return None, None
+        mime = head[5:].split(";")[0] or "image/jpeg"
+        raw = body
+    try:
+        return base64.b64decode(raw, validate=True), mime
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/photos", methods=["POST"])
+@login_required
+def upload_trip_photo(trip_id: int):
+    """上传一张景点照片,返回 sha。停留点只记 sha,不记 URL。"""
+    from services.trip_photos import store_photo
+
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    data = request.get_json() or {}
+    blob, mime = _decode_data_url(data.get("image"))
+    if not blob:
+        return jsonify({"error": "图片数据不合法"}), 400
+    try:
+        out = store_photo(g.user_id, trip_id, blob, mime)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(out), 201
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/photos/<sha>", methods=["GET"])
+@login_required
+def get_trip_photo(trip_id: int, sha: str):
+    from flask import send_file
+    from services.trip_photos import find_photo, absolute_path
+
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    info = find_photo(trip_id, sha)
+    if not info:
+        return jsonify({"error": "照片不存在"}), 404
+    path = absolute_path(info["path"])
+    if not os.path.isfile(path):
+        return jsonify({"error": "文件已丢失"}), 410
+    return send_file(path, mimetype=info["mime"])
+
+
 # ---------- 分享:公开只读链接 ----------
 # 安全边界:公开端点不走 login_required,因此**必须**逐字段白名单输出。
 # 明确排除:journal(手记)、打包清单、user_id、内部时间戳。
@@ -291,6 +349,19 @@ def delete_pack_item(trip_id: int, item_id: int):
 _PUBLIC_TRIP_FIELDS = ("title", "subtitle", "code", "start_date", "end_date",
                        "accent", "cover_note")
 _PUBLIC_DAY_FIELDS = ("day_no", "date", "route", "transport", "meal")
+
+
+def _shared_trip_id(token: str):
+    """token → trip_id。无效 / 已撤销 / 行程已软删,一律返回 None,
+    调用方统一回 404(不区分,避免探测行程是否存在)。"""
+    if not token or len(token) > 64:
+        return None
+    row = get_db().execute(
+        "SELECT t.id FROM trip_shares s JOIN trips t ON t.id = s.trip_id "
+        "WHERE s.token = ? AND s.revoked_at IS NULL AND t.deleted_at IS NULL",
+        (token,),
+    ).fetchone()
+    return row["id"] if row else None
 
 
 @travel_bp.route("/api/trips/<int:trip_id>/share", methods=["GET"])
@@ -352,24 +423,16 @@ def public_trip(token: str):
 
     token 无效、已撤销、行程已软删,一律 404(不区分,避免探测行程是否存在)。
     """
-    if not token or len(token) > 64:
-        return jsonify({"error": "链接无效"}), 404
+    trip_id = _shared_trip_id(token)
+    if not trip_id:
+        return jsonify({"error": "链接无效或已失效"}), 404
     db = get_db()
-    share = db.execute(
-        "SELECT trip_id FROM trip_shares WHERE token = ? AND revoked_at IS NULL", (token,),
-    ).fetchone()
-    if not share:
-        return jsonify({"error": "链接无效或已失效"}), 404
-    trip = db.execute(
-        "SELECT * FROM trips WHERE id = ? AND deleted_at IS NULL", (share["trip_id"],),
-    ).fetchone()
-    if not trip:
-        return jsonify({"error": "链接无效或已失效"}), 404
+    trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
 
     trip_out = {k: trip[k] for k in _PUBLIC_TRIP_FIELDS}
     days_out = []
     for r in db.execute(
-        "SELECT * FROM trip_days WHERE trip_id = ? ORDER BY day_no ASC", (share["trip_id"],),
+        "SELECT * FROM trip_days WHERE trip_id = ? ORDER BY day_no ASC", (trip_id,),
     ).fetchall():
         d = {k: r[k] for k in _PUBLIC_DAY_FIELDS}
         try:
@@ -384,11 +447,30 @@ def public_trip(token: str):
         for r in db.execute(
             "SELECT label, body FROM trip_facts "
             "WHERE trip_id = ? AND is_public = 1 ORDER BY sort_order ASC, id ASC",
-            (share["trip_id"],),
+            (trip_id,),
         ).fetchall()
     ]
     # 打包清单始终不公开:是个人准备事项,勾选状态也属于私人进度
     return jsonify({"trip": trip_out, "days": days_out, "facts": facts_out})
+
+
+@travel_bp.route("/api/public/trips/<token>/photos/<sha>", methods=["GET"])
+def public_trip_photo(token: str, sha: str):
+    """分享页取景点照片。**无需登录**——能不能看完全由 token 决定,
+    并且只认这趟行程名下的 sha,拿别的行程的 sha 来也取不到。"""
+    from flask import send_file
+    from services.trip_photos import find_photo, absolute_path
+
+    trip_id = _shared_trip_id(token)
+    if not trip_id:
+        return jsonify({"error": "链接无效或已失效"}), 404
+    info = find_photo(trip_id, sha)
+    if not info:
+        return jsonify({"error": "照片不存在"}), 404
+    path = absolute_path(info["path"])
+    if not os.path.isfile(path):
+        return jsonify({"error": "文件已丢失"}), 410
+    return send_file(path, mimetype=info["mime"])
 
 
 # ---------- 速查信息 ----------
