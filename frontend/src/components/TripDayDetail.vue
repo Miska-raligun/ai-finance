@@ -13,6 +13,11 @@
       </div>
     </header>
 
+    <!-- 当日地图:该天有带坐标的停留点才显示 -->
+    <section v-if="hasStops" class="dd-sec">
+      <TripMap :days="[day]" title="当日路线" />
+    </section>
+
     <!-- 当日时间轴 -->
     <section v-if="sched.length" class="dd-sec">
       <h4 class="dd-h">行程安排</h4>
@@ -75,6 +80,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import TripMap from '@/components/TripMap.vue'
 
 const props = defineProps({
   tripId: { type: Number, required: true },
@@ -95,6 +101,8 @@ const detail = computed(() => props.day?.detail || {})
 const sched = computed(() => detail.value.sched || [])
 const spots = computed(() => detail.value.spots || [])
 const stay = computed(() => detail.value.stay || null)
+const hasStops = computed(() =>
+  (detail.value.stops || []).some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
 const tipGroups = computed(() => [
   { key: 'todo', label: '贴士', items: detail.value.todo || [] },
   { key: 'cam', label: '拍摄建议', items: detail.value.cam || [] },

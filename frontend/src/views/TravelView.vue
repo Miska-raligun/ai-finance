@@ -47,12 +47,25 @@
       <!-- 宽屏:日历 + 右侧详情(master-detail);窄屏:只显示日历,点开抽屉 -->
       <div class="trip-body">
         <div class="trip-cal animal-pop" :style="{ '--i': 1 }">
+          <div class="pane-switch">
+            <button
+              v-for="m in ['calendar', 'map']"
+              :key="m"
+              type="button"
+              class="pane-btn"
+              :class="{ on: leftMode === m }"
+              @click="leftMode = m"
+            >{{ m === 'calendar' ? '日历' : '全程地图' }}</button>
+          </div>
+
           <TripCalendar
+            v-if="leftMode === 'calendar'"
             :trip="trip"
             :days="days"
             :selected-day-no="selectedDayNo"
             @select="onSelectDay"
           />
+          <TripMap v-else :days="days" title="全程路线" />
         </div>
 
         <div v-if="isWide" class="trip-detail animal-pop" :style="{ '--i': 2 }">
@@ -125,6 +138,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import TripCalendar from '@/components/TripCalendar.vue'
+import TripMap from '@/components/TripMap.vue'
 import TripDayDetail from '@/components/TripDayDetail.vue'
 
 // 每趟旅行的主题色预设(与后端 ACCENTS 对齐)
@@ -147,6 +161,7 @@ const loading = ref(true)
 const showCreate = ref(false)
 const creating = ref(false)
 const showDrawer = ref(false)
+const leftMode = ref('calendar')   // calendar | map
 
 const form = reactive({ title: '', subtitle: '', code: '', range: [], accent: 'glacier' })
 
@@ -282,6 +297,17 @@ onMounted(loadTrips)
   border-radius: var(--radius-tile-large, 20px);
   box-shadow: 0 4px 0 0 var(--shadow-anchor-light);
   padding: 14px;
+}
+
+.pane-switch { display: flex; gap: 6px; margin-bottom: 12px; }
+.pane-btn {
+  appearance: none; border: 1px solid var(--color-border-light);
+  background: var(--color-surface); color: var(--color-text-muted);
+  font: inherit; font-size: 12px; font-weight: 700;
+  padding: 4px 12px; border-radius: 999px; cursor: pointer;
+}
+.pane-btn.on {
+  background: var(--trip-accent); border-color: var(--trip-accent); color: #fff;
 }
 
 .accent-picker { display: flex; gap: 8px; }
