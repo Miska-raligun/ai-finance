@@ -1,90 +1,31 @@
-<!-- components/TripMap.vue — 行程地图:海岸线底图 + 曲线航段 + 带标注的停留点
-     底图为 Natural Earth 110m 陆地(公有领域)简化后的静态资源,按需懒加载,
-     不依赖任何外部地图服务——既避开 CSP(default-src 'self'),也不把行程
-     坐标发给第三方。
+<!-- components/TripMap.vue — 行程地图:高德底图 + 曲线航段 + 可点停留点
 
-     标注是这张图能不能看懂的关键:只有圆点的话,在没有地名的底图上根本
-     认不出是哪儿。所以做了「就近合并 + 避让排版」,放不下的标签宁可不画,
-     也不让它们互相压。 -->
+     用真实底图而不是自己画海岸线:街道、地名、POI 这些周边信息是自己画
+     拿不到的。高德栅格瓦片的地名全球都是中文,国内加载也快。
+
+     两件必须注意的事:
+       1. 高德瓦片是 GCJ-02 坐标,行程里存的是 WGS-84。境内直接画会偏几百米,
+          所以画之前统一过一遍 wgs2gcj(境外两者一致,函数会原样返回)。
+       2. 整站 CSP 是 default-src 'self',瓦片域名要在 img-src 里放行。
+          只放图片源,不引第三方脚本。 -->
 <template>
-  <div class="tmap" ref="wrapRef">
+  <div class="tmap">
     <div class="tmap-head">
       <span class="tmap-title">{{ title }}</span>
       <div class="tmap-tools">
-        <button type="button" class="tmap-btn" :disabled="zoom === 1" @click="resetView">复位</button>
-        <span class="tmap-hint">滚轮缩放 · 拖动平移 · 点圆点看介绍</span>
+        <button
+          v-for="l in LAYERS"
+          :key="l.key"
+          type="button"
+          class="tmap-btn"
+          :class="{ on: layer === l.key }"
+          @click="setLayer(l.key)"
+        >{{ l.label }}</button>
+        <button type="button" class="tmap-btn" @click="fitAll">复位</button>
       </div>
     </div>
 
-    <svg
-      ref="svgRef"
-      class="tmap-svg"
-      :viewBox="`0 0 ${W} ${H}`"
-      role="img"
-      :aria-label="`${title} 地图`"
-      @wheel.prevent="onWheel"
-      @pointerdown="onDown"
-      @pointermove="onMove"
-      @pointerup="onUp"
-      @pointerleave="onUp"
-    >
-      <rect class="tmap-sea" :width="W" :height="H" />
-
-      <!-- 陆地:跟着视图缩放,描边用 non-scaling-stroke 保持粗细 -->
-      <g v-if="landPath" :transform="landTransform">
-        <path :d="landPath" class="tmap-land" vector-effect="non-scaling-stroke" />
-      </g>
-
-      <!-- 航段:曲线。飞行虚线、航船点线、陆路实线 -->
-      <path
-        v-for="(l, i) in legs"
-        :key="'l' + i"
-        :d="l.d"
-        class="tmap-leg"
-        :class="{ air: l.air, sea: l.sea }"
-      />
-
-      <!-- 标签引线 -->
-      <line
-        v-for="(g, i) in labels.filter(x => x.lead)"
-        :key="'g' + i"
-        class="tmap-lead"
-        :x1="g.mx" :y1="g.my" :x2="g.lx" :y2="g.ly"
-      />
-
-      <!-- 停留点 -->
-      <g
-        v-for="m in marks"
-        :key="m.key"
-        class="tmap-mark"
-        :class="{ on: m.key === activeKey }"
-        role="button"
-        tabindex="0"
-        :aria-label="m.label"
-        @click.stop="open(m)"
-        @keydown.enter.stop="open(m)"
-      >
-        <circle :cx="m.x" :cy="m.y" :r="m.r + 2.2" class="tmap-ring" />
-        <circle
-          :cx="m.x" :cy="m.y" :r="m.r"
-          class="tmap-dot"
-          :class="{ first: m.first, last: m.last }"
-        />
-        <!-- 合并了几个点时角标写数量 -->
-        <g v-if="m.stops.length > 1">
-          <circle :cx="m.x + m.r + 2.6" :cy="m.y - m.r - 1.6" r="5.6" class="tmap-badge" />
-          <text :x="m.x + m.r + 2.6" :y="m.y - m.r + 1.2" class="tmap-badge-t">{{ m.stops.length }}</text>
-        </g>
-        <!-- 命中区:圆点太小,给一个不可见的大圆兜住点击 -->
-        <circle :cx="m.x" :cy="m.y" r="13" class="tmap-hit" />
-      </g>
-
-      <!-- 标签 -->
-      <g v-for="(g, i) in labels" :key="'t' + i" class="tmap-label" @click.stop="open(g.mark)">
-        <rect :x="g.bx" :y="g.by" :width="g.bw" :height="g.bh" rx="3" class="tmap-chip" />
-        <text :x="g.tx" :y="g.ty" :text-anchor="g.anchor" class="tmap-chip-t">{{ g.text }}</text>
-      </g>
-    </svg>
+    <div ref="mapEl" class="tmap-canvas"></div>
 
     <div class="tmap-legend">
       <span v-if="hasAir"><i class="lg lg-air"></i>飞行</span>
@@ -94,15 +35,15 @@
       <span><i class="dotl end"></i>终点</span>
     </div>
 
-    <!-- 停留点列表:全程视图下市内景点会挤成一点,列表保证每个点都可达,
-         也让键盘 / 读屏用户有路径。 -->
+    <!-- 停留点列表:低缩放下点会叠在一起,列表保证每个点都可达,
+         也给键盘 / 读屏用户一条路径。 -->
     <ul v-if="points.length" class="tmap-list">
       <li v-for="p in points" :key="p.id">
         <button
           type="button"
           class="tmap-li"
           :class="{ on: activeStopId === p.id }"
-          @click="openStop(p)"
+          @click="focusStop(p)"
         >
           <span class="tmap-li-dot" :class="{ air: p.air, sea: p.sea }"></span>
           {{ p.t }}
@@ -211,8 +152,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { mapUrl } from '@/utils/maplink'
+import { wgs2gcj } from '@/utils/gcj02'
 
 const props = defineProps({
   // [{ day_no, date, route, detail:{ stops:[{t,lat,lng,air,sea,desc,photo}], spots, todo, cam, warn } }]
@@ -234,46 +178,33 @@ function photoUrl(sha) {
     : (props.tripId ? `/api/trips/${props.tripId}/photos/${sha}` : '')
 }
 
-const W = 760, H = 380
-const S = 100                      // 世界坐标缩放基数
-const wrapRef = ref(null)
-const svgRef = ref(null)
-const land = ref(null)
-const detail = ref(null)
-const activeStopId = ref(null)
-const zoom = ref(1)
-const panX = ref(0), panY = ref(0)
+/* ---------- 底图 ---------- */
 
-// 弹窗 teleport 到 body,拿不到外层 .travel-page 上的主题色变量,
-// 打开时从组件所在位置把它们读出来带过去。
-const ACCENT_VARS = ['--trip-accent', '--trip-accent-weak', '--trip-accent-ink']
-const accentStyle = ref({})
-function snapshotAccent() {
-  const el = wrapRef.value
-  if (!el) return
-  const cs = getComputedStyle(el)
-  const out = {}
-  for (const k of ACCENT_VARS) {
-    const v = cs.getPropertyValue(k).trim()
-    if (v) out[k] = v
-  }
-  accentStyle.value = out
-}
-
-onMounted(async () => {
-  try {
-    const mod = await import('@/assets/geo/world-land.json')
-    land.value = mod.default || mod
-  } catch {
-    land.value = []                // 底图挂了也不影响景点和路线
-  }
-})
+const LAYERS = [
+  { key: 'road', label: '街道', url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}' },
+  { key: 'sat', label: '卫星', url: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}' },
+]
+// 卫星图没有地名,叠一层高德的注记层上去
+const LABEL_URL = 'https://webst0{s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}'
+const layer = ref('road')
 
 /* ---------- 取点 ---------- */
 
-/** 收集所有带坐标的点,按天顺序;顺带把当天 spots 的时长、
- *  以及提到这个地名的贴士配对上去——静态行程页里介绍是散在
- *  spots / todo / cam 里的,不配对的话点开只会看到一句"还没有介绍"。 */
+const mapEl = ref(null)
+const detail = ref(null)
+const activeStopId = ref(null)
+
+let map = null
+let baseLayer = null
+let labelLayer = null
+let routeGroup = null
+let markerGroup = null
+let markerById = new Map()
+let ro = null
+
+/** 收集所有带坐标的点,按天顺序;顺带把当天 spots 的时长、以及提到这个地名的
+ *  贴士配对上去——静态行程页里介绍是散在 spots / todo / cam 里的,
+ *  不配对的话点开只会看到一句"还没有介绍"。 */
 const points = computed(() => {
   const out = []
   for (const d of props.days) {
@@ -289,16 +220,17 @@ const points = computed(() => {
       const lat = Number(st.lat), lng = Number(st.lng)
       if (!isFinite(lat) || !isFinite(lng)) continue
       const name = st.t || '未命名'
+      const [glat, glng] = wgs2gcj(lat, lng)
       out.push({
         id: `${d.day_no}-${out.length}`,
         si,
         t: name,
-        lat, lng,
+        lat, lng,                 // 原始 WGS-84,给"在地图应用里打开"用
+        glat, glng,               // GCJ-02,画在高德底图上用
         air: !!st.air, sea: !!st.sea,
         desc: st.desc || st.note || '',
         photoSha: st.photo || '',
         dur: durOf[name] || '',
-        // 贴士里点名提到这个地点的,归到它名下
         tips: tipPool.filter(x => typeof x === 'string' && x.includes(name)),
         dayNo: d.day_no,
         date: d.date || '',
@@ -312,256 +244,161 @@ const points = computed(() => {
 const hasAir = computed(() => points.value.some(p => p.air))
 const hasSea = computed(() => points.value.some(p => p.sea))
 
-/* ---------- 投影与视图 ---------- */
-
-/** 取自动 fit 用的外接框。
+/** 复位视野用的范围。
  *
- *  直接用全部点的外接框有个很难看的后果:一条「上海 ✈ 赫尔辛基」的长途航段
- *  会把视野撑到半个欧亚大陆,真正要看的北欧部分缩成一小团。所以这里先算
- *  中间 90% 的点的框,只有当它比全量框小一半以上(说明确实存在远端离群点)
- *  才采用;点少或分布均匀时两者几乎一样,行为不变。 */
-function fitBox(pts) {
-  const lats = pts.map(p => p.lat).sort((a, b) => a - b)
-  const lngs = pts.map(p => p.lng).sort((a, b) => a - b)
+ *  直接框住全部点有个很难看的后果:一条「上海 ✈ 赫尔辛基」的长途航段会把
+ *  视野拉到半个欧亚大陆,真正要看的北欧缩成一小团。所以先算中间 90% 的点的
+ *  范围,只有当它明显更小(确实存在远端离群点)才用它;点少或分布均匀时
+ *  两者几乎一样。被排除的点照画,缩小一点就能看到。 */
+function fitBounds() {
+  const pts = points.value
+  if (!pts.length) return null
+  const lats = pts.map(p => p.glat).sort((a, b) => a - b)
+  const lngs = pts.map(p => p.glng).sort((a, b) => a - b)
   const at = (arr, t) => arr[Math.max(0, Math.min(arr.length - 1, Math.round((arr.length - 1) * t)))]
-  const full = {
-    minLat: lats[0], maxLat: lats[lats.length - 1],
-    minLng: lngs[0], maxLng: lngs[lngs.length - 1],
-  }
-  if (pts.length < 8) return full
-  const core = {
-    minLat: at(lats, 0.05), maxLat: at(lats, 0.95),
-    minLng: at(lngs, 0.05), maxLng: at(lngs, 0.95),
-  }
-  const area = (b) => Math.max(b.maxLat - b.minLat, 1e-6) * Math.max(b.maxLng - b.minLng, 1e-6)
-  return area(core) < area(full) * 0.5 ? core : full
+  const full = [[lats[0], lngs[0]], [lats[lats.length - 1], lngs[lngs.length - 1]]]
+  if (pts.length < 8) return L.latLngBounds(full)
+  const core = [[at(lats, 0.05), at(lngs, 0.05)], [at(lats, 0.95), at(lngs, 0.95)]]
+  const area = (b) => Math.max(b[1][0] - b[0][0], 1e-6) * Math.max(b[1][1] - b[0][1], 1e-6)
+  return L.latLngBounds(area(core) < area(full) * 0.5 ? core : full)
 }
 
-// 高纬度经度要按 cos 压缩,否则地图被横向拉宽
-const K = computed(() => {
-  const pts = points.value
-  if (!pts.length) return 1
-  const b = fitBox(pts)
-  return Math.cos(((b.minLat + b.maxLat) / 2) * Math.PI / 180)
-})
-const wx = (lng) => lng * K.value * S
-const wy = (lat) => -lat * S
+/* ---------- 画 ---------- */
 
-/** 基准视图:把 fit 框放进画布,四周留白。 */
-const baseView = computed(() => {
-  const pts = points.value
-  if (!pts.length) return { cx: 0, cy: 0, s: 1 }
-  const b = fitBox(pts)
-  const x0 = wx(b.minLng), x1 = wx(b.maxLng)
-  const y0 = wy(b.maxLat), y1 = wy(b.minLat)
-  const pad = 54                      // 给标签留的边距
-  const dx = Math.max(x1 - x0, 1e-6), dy = Math.max(y1 - y0, 1e-6)
-  return {
-    cx: (x0 + x1) / 2,
-    cy: (y0 + y1) / 2,
-    s: Math.min((W - pad * 2) / dx, (H - pad * 2) / dy),
-  }
-})
-
-const view = computed(() => {
-  const b = baseView.value
-  const s = b.s * zoom.value
-  return { cx: b.cx - panX.value / s, cy: b.cy - panY.value / s, s }
-})
-
-function screen(p) {
-  const v = view.value
-  return [(wx(p.lng) - v.cx) * v.s + W / 2, (wy(p.lat) - v.cy) * v.s + H / 2]
-}
-
-const landTransform = computed(() => {
-  const v = view.value
-  return `translate(${(W / 2 - v.cx * v.s).toFixed(2)} ${(H / 2 - v.cy * v.s).toFixed(2)}) scale(${v.s.toFixed(6)})`
-})
-
-// 底图路径只跟 K 有关,缩放平移交给 transform,不用每帧重算这 120 个环。
-// 只画与视野相交的环:一是省掉全球其它大陆的绘制,二是更要紧的——
-// 欧亚和美洲这种跨半球的大环一起画进同一个 <path> 时,绕向相反的环在
-// nonzero 填充下会互相翻转,海面会被整片涂成陆地色。
-const landPath = computed(() => {
-  if (!land.value || !land.value.length) return ''
-  const k = K.value
-  const pts = points.value
-  if (!pts.length) return ''
-  const b = fitBox(pts)
-  // 留足余量,缩到最小(0.35)时四周也还有陆地
-  const win = {
-    minLng: b.minLng - 45, maxLng: b.maxLng + 45,
-    minLat: b.minLat - 28, maxLat: b.maxLat + 28,
-  }
-  const parts = []
-  for (const ring of land.value) {
-    let hit = false
-    for (const [lng, lat] of ring) {
-      if (lng >= win.minLng && lng <= win.maxLng && lat >= win.minLat && lat <= win.maxLat) {
-        hit = true
-        break
-      }
-    }
-    if (!hit) continue
-    let d = ''
-    for (let i = 0; i < ring.length; i++) {
-      const [lng, lat] = ring[i]
-      d += (i ? 'L' : 'M') + (lng * k * S).toFixed(1) + ' ' + (-lat * S).toFixed(1)
-    }
-    parts.push(d + 'Z')
-  }
-  return parts.join('')
-})
-
-/* ---------- 航段:曲线 ---------- */
-
-/** 两点之间画一条二次贝塞尔,控制点沿弦的垂线外推。
- *  直线看起来像网络拓扑图,弧线才像航线;飞行段拱得更明显一点。 */
-const legs = computed(() => {
-  const ps = points.value
+/** 两点之间的弧线:直线看着像网络拓扑图,弧线才像航线。
+ *  控制点沿弦的垂线外推,飞行段拱得更明显。 */
+function arc(a, b, bend) {
+  const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  const k = Math.max(Math.cos(mid[0] * Math.PI / 180), 0.1)
+  const dx = (b[1] - a[1]) * k, dy = b[0] - a[0]
+  const cp = [mid[0] + dx * bend, mid[1] - dy * bend / k]
   const out = []
+  const N = 28
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, u = 1 - t
+    out.push([
+      u * u * a[0] + 2 * u * t * cp[0] + t * t * b[0],
+      u * u * a[1] + 2 * u * t * cp[1] + t * t * b[1],
+    ])
+  }
+  return out
+}
+
+function accentColor() {
+  const el = mapEl.value
+  if (!el) return '#2B6A80'
+  return (getComputedStyle(el).getPropertyValue('--trip-accent') || '').trim() || '#2B6A80'
+}
+
+function draw() {
+  if (!map) return
+  routeGroup.clearLayers()
+  markerGroup.clearLayers()
+  markerById = new Map()
+
+  const ps = points.value
+  const color = accentColor()
+
   for (let i = 1; i < ps.length; i++) {
-    const [ax, ay] = screen(ps[i - 1])
-    const [bx, by] = screen(ps[i])
-    const dx = bx - ax, dy = by - ay
-    const len = Math.hypot(dx, dy)
-    if (len < 2) continue
-    const bend = (ps[i].air ? 0.17 : 0.09)
-    // 垂线方向统一取一侧,整条路线的弧向才一致
-    const mx = (ax + bx) / 2 - dy * bend
-    const my = (ay + by) / 2 + dx * bend
-    out.push({
-      d: `M${ax.toFixed(1)} ${ay.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}`,
-      air: !!ps[i].air,
-      sea: !!ps[i].sea,
-    })
+    const a = [ps[i - 1].glat, ps[i - 1].glng]
+    const b = [ps[i].glat, ps[i].glng]
+    if (a[0] === b[0] && a[1] === b[1]) continue
+    const air = ps[i].air, sea = ps[i].sea
+    L.polyline(arc(a, b, air ? 0.17 : 0.09), {
+      color: air ? '#8A9EA3' : color,
+      weight: air ? 2 : 3,
+      opacity: air ? 0.75 : 0.9,
+      dashArray: air ? '8 6' : (sea ? '3 6' : null),
+      lineCap: 'round',
+      interactive: false,
+    }).addTo(routeGroup)
   }
-  return out
-})
 
-/* ---------- 就近合并 ---------- */
-
-const MERGE_PX = 20
-
-/** 一堆点挤在一起时,标签该写哪个名字。
- *
- *  地图上要的是"这是哪座城",不是"这一团里排第一的那个景点"。取被同团其它
- *  名字包含得最多的那个:赫尔辛基机场 / 赫尔辛基之眼 / 赫尔辛基 → 赫尔辛基。
- *  并列时保留行程里最早出现的那个——当天第一个点通常是机场 / 港口 / 进城点,
- *  比"老城""新港"这种到处都有的名字更能定位。
- *
- *  试过拿当天 route 里的地名加权,但那些是行程描述不是地名层级:
- *  「南岸瀑布 · DC3 · 维克黑沙滩」会把一整团标成 DC3,反而更糟。 */
-function pickName(names) {
-  let best = names[0], bestScore = -1
-  for (const n of names) {
-    const score = names.reduce((k, o) => k + (o.includes(n) ? 1 : 0), 0)
-    if (score > bestScore) {
-      best = n
-      bestScore = score
-    }
-  }
-  return best
-}
-
-const marks = computed(() => {
-  const ps = points.value
-  const out = []
   ps.forEach((p, i) => {
-    const [x, y] = screen(p)
-    const hit = out.find(o => Math.hypot(o.x - x, o.y - y) < MERGE_PX)
-    if (hit) {
-      hit.stops.push(p)
-      if (i === 0) hit.first = true
-      if (i === ps.length - 1) hit.last = true
-      return
-    }
-    out.push({
-      key: p.id, x, y, stops: [p],
-      first: i === 0, last: i === ps.length - 1,
+    const kind = i === 0 ? 'start' : (i === ps.length - 1 ? 'end' : '')
+    const m = L.marker([p.glat, p.glng], {
+      icon: L.divIcon({
+        className: 'tm-pin-wrap',
+        html: `<span class="tm-pin ${kind}"></span>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      }),
+      title: p.t,
+      keyboard: true,
+      alt: p.t,
     })
+    m.bindTooltip(p.t, { direction: 'top', offset: [0, -8] })
+    m.on('click', () => openStop(p))
+    m.addTo(markerGroup)
+    markerById.set(p.id, m)
   })
-  for (const m of out) {
-    const names = [...new Set(m.stops.map(s => s.t))]
-    const joined = names.join(' · ')
-    m.label = joined.length <= 14 ? joined : `${pickName(names)} 等 ${names.length} 处`
-    m.r = (m.first || m.last) ? 5.2 : 4
-    // 起终点和合并点优先拿到标签位
-    m.pri = (m.first || m.last) ? 0 : (m.stops.length > 1 ? 1 : 2)
-  }
-  return out
-})
-
-const activeKey = computed(() => {
-  const id = activeStopId.value
-  if (!id) return null
-  return marks.value.find(m => m.stops.some(s => s.id === id))?.key || null
-})
-
-/* ---------- 标签避让 ---------- */
-
-const FS = 11.5
-
-/** 中日文按全宽、西文按 0.56 倍估宽度,够排版用。 */
-function textWidth(t) {
-  let w = 0
-  for (const ch of t) w += /[　-鿿＀-￯]/.test(ch) ? FS : FS * 0.56
-  return w
 }
 
-/** 逐个找不与已放标签 / 圆点相撞的位置,两圈候选方向都放不下就放弃。
- *  宁可少几个标签,也不要糊成一团。 */
-const labels = computed(() => {
-  const ms = marks.value.filter(m => m.x > -40 && m.x < W + 40 && m.y > -40 && m.y < H + 40)
-  const DIRS = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [-1, -1], [1, 1], [-1, 1]]
-  const dots = ms.map(m => ({ x0: m.x - 9, y0: m.y - 9, x1: m.x + 9, y1: m.y + 9 }))
-  const boxes = []
-  const hit = (a, b) => !(a.x1 < b.x0 - 3 || a.x0 > b.x1 + 3 || a.y1 < b.y0 - 2 || a.y0 > b.y1 + 2)
-  const out = []
-
-  for (const m of [...ms].sort((a, b) => a.pri - b.pri)) {
-    const w = textWidth(m.label), h = FS * 1.08
-    let placed = null
-    for (let ring = 0; ring < 2 && !placed; ring++) {
-      const gap = ring === 0 ? 10 : 24
-      for (const [dxs, dys] of DIRS) {
-        const anchor = dxs > 0 ? 'start' : (dxs < 0 ? 'end' : 'middle')
-        const dx = dxs * gap
-        const dy = dys === 0 ? FS * 0.34 : dys * (gap * 0.62) + (dys < 0 ? 0 : FS * 0.6)
-        const x0 = anchor === 'start' ? m.x + dx : (anchor === 'end' ? m.x + dx - w : m.x - w / 2)
-        const y0 = m.y + dy - h * 0.76
-        const box = { x0: x0 - 4, y0: y0 - 2, x1: x0 + w + 4, y1: y0 + h + 2 }
-        if (box.x0 < 3 || box.x1 > W - 3 || box.y0 < 3 || box.y1 > H - 3) continue
-        if (boxes.some(b => hit(box, b))) continue
-        if (dots.some(d => hit(box, d))) continue
-        boxes.push(box)
-        placed = {
-          anchor,
-          tx: anchor === 'middle' ? m.x : m.x + dx,
-          ty: m.y + dy,
-          box,
-          lead: ring === 1,      // 推到外圈的才画引线
-        }
-        break
-      }
-    }
-    if (!placed) continue
-    const b = placed.box
-    out.push({
-      mark: m, text: m.label, anchor: placed.anchor,
-      tx: placed.tx, ty: placed.ty,
-      bx: b.x0, by: b.y0, bw: b.x1 - b.x0, bh: b.y1 - b.y0,
-      lead: placed.lead,
-      mx: m.x, my: m.y,
-      lx: Math.max(b.x0, Math.min(m.x, b.x1)),
-      ly: Math.max(b.y0, Math.min(m.y, b.y1)),
-    })
+function setLayer(key) {
+  layer.value = key
+  if (!map) return
+  if (baseLayer) map.removeLayer(baseLayer)
+  if (labelLayer) { map.removeLayer(labelLayer); labelLayer = null }
+  const def = LAYERS.find(l => l.key === key) || LAYERS[0]
+  baseLayer = L.tileLayer(def.url, {
+    subdomains: '1234', maxZoom: 18, attribution: '© 高德地图',
+  }).addTo(map)
+  if (key === 'sat') {
+    labelLayer = L.tileLayer(LABEL_URL, { subdomains: '1234', maxZoom: 18 }).addTo(map)
   }
-  return out
+  baseLayer.bringToBack()
+}
+
+function fitAll() {
+  const b = fitBounds()
+  if (b && map) map.fitBounds(b, { padding: [36, 36] })
+}
+
+onMounted(() => {
+  map = L.map(mapEl.value, {
+    zoomControl: true,
+    attributionControl: true,
+    scrollWheelZoom: true,
+    worldCopyJump: true,
+  })
+  routeGroup = L.layerGroup().addTo(map)
+  markerGroup = L.layerGroup().addTo(map)
+  setLayer(layer.value)
+  draw()
+  fitAll()
+  // 地图装在切换面板 / 抽屉里,显示出来时尺寸才定下来,必须重算
+  ro = new ResizeObserver(() => map && map.invalidateSize())
+  ro.observe(mapEl.value)
+})
+
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  map?.remove()
+  map = null
+})
+
+watch(points, () => {
+  draw()
+  fitAll()
 })
 
 /* ---------- 详情 ---------- */
+
+// 弹窗 teleport 到 body,拿不到外层 .travel-page 上的主题色变量,
+// 打开时从组件所在位置把它们读出来带过去。
+const ACCENT_VARS = ['--trip-accent', '--trip-accent-weak', '--trip-accent-ink']
+const accentStyle = ref({})
+function snapshotAccent() {
+  const el = mapEl.value
+  if (!el) return
+  const cs = getComputedStyle(el)
+  const out = {}
+  for (const k of ACCENT_VARS) {
+    const v = cs.getPropertyValue(k).trim()
+    if (v) out[k] = v
+  }
+  accentStyle.value = out
+}
 
 function describe(p) {
   activeStopId.value = p.id
@@ -571,21 +408,28 @@ function describe(p) {
     mapUrl: mapUrl({ lat: p.lat, lng: p.lng, name: p.t }),
   }
 }
+
 function openStop(p) {
   snapshotAccent()
   editing.value = false
   uploadErr.value = ''
   detail.value = describe(p)
 }
-function open(m) {
-  if (suppressClick) return          // 刚拖完地图,不要顺手弹窗
-  if (m?.stops?.length) openStop(m.stops[0])
+
+/** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。 */
+function focusStop(p) {
+  if (map) map.flyTo([p.glat, p.glng], Math.max(map.getZoom(), 10), { duration: 0.6 })
+  openStop(p)
 }
 
 const siblings = computed(() => {
   const d = detail.value
   if (!d) return []
-  return marks.value.find(m => m.stops.some(s => s.id === d.id))?.stops || []
+  // 同一天、离得很近(约 1km 内)的点,当作"这一带"
+  return points.value.filter(p =>
+    p.dayNo === d.dayNo &&
+    Math.abs(p.glat - d.glat) < 0.012 &&
+    Math.abs(p.glng - d.glng) < 0.02)
 })
 
 /* ---------- 编辑:介绍与照片 ---------- */
@@ -668,106 +512,31 @@ async function removePhoto() {
     saving.value = false
   }
 }
-
-/* ---------- 缩放 / 平移 ---------- */
-
-const MIN_ZOOM = 0.35, MAX_ZOOM = 8
-
-function resetView() { zoom.value = 1; panX.value = 0; panY.value = 0 }
-
-function onWheel(e) {
-  const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom.value * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
-  if (next === zoom.value) return
-  // 以指针为锚点缩放,手感更自然
-  const r = svgRef.value.getBoundingClientRect()
-  const mx = (e.clientX - r.left) / r.width * W - W / 2
-  const my = (e.clientY - r.top) / r.height * H - H / 2
-  const k = next / zoom.value
-  panX.value = mx - (mx - panX.value) * k
-  panY.value = my - (my - panY.value) * k
-  zoom.value = next
-  if (next === 1) { panX.value = 0; panY.value = 0 }
-}
-
-let drag = null
-let suppressClick = false
-
-function onDown(e) {
-  drag = { x: e.clientX, y: e.clientY, px: panX.value, py: panY.value, moved: false }
-  svgRef.value.setPointerCapture?.(e.pointerId)
-}
-function onMove(e) {
-  if (!drag) return
-  const r = svgRef.value.getBoundingClientRect()
-  const dx = (e.clientX - drag.x) / r.width * W
-  const dy = (e.clientY - drag.y) / r.height * H
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true
-  panX.value = drag.px + dx
-  panY.value = drag.py + dy
-}
-function onUp() {
-  suppressClick = !!drag?.moved
-  drag = null
-  if (suppressClick) setTimeout(() => { suppressClick = false }, 0)
-}
 </script>
 
 <style scoped>
 .tmap { position: relative; }
 .tmap-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .tmap-title { font-size: 12px; font-weight: 800; letter-spacing: .08em; color: var(--trip-ink-2, var(--color-text-muted)); }
-.tmap-tools { display: flex; align-items: center; gap: 8px; }
-.tmap-hint { font-size: 11px; color: var(--color-text-muted); }
+.tmap-tools { display: flex; align-items: center; gap: 6px; }
 .tmap-btn {
   appearance: none; border: 1px solid var(--color-border-light); background: var(--color-surface);
   color: var(--color-text-muted); font: inherit; font-size: 11px;
   padding: 2px 10px; border-radius: 999px; cursor: pointer;
 }
-.tmap-btn:disabled { opacity: .45; cursor: default; }
+.tmap-btn.on {
+  background: var(--trip-accent, var(--color-primary));
+  border-color: var(--trip-accent, var(--color-primary)); color: #fff;
+}
 
-.tmap-svg {
-  width: 100%; height: auto; display: block;
-  /* 容器把高度压扁时 SVG 会按 viewBox 等比留白，背景必须和海面同色，
-     否则两侧会露出卡片底色，看上去像地图糊了一块。 */
-  background: var(--trip-accent-weak, #dce7ea);
+.tmap-canvas {
+  width: 100%;
+  height: clamp(300px, 52vh, 520px);
   border-radius: 12px;
   border: 1px solid var(--trip-line, var(--color-border-light));
-  touch-action: none; cursor: grab;
+  background: var(--trip-accent-weak, #dce7ea);
+  z-index: 0;                 /* 别盖住页面上的吸顶条 */
 }
-.tmap-svg:active { cursor: grabbing; }
-
-.tmap-sea { fill: var(--trip-accent-weak, #dce7ea); }
-.tmap-land {
-  fill: var(--color-surface, #fff);
-  stroke: color-mix(in srgb, var(--trip-accent, #2B6A80) 34%, transparent);
-  stroke-width: 1; stroke-linejoin: round;
-}
-
-.tmap-leg {
-  fill: none;
-  stroke: var(--trip-accent, var(--color-primary));
-  stroke-width: 2.2; stroke-linecap: round; opacity: .9;
-}
-.tmap-leg.sea { stroke-dasharray: 2.5 4; }
-.tmap-leg.air { stroke-width: 1.5; stroke-dasharray: 7 5; opacity: .62; }
-
-.tmap-lead { stroke: var(--color-text-muted); stroke-width: 1; opacity: .5; }
-
-.tmap-mark { cursor: pointer; }
-.tmap-ring { fill: var(--color-surface, #fff); }
-.tmap-dot { fill: var(--trip-accent, var(--color-primary)); }
-.tmap-dot.first { fill: #1d2b32; }
-.tmap-dot.last { fill: #3C8C6E; }
-.tmap-hit { fill: transparent; }
-.tmap-mark:focus-visible { outline: none; }
-.tmap-mark:focus-visible .tmap-ring { stroke: var(--trip-accent); stroke-width: 2; }
-.tmap-mark:hover .tmap-dot, .tmap-mark.on .tmap-dot { fill: #b4562f; }
-.tmap-badge { fill: var(--trip-accent, var(--color-primary)); stroke: var(--color-surface); stroke-width: 1.2; }
-.tmap-badge-t { font-size: 7.8px; font-weight: 700; fill: #fff; text-anchor: middle; }
-
-.tmap-label { cursor: pointer; }
-.tmap-chip { fill: color-mix(in srgb, var(--color-surface, #fff) 92%, transparent); }
-.tmap-chip-t { font-size: 11.5px; font-weight: 500; fill: var(--color-text-strong, #2A3D45); }
 
 .tmap-legend {
   display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px;
@@ -807,13 +576,24 @@ function onUp() {
 .tmap-li-day { font-size: 10px; opacity: .65; font-variant-numeric: tabular-nums; }
 
 .tmap-empty { padding: 14px 4px 2px; font-size: 12px; color: var(--color-text-muted); }
-
-@media (max-width: 768px) {
-  .tmap-hint { display: none; }
-}
 </style>
 
 <style>
+/* Leaflet 的类名在组件外,加上 teleport 到 body 的弹窗,这一段不能 scoped */
+.tm-pin-wrap { background: none; border: 0; }
+.tm-pin {
+  display: block; width: 12px; height: 12px; margin: 2px; border-radius: 50%;
+  background: var(--trip-accent, #2B6A80);
+  box-shadow: 0 0 0 2.5px #fff, 0 1px 3px rgba(0, 0, 0, .35);
+  cursor: pointer; transition: transform .12s ease;
+}
+.tm-pin:hover { transform: scale(1.35); }
+.tm-pin.start { background: #1d2b32; width: 14px; height: 14px; margin: 1px; }
+.tm-pin.end { background: #3C8C6E; width: 14px; height: 14px; margin: 1px; }
+.leaflet-container { font: inherit; }
+.leaflet-container .leaflet-control-attribution { font-size: 10px; }
+.leaflet-tooltip { font-size: 12px; padding: 2px 8px; }
+
 /* 详情弹窗 teleport 到 body,不能用 scoped */
 .spot-mask {
   position: fixed; inset: 0; z-index: 3000;

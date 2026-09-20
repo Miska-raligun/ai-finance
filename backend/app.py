@@ -59,9 +59,13 @@ register_csrf(app)
 
 
 # 统一注入安全响应头：浏览器默认即可加固大半 XSS / Clickjacking / MIME-sniff 风险。
+# 高德地图瓦片:行程地图用真实底图(街道 / 地名 / POI 自己画不出来)。
+# 只放**图片**源,不放脚本源——地图库是打进 bundle 的,不引第三方 JS。
+_MAP_TILE_HOSTS = "https://*.is.autonavi.com"
+
 _csp_default = (
     "default-src 'self'; "
-    "img-src 'self' data: blob:; "
+    f"img-src 'self' data: blob: {_MAP_TILE_HOSTS}; "
     "style-src 'self' 'unsafe-inline'; "
     "script-src 'self' 'unsafe-inline'; "  # Element Plus 等内联样式/脚本兼容
     "connect-src 'self'; "
