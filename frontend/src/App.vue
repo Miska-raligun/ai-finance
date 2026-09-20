@@ -166,7 +166,7 @@
         <div class="topbar-user">{{ username.slice(0, 1).toUpperCase() }}</div>
       </header>
 
-      <el-main :class="{ 'has-topbar': isMobile && !isBare }">
+      <el-main :class="{ 'has-topbar': isMobile && !isBare, 'bare-main': isBare }">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in" appear>
             <keep-alive :max="3">
@@ -667,6 +667,9 @@ body {
 .el-main.has-topbar {
   padding-top: calc(var(--topbar-height) + 12px);
 }
+/* 无外壳页面（登录 / 公开分享）自己铺满整屏：去掉 el-main 的 20px 内边距，
+   否则满宽头图会被框在一圈留白里，登录页也会因为双层 padding 多出滚动条。 */
+.el-main.bare-main { padding: 0; }
 
 /* ===== 侧边栏（蓝色调浅色） ===== */
 .app-aside {

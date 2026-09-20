@@ -51,8 +51,18 @@
     <section v-if="stay && (stay.h || stay.a)" class="dd-sec">
       <h4 class="dd-h">住宿</h4>
       <div class="dd-stay">
-        <b>{{ stay.h }}</b>
-        <span v-if="stay.a" class="dd-dim">{{ stay.a }}</span>
+        <div class="dd-stay-txt">
+          <b>{{ stay.h }}</b>
+          <span v-if="stay.a" class="dd-dim">{{ stay.a }}</span>
+        </div>
+        <!-- 外链到系统地图:不嵌第三方地图,既不违反 CSP 也不把坐标交出去 -->
+        <a
+          v-if="stayMap"
+          class="dd-maplink"
+          :href="stayMap"
+          target="_blank"
+          rel="noopener noreferrer"
+        >📍 地图</a>
       </div>
     </section>
 
@@ -81,6 +91,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import TripMap from '@/components/TripMap.vue'
+import { mapUrl } from '@/utils/maplink'
 
 const props = defineProps({
   tripId: { type: Number, required: true },
@@ -101,6 +112,11 @@ const detail = computed(() => props.day?.detail || {})
 const sched = computed(() => detail.value.sched || [])
 const spots = computed(() => detail.value.spots || [])
 const stay = computed(() => detail.value.stay || null)
+// 有经纬度就精确落点,只填了酒店名也能按名字搜——所以这个链接几乎总是可用的
+const stayMap = computed(() => {
+  const s = stay.value
+  return s ? mapUrl({ lat: s.lat, lng: s.lng, name: s.h, addr: s.a }) : ''
+})
 const hasStops = computed(() =>
   (detail.value.stops || []).some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
 const tipGroups = computed(() => [
@@ -182,6 +198,14 @@ async function saveJournal() {
 .dd-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
 .dd-tips li { color: var(--color-text); }
 .dd-dim { color: var(--color-text-muted); font-size: 12px; }
-.dd-stay { font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.dd-stay { font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dd-stay-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dd-maplink {
+  flex-shrink: 0; font-size: 12px; font-weight: 700; text-decoration: none;
+  color: var(--trip-accent, var(--color-primary));
+  border: 1px solid var(--trip-accent, var(--color-primary));
+  border-radius: 999px; padding: 3px 10px; line-height: 1.5;
+}
+.dd-maplink:hover { background: var(--trip-accent, var(--color-primary)); color: #fff; }
 .dd-journal-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 </style>
