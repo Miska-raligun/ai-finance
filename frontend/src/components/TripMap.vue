@@ -7,7 +7,7 @@
     <div class="tmap-head">
       <span class="tmap-title">{{ title }}</span>
       <div class="tmap-tools">
-        <el-button size="small" text :disabled="scale <= 1" @click="resetView">复位</el-button>
+        <el-button size="small" text :disabled="scale === 1" @click="resetView">复位</el-button>
         <span class="tmap-hint">滚轮缩放 · 拖动平移 · 点圆点看介绍</span>
       </div>
     </div>
@@ -131,15 +131,36 @@ const rawPoints = computed(() => {
   return out
 })
 
-/** 等距圆柱投影 + 自动 fit 到所有点的外接框(带 padding,并按纬度修正横向压缩)。 */
+/** 取自动 fit 用的外接框。
+
+ *  直接用全部点的外接框有个很难看的后果:一条「上海 ✈ 赫尔辛基」的长途航段
+ *  会把视野撑到半个欧亚大陆,真正要看的北欧部分缩成一小团。所以这里先算
+ *  中间 90% 的点的框,只有当它比全量框小一半以上(说明确实存在远端离群点)
+ *  才采用;点少或分布均匀时两者几乎一样,行为不变。被排除的点照样画出来,
+ *  只是落在视野外,缩小地图就能看到。
+ */
+function fitBox(pts) {
+  const lats = pts.map(p => p.lat).sort((a, b) => a - b)
+  const lngs = pts.map(p => p.lng).sort((a, b) => a - b)
+  const at = (arr, t) => arr[Math.max(0, Math.min(arr.length - 1, Math.round((arr.length - 1) * t)))]
+  const full = {
+    minLat: lats[0], maxLat: lats[lats.length - 1],
+    minLng: lngs[0], maxLng: lngs[lngs.length - 1],
+  }
+  if (pts.length < 8) return full
+  const core = {
+    minLat: at(lats, 0.05), maxLat: at(lats, 0.95),
+    minLng: at(lngs, 0.05), maxLng: at(lngs, 0.95),
+  }
+  const area = (b) => Math.max(b.maxLat - b.minLat, 1e-6) * Math.max(b.maxLng - b.minLng, 1e-6)
+  return area(core) < area(full) * 0.5 ? core : full
+}
+
+/** 等距圆柱投影 + 自动 fit(带 padding,并按纬度修正横向压缩)。 */
 const proj = computed(() => {
   const pts = rawPoints.value
   if (!pts.length) return null
-  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180
-  for (const p of pts) {
-    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat)
-    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng)
-  }
+  let { minLat, maxLat, minLng, maxLng } = fitBox(pts)
   // 单点或极小范围时给一个最小跨度,避免除零和过度放大
   const padLat = Math.max((maxLat - minLat) * 0.25, 0.6)
   const padLng = Math.max((maxLng - minLng) * 0.25, 0.9)
@@ -201,8 +222,10 @@ watch(() => props.days, () => { active.value = null; resetView() })
 // ---- 缩放 / 平移 ----
 function resetView() { scale.value = 1; tx.value = 0; ty.value = 0 }
 
+const MIN_SCALE = 0.35   // 允许缩到 1 倍以下,才能把 fit 之外的远端点拉回视野
+
 function onWheel(e) {
-  const next = Math.min(8, Math.max(1, scale.value * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+  const next = Math.min(8, Math.max(MIN_SCALE, scale.value * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
   if (next === scale.value) return
   // 以指针位置为锚点缩放,手感更自然
   const r = svgRef.value.getBoundingClientRect()
@@ -216,7 +239,7 @@ function onWheel(e) {
 
 let drag = null
 function onDown(e) {
-  if (scale.value <= 1) return
+  if (scale.value === 1) return
   drag = { x: e.clientX, y: e.clientY, tx: tx.value, ty: ty.value }
   svgRef.value.setPointerCapture?.(e.pointerId)
 }
