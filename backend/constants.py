@@ -19,4 +19,4 @@ DEFAULT_PERSONA = "一个有点傲娇的财务顾问"
 # 共享 DeepSeek 端点高峰期慢,默认给到 60s 避免生成没完就被判超时退本地规则。
 # 换更快的自建/付费端点后可在 .env 里调低。
 import os as _os
-LLM_TIMEOUT_LONG = int(_os.getenv("LLM_TIMEOUT_LONG", "60"))
+LLM_TIMEOUT_LONG = int(_os.getenv("LLM_TIMEOUT_LONG", "300"))
