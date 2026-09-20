@@ -45,8 +45,29 @@
         </div>
       </div>
 
-      <!-- 宽屏:日历 + 右侧详情(master-detail);窄屏:只显示日历,点开抽屉 -->
-      <div class="trip-body">
+      <div class="trip-tabs">
+        <button
+          v-for="t in TABS"
+          :key="t.key"
+          type="button"
+          class="trip-tab"
+          :class="{ on: tab === t.key }"
+          @click="tab = t.key"
+        >{{ t.label }}</button>
+      </div>
+
+      <!-- 打包 -->
+      <div v-if="tab === 'pack'" class="trip-panel animal-pop" :style="{ '--i': 1 }">
+        <TripPacking :trip-id="trip.id" :packing="packing" @changed="loadTrip" />
+      </div>
+
+      <!-- 速查 -->
+      <div v-else-if="tab === 'facts'" class="trip-panel animal-pop" :style="{ '--i': 1 }">
+        <TripFacts :trip-id="trip.id" :facts="facts" @changed="loadTrip" />
+      </div>
+
+      <!-- 行程:宽屏 日历 + 右侧详情(master-detail);窄屏 点开抽屉 -->
+      <div v-else class="trip-body">
         <div class="trip-cal animal-pop" :style="{ '--i': 1 }">
           <div class="pane-switch">
             <button
@@ -76,7 +97,7 @@
 
       <!-- 移动端:底部抽屉展示当天详情 -->
       <el-drawer
-        v-if="!isWide"
+        v-if="!isWide && tab === 'days'"
         v-model="showDrawer"
         direction="btt"
         size="86%"
@@ -165,6 +186,8 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import TripCalendar from '@/components/TripCalendar.vue'
 import TripMap from '@/components/TripMap.vue'
+import TripPacking from '@/components/TripPacking.vue'
+import TripFacts from '@/components/TripFacts.vue'
 import TripDayDetail from '@/components/TripDayDetail.vue'
 
 // 每趟旅行的主题色预设(与后端 ACCENTS 对齐)
@@ -181,6 +204,8 @@ const ACCENT_LIST = Object.entries(ACCENTS).map(([key, v]) => ({ key, ...v }))
 const trips = ref([])
 const trip = ref(null)
 const days = ref([])
+const packing = ref([])
+const facts = ref([])
 const currentTripId = ref(null)
 const selectedDayNo = ref(0)
 const loading = ref(true)
@@ -188,6 +213,12 @@ const showCreate = ref(false)
 const creating = ref(false)
 const showDrawer = ref(false)
 const leftMode = ref('calendar')   // calendar | map
+const TABS = [
+  { key: 'days', label: '行程' },
+  { key: 'pack', label: '打包' },
+  { key: 'facts', label: '速查' },
+]
+const tab = ref('days')
 const showShare = ref(false)
 const sharing = ref(false)
 const shareToken = ref('')
@@ -259,6 +290,8 @@ async function loadTrip() {
   const res = await api.get(`/api/trips/${currentTripId.value}`)
   trip.value = res.data.trip
   days.value = res.data.days || []
+  packing.value = res.data.packing || []
+  facts.value = res.data.facts || []
   // 默认落在今天(若在行程内),否则第一天
   const todayIso = new Date().toISOString().slice(0, 10)
   const today = days.value.find(d => d.date === todayIso)
@@ -371,6 +404,25 @@ onMounted(loadTrips)
   border-radius: var(--radius-tile-large, 20px);
   box-shadow: 0 4px 0 0 var(--shadow-anchor-light);
   padding: 14px;
+}
+
+.trip-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.trip-tab {
+  appearance: none; border: 2px solid var(--color-border-light);
+  background: var(--color-surface); color: var(--color-text-muted);
+  font: inherit; font-size: 13px; font-weight: 700;
+  padding: 5px 16px; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 2px 0 0 var(--shadow-anchor-light);
+}
+.trip-tab.on {
+  background: var(--trip-accent); border-color: var(--trip-accent); color: #fff;
+}
+.trip-panel {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-light);
+  border-radius: var(--radius-tile-large, 20px);
+  box-shadow: 0 4px 0 0 var(--shadow-anchor-light);
+  padding: 16px;
 }
 
 .share-note { font-size: 13px; line-height: 1.7; color: var(--color-text); margin: 0 0 12px; }

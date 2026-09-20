@@ -25,6 +25,12 @@
           <TripMap :days="days" title="全程路线" />
         </section>
 
+        <!-- 速查:只包含行程所有者显式设为公开的条目 -->
+        <section v-if="facts.length" class="pub-card">
+          <h3 class="pub-sec-t">速查</h3>
+          <TripFacts :facts="facts" readonly />
+        </section>
+
         <section
           v-for="d in days"
           :key="d.day_no"
@@ -73,6 +79,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import TripMap from '@/components/TripMap.vue'
+import TripFacts from '@/components/TripFacts.vue'
 
 const ACCENTS = {
   glacier: { color: '#2B6A80', weak: '#D9E6EB', ink: '#17414f' },
@@ -86,6 +93,7 @@ const ACCENTS = {
 const route = useRoute()
 const trip = ref({})
 const days = ref([])
+const facts = ref([])
 const loading = ref(true)
 const error = ref(false)
 
@@ -123,6 +131,7 @@ onMounted(async () => {
     const data = await res.json()
     trip.value = data.trip || {}
     days.value = data.days || []
+    facts.value = data.facts || []
     if (trip.value.title) document.title = `${trip.value.title} · 行程`
   } catch {
     error.value = true
@@ -150,6 +159,7 @@ onMounted(async () => {
   border: 1px solid var(--color-border-light, #e3ddd0);
   border-radius: 14px; padding: 14px 16px;
 }
+.pub-sec-t { margin: 0 0 6px; font-size: 13px; font-weight: 800; color: var(--color-text-strong); }
 .pub-day-head { display: flex; align-items: baseline; gap: 10px; }
 .pub-dayno {
   font-size: 11px; font-weight: 800; letter-spacing: .06em; color: #fff;

@@ -191,3 +191,47 @@ def test_share_token_reused_and_owner_only(app, auth_client):
     anon = app.test_client()
     assert anon.post(f"/api/trips/{tid}/share").status_code == 401
     assert anon.delete(f"/api/trips/{tid}/share").status_code == 401
+
+
+# ---------- 速查信息 + 分享可见性 ----------
+
+def test_facts_crud_and_default_private(app, auth_client):
+    tid = _mk_trip(auth_client).get_json()["id"]
+    r = auth_client.post(f"/api/trips/{tid}/facts", json={
+        "label": "领队", "body": "臧华男 13945079235 导游证 AB99274K"})
+    assert r.status_code == 201
+    fid = r.get_json()["id"]
+
+    facts = auth_client.get(f"/api/trips/{tid}").get_json()["facts"]
+    assert facts[0]["label"] == "领队"
+    assert facts[0]["is_public"] == 0        # 默认不公开
+
+    assert auth_client.patch(f"/api/trips/{tid}/facts/{fid}",
+                             json={"is_public": True}).status_code == 200
+    assert auth_client.get(f"/api/trips/{tid}").get_json()["facts"][0]["is_public"] == 1
+
+    assert auth_client.delete(f"/api/trips/{tid}/facts/{fid}").status_code == 200
+    assert auth_client.get(f"/api/trips/{tid}").get_json()["facts"] == []
+
+
+def test_public_share_respects_fact_visibility(app, auth_client):
+    """领队/使馆电话这类默认不进分享页;逐条打开后才出现,且只给 label/body。"""
+    tid = _mk_trip(auth_client).get_json()["id"]
+    auth_client.post(f"/api/trips/{tid}/facts",
+                     json={"label": "领队", "body": "臧华男 13945079235"})
+    pub_id = auth_client.post(f"/api/trips/{tid}/facts",
+                              json={"label": "航班", "body": "HO1607 PVG–HEL"}).get_json()["id"]
+    auth_client.patch(f"/api/trips/{tid}/facts/{pub_id}", json={"is_public": True})
+    auth_client.post(f"/api/trips/{tid}/packing", json={"grp": "证件", "label": "护照"})
+    token = auth_client.post(f"/api/trips/{tid}/share").get_json()["token"]
+
+    anon = app.test_client()
+    body = anon.get(f"/api/public/trips/{token}")
+    raw = body.get_data(as_text=True)
+    data = body.get_json()
+
+    labels = [f["label"] for f in data["facts"]]
+    assert labels == ["航班"]                 # 只有显式公开的那条
+    assert "13945079235" not in raw           # 领队手机号没泄露
+    assert "护照" not in raw                  # 打包清单始终不公开
+    assert "is_public" not in raw and "sort_order" not in raw

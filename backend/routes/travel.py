@@ -142,7 +142,11 @@ def get_trip(trip_id: int):
         "SELECT * FROM trip_pack_items WHERE trip_id = ? ORDER BY sort_order ASC, id ASC",
         (trip_id,),
     ).fetchall()]
-    return jsonify({"trip": dict(trip), "days": days, "packing": packs})
+    facts = [dict(r) for r in db.execute(
+        "SELECT * FROM trip_facts WHERE trip_id = ? ORDER BY sort_order ASC, id ASC",
+        (trip_id,),
+    ).fetchall()]
+    return jsonify({"trip": dict(trip), "days": days, "packing": packs, "facts": facts})
 
 
 @travel_bp.route("/api/trips/<int:trip_id>", methods=["PATCH"])
@@ -373,4 +377,87 @@ def public_trip(token: str):
         except (TypeError, ValueError):
             d["detail"] = {}
         days_out.append(d)          # 注意:journal 不在 _PUBLIC_DAY_FIELDS 里
-    return jsonify({"trip": trip_out, "days": days_out})
+
+    # 速查:仅 is_public=1 的条目,且只给 label/body(不给 id/user_id/排序等)
+    facts_out = [
+        {"label": r["label"], "body": r["body"]}
+        for r in db.execute(
+            "SELECT label, body FROM trip_facts "
+            "WHERE trip_id = ? AND is_public = 1 ORDER BY sort_order ASC, id ASC",
+            (share["trip_id"],),
+        ).fetchall()
+    ]
+    # 打包清单始终不公开:是个人准备事项,勾选状态也属于私人进度
+    return jsonify({"trip": trip_out, "days": days_out, "facts": facts_out})
+
+
+# ---------- 速查信息 ----------
+
+@travel_bp.route("/api/trips/<int:trip_id>/facts", methods=["POST"])
+@login_required
+def add_fact(trip_id: int):
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    data = request.get_json() or {}
+    label = (data.get("label") or "").strip()
+    if not label:
+        return jsonify({"error": "缺少标题"}), 400
+    db = get_db()
+    now = _now()
+    cur = db.execute(
+        "INSERT INTO trip_facts (trip_id, user_id, label, body, is_public, sort_order, "
+        "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        (trip_id, g.user_id, label, (data.get("body") or "").strip() or None,
+         1 if data.get("is_public") else 0, int(data.get("sort_order") or 0), now, now),
+    )
+    db.commit()
+    return jsonify({"id": cur.lastrowid, "success": True}), 201
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/facts/<int:fact_id>", methods=["PATCH"])
+@login_required
+def update_fact(trip_id: int, fact_id: int):
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    data = request.get_json() or {}
+    updates: dict = {}
+    for k in ("label", "body"):
+        if k in data:
+            updates[k] = (data[k] or "").strip() or None
+    if "is_public" in data:
+        updates["is_public"] = 1 if data["is_public"] else 0
+    if "sort_order" in data:
+        try:
+            updates["sort_order"] = int(data["sort_order"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "sort_order 必须为整数"}), 400
+    if not updates:
+        return jsonify({"error": "无可更新字段"}), 400
+    if updates.get("label") is None and "label" in updates:
+        return jsonify({"error": "标题不能为空"}), 400
+    db = get_db()
+    sets = ", ".join(f"{k} = ?" for k in updates) + ", updated_at = ?"
+    cur = db.execute(
+        f"UPDATE trip_facts SET {sets} WHERE id = ? AND trip_id = ? AND user_id = ?",
+        list(updates.values()) + [_now(), fact_id, trip_id, g.user_id],
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        return jsonify({"error": "条目不存在"}), 404
+    return jsonify({"success": True})
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/facts/<int:fact_id>", methods=["DELETE"])
+@login_required
+def delete_fact(trip_id: int, fact_id: int):
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    db = get_db()
+    cur = db.execute(
+        "DELETE FROM trip_facts WHERE id = ? AND trip_id = ? AND user_id = ?",
+        (fact_id, trip_id, g.user_id),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        return jsonify({"error": "条目不存在"}), 404
+    return jsonify({"success": True})
