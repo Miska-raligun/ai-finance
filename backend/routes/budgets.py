@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, g
 from db import get_db
 from auth import login_required
 from constants import CATEGORY_EXPENSE
+from validators import is_month
 
 budgets_bp = Blueprint('budgets', __name__)
 
@@ -185,7 +186,7 @@ def calibrate_budgets():
         today = datetime.now()
         year, mon = today.year, today.month
         target = f"{year + 1}-01" if mon == 12 else f"{year}-{mon + 1:02d}"
-    if len(target) != 7:
+    if not is_month(target):
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
 
     try:
@@ -259,7 +260,7 @@ def apply_calibration():
     data = request.get_json() or {}
     month = (data.get("month") or "").strip()
     items = data.get("items") or []
-    if len(month) != 7:
+    if not is_month(month):
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
     if not isinstance(items, list) or not items:
         return jsonify({"error": "items 必须是非空列表"}), 400

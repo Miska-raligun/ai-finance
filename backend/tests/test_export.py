@@ -38,7 +38,7 @@ def test_export_report_html_404(auth_client):
     assert r.status_code == 404
 
 
-def test_export_report_html_renders(app, auth_client, monkeypatch):
+def test_export_report_html_renders(app, auth_client, monkeypatch, wait_report):
     from db import get_db
     from handlers import add_record
     from constants import PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE
@@ -53,6 +53,8 @@ def test_export_report_html_renders(app, auth_client, monkeypatch):
         uid = get_db().execute("SELECT id FROM users WHERE username='tester'").fetchone()[0]
         add_record(uid, {PARAM_CATEGORY: "餐饮", PARAM_AMOUNT: 100, PARAM_DATE: "2026-04-01"})
         generate_monthly_report(uid, period="2026-04")
+    # 生成是异步的，导出前要等后台线程把正文写进去
+    assert wait_report(uid, "2026-04")["status"] == "done"
 
     r = auth_client.get("/api/export/report.html?period=2026-04")
     assert r.status_code == 200

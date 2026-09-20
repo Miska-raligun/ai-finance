@@ -8,6 +8,7 @@ import json
 from flask import Blueprint, Response, abort, g, jsonify, request, stream_with_context
 
 from auth import login_required
+from validators import is_month
 from db import get_db
 
 export_bp = Blueprint("export", __name__)
@@ -175,7 +176,7 @@ def _emit_xlsx(kind, sql, headers, user_id) -> Response:
 def export_report_html():
     """把指定月份的报告渲染成可打印 HTML（用户在浏览器中 Cmd+P 转 PDF）。"""
     period = (request.args.get("period") or "").strip()
-    if len(period) != 7:
+    if not is_month(period):
         abort(400, description="period 参数应为 YYYY-MM")
 
     from services.reports import get_report

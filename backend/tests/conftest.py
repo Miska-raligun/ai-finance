@@ -81,6 +81,35 @@ def client(app):
 
 
 @pytest.fixture
+def wait_report(app):
+    """等异步月报落库。
+
+    generate_monthly_report 现在是「立即返回 pending + 后台线程写结果」，
+    调用方不能拿到返回值就断言内容，必须等后台线程收尾。
+    顺带也避免 monkeypatch 在后台线程还在跑时就被 pytest 撤掉。
+    """
+    import time
+
+    from db import get_db
+
+    def _wait(user_id: int, period: str, timeout: float = 5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with app.app_context():
+                row = get_db().execute(
+                    "SELECT status, content, insights_json FROM reports "
+                    "WHERE user_id = ? AND period = ?",
+                    (user_id, period),
+                ).fetchone()
+            if row and row["status"] in ("done", "failed"):
+                return row
+            time.sleep(0.05)
+        raise AssertionError(f"报告 {period} 在 {timeout}s 内没跑完")
+
+    return _wait
+
+
+@pytest.fixture
 def auth_client(app, client):
     """注册并登录一个测试用户，返回带 session 的 client。"""
     from werkzeug.security import generate_password_hash

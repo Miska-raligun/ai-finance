@@ -18,7 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
-from db import get_db, DB_FILE
+import db as db_module            # 按模块引用，见 _run_async 里的说明
+from db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,11 @@ def generate_monthly_report(user_id: int, period: Optional[str] = None,
 def _run_async(user_id: int, period: str, insights: dict, llm: Optional[dict]) -> None:
     """后台线程入口：独立 sqlite 连接，避免与 Flask 请求线程的 g.db 冲突。"""
     key = (user_id, period)
-    conn = sqlite3.connect(DB_FILE)
+    # 这里取 db_module.DB_FILE 而不是 `from db import DB_FILE`：后者在本模块第一次
+    # 被 import 时就把路径定死了。进程内 DB_FILE 不变时两者等价，但测试会给每个用例
+    # 换一个临时库，按值绑定会让后台线程一直连着第一个（早已删掉的）文件，
+    # 于是 sqlite 就地建一个空库、报 "no such table: reports"。
+    conn = sqlite3.connect(db_module.DB_FILE)
     conn.row_factory = sqlite3.Row
     try:
         # 切到 running，给前端"已经在跑"信号

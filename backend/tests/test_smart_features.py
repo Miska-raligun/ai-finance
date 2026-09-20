@@ -88,22 +88,25 @@ def test_normalize_dedupes_punctuation(app):
 
 
 def test_reports_aggregate_no_data(app, auth_client):
+    """该月无数据时不走 LLM，直接同步落库为 done。"""
     from db import get_db
     from services.reports import generate_monthly_report
     with app.app_context():
         uid = get_db().execute("SELECT id FROM users WHERE username='tester'").fetchone()[0]
         out = generate_monthly_report(uid, period="2099-01")
-    assert out["stored"] is False
+    assert out["status"] == "done"
+    assert out["stored"] is True
     assert "无任何记录" in out["content"]
 
 
-def test_reports_aggregate_returns_totals(app, auth_client, monkeypatch):
+def test_reports_aggregate_returns_totals(app, auth_client, monkeypatch, wait_report):
+    """有数据时立即返回 pending，聚合结果由后台线程连同正文一起落库。"""
+    import json
+
     from db import get_db
     from handlers import add_record, add_income
     from constants import PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE
     import services.reports as reports_mod
-
-    monkeypatch.setattr(reports_mod, "__name__", reports_mod.__name__)
 
     with app.app_context():
         uid = get_db().execute("SELECT id FROM users WHERE username='tester'").fetchone()[0]
@@ -118,13 +121,18 @@ def test_reports_aggregate_returns_totals(app, auth_client, monkeypatch):
         )
         out = reports_mod.generate_monthly_report(uid, period="2026-04")
 
-    assert out["stored"] is True
-    assert out["insights"]["spend_total"] == 150
-    assert out["insights"]["income_total"] == 8000
-    assert out["insights"]["net"] == 7850
+    assert out["status"] == "pending"
+
+    row = wait_report(uid, "2026-04")
+    assert row["status"] == "done"
+    assert row["content"].startswith("# 报告 2026-04")
+    insights = json.loads(row["insights_json"])
+    assert insights["spend_total"] == 150
+    assert insights["income_total"] == 8000
+    assert insights["net"] == 7850
 
 
-def test_reports_routes_list_and_get(app, auth_client, monkeypatch):
+def test_reports_routes_list_and_get(app, auth_client, monkeypatch, wait_report):
     from db import get_db
     from handlers import add_record
     from constants import PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE
@@ -134,8 +142,7 @@ def test_reports_routes_list_and_get(app, auth_client, monkeypatch):
         add_record(uid, {PARAM_CATEGORY: "餐饮", PARAM_AMOUNT: 100, PARAM_DATE: "2026-04-01"})
 
     monkeypatch.setattr(
-        "services.reports.call_llm_monthly_report"
-        if False else "services.llm.call_llm_monthly_report",
+        "services.llm.call_llm_monthly_report",
         lambda insights, llm=None: "# 月报\n内容",
     )
 
@@ -143,7 +150,12 @@ def test_reports_routes_list_and_get(app, auth_client, monkeypatch):
     assert r.status_code == 200
     data = r.get_json()
     assert data["period"] == "2026-04"
-    assert data["stored"] is True
+    # 异步：POST 只负责排队，正文要等后台线程写完
+    assert data["status"] in ("pending", "done")
+    assert wait_report(uid, "2026-04")["status"] == "done"
+
+    # 月份格式非法直接 400（"2026/04" 同样是 7 个字符，不能只判长度）
+    assert auth_client.post("/api/reports/generate?month=2026/04").status_code == 400
 
     r2 = auth_client.get("/api/reports")
     assert r2.status_code == 200

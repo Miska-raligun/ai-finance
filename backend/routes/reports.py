@@ -6,6 +6,7 @@ from datetime import datetime
 from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
+from validators import is_month
 from db import get_db
 from services.llm_config import current_llm
 from services.recap import compute_recap
@@ -27,7 +28,7 @@ def api_list_reports():
 def api_generate_report():
     data = request.get_json(silent=True) or {}
     period = (request.args.get("month") or data.get("month") or "").strip() or None
-    if period and len(period) != 7:
+    if period and not is_month(period):
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
 
     llm_cfg = current_llm(data)
@@ -40,7 +41,7 @@ def api_generate_report():
 def api_recap():
     """本月回顾卡片数据：亮点指标 + 俏皮文案。month 缺省取当月。"""
     period = (request.args.get("month") or "").strip() or datetime.now().strftime("%Y-%m")
-    if len(period) != 7:
+    if not is_month(period):
         return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
     force = str(request.args.get("force") or "").lower() in {"1", "true", "yes", "on"}
     return jsonify(compute_recap(g.user_id, period, llm=current_llm(), force=force))
@@ -51,7 +52,7 @@ def api_recap():
 def api_report_status(period: str):
     """异步生成的轻量轮询端点：只返回 status / error_message。"""
     period = period.strip()
-    if len(period) != 7:
+    if not is_month(period):
         return jsonify({"error": "period 格式应为 YYYY-MM"}), 400
     info = get_report_status(g.user_id, period)
     if not info:
@@ -63,7 +64,7 @@ def api_report_status(period: str):
 @login_required
 def api_get_report(period: str):
     period = period.strip()
-    if len(period) != 7:
+    if not is_month(period):
         return jsonify({"error": "period 格式应为 YYYY-MM"}), 400
     report = get_report(g.user_id, period)
     if not report:

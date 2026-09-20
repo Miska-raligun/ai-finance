@@ -21,27 +21,31 @@ def conn(temp_db):
 
 
 def _seed(conn, *, holdings=10, cost_basis=15000, current_value=18000):
+    """建一个测试用户 + 一笔持仓，返回 (user_id, asset_id)。
+
+    不能写死 id=1：init_db() 会自动创建默认管理员 admin，1 号已经被占了。
+    """
     now = datetime.now().isoformat(timespec="seconds")
-    conn.execute(
-        "INSERT INTO users (id, username, password) VALUES (1, 'tester', 'x')"
-    )
+    uid = conn.execute(
+        "INSERT INTO users (username, password) VALUES ('tester', 'x')"
+    ).lastrowid
     conn.execute(
         "INSERT INTO asset_types (user_id, name, shape, quote_source, created_at) "
-        "VALUES (1, 'A股', 'security_manual', NULL, ?)", (now,))
+        "VALUES (?, 'A股', 'security_manual', NULL, ?)", (uid, now))
     cur = conn.execute(
         "INSERT INTO assets (user_id, name, type, symbol, holdings, cost_basis, "
         "current_value, currency, created_at, updated_at) "
-        "VALUES (1, '茅台', 'A股', 'sh600519', ?, ?, ?, 'CNY', ?, ?)",
-        (holdings, cost_basis, current_value, now, now),
+        "VALUES (?, '茅台', 'A股', 'sh600519', ?, ?, ?, 'CNY', ?, ?)",
+        (uid, holdings, cost_basis, current_value, now, now),
     )
     conn.commit()
-    return cur.lastrowid
+    return uid, cur.lastrowid
 
 
 def test_sell_full_profit(conn):
-    aid = _seed(conn)
+    uid, aid = _seed(conn)
     from services.asset_settle import sell_asset
-    r = sell_asset(conn, 1, aid, price=1900, fee=5, date="2025-04-15")
+    r = sell_asset(conn, uid, aid, price=1900, fee=5, date="2025-04-15")
     assert r["ledger"] == "income"
     assert abs(r["pnl"] - 3995.0) < 0.01
     assert r["remaining_holdings"] == 0
@@ -51,9 +55,9 @@ def test_sell_full_profit(conn):
 
 
 def test_sell_partial_loss_keeps_asset(conn):
-    aid = _seed(conn, holdings=10, cost_basis=15000)
+    uid, aid = _seed(conn, holdings=10, cost_basis=15000)
     from services.asset_settle import sell_asset
-    r = sell_asset(conn, 1, aid, price=1300, quantity=4)
+    r = sell_asset(conn, uid, aid, price=1300, quantity=4)
     assert r["ledger"] == "expense"
     assert abs(r["remaining_holdings"] - 6) < 1e-6
     asset = conn.execute("SELECT holdings, cost_basis FROM assets").fetchone()
@@ -62,20 +66,20 @@ def test_sell_partial_loss_keeps_asset(conn):
 
 
 def test_sell_invalid_inputs_raise(conn):
-    aid = _seed(conn)
+    uid, aid = _seed(conn)
     from services.asset_settle import sell_asset, SettleError
     with pytest.raises(SettleError):
-        sell_asset(conn, 1, aid, price=0)
+        sell_asset(conn, uid, aid, price=0)
     with pytest.raises(SettleError):
-        sell_asset(conn, 1, aid, price=10, quantity=9999)
+        sell_asset(conn, uid, aid, price=10, quantity=9999)
     with pytest.raises(SettleError):
-        sell_asset(conn, 1, 99999, price=10)
+        sell_asset(conn, uid, 99999, price=10)
 
 
 def test_archive_records_income(conn):
-    aid = _seed(conn, cost_basis=10000, current_value=12500)
+    uid, aid = _seed(conn, cost_basis=10000, current_value=12500)
     from services.asset_settle import archive_asset
-    r = archive_asset(conn, 1, aid, date="2025-04-20", note="停止追踪")
+    r = archive_asset(conn, uid, aid, date="2025-04-20", note="停止追踪")
     assert r["ledger"] == "income"
     assert abs(r["pnl"] - 2500.0) < 0.01
     income = conn.execute("SELECT note FROM income").fetchone()
@@ -84,9 +88,9 @@ def test_archive_records_income(conn):
 
 
 def test_archive_break_even(conn):
-    aid = _seed(conn, cost_basis=8000, current_value=8000)
+    uid, aid = _seed(conn, cost_basis=8000, current_value=8000)
     from services.asset_settle import archive_asset
-    r = archive_asset(conn, 1, aid)
+    r = archive_asset(conn, uid, aid)
     assert r["ledger"] == "none"
     assert conn.execute("SELECT COUNT(*) FROM income").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 0

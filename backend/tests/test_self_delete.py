@@ -55,12 +55,16 @@ def test_last_admin_cannot_self_delete(app, client):
     from db import get_db
     with app.app_context():
         db = get_db()
+        # init_db() 会自动建一个默认管理员 admin，先把它降权，
+        # 否则 admin1 并不是"最后一个管理员"，这条用例的前提就不成立。
+        db.execute("UPDATE users SET is_admin = 0 WHERE is_admin = 1")
         db.execute(
             "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)",
             ("admin1", generate_password_hash("pwd")),
         )
         db.commit()
         uid = db.execute("SELECT id FROM users WHERE username = ?", ("admin1",)).fetchone()[0]
+        assert db.execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0] == 1
     with client.session_transaction() as s:
         s["user_id"] = uid
         s["username"] = "admin1"
