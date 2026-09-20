@@ -13,6 +13,7 @@ const LedgerView = () => import('../views/LedgerView.vue')
 const InvestmentView = () => import('../views/InvestmentView.vue')
 const ReportsView = () => import('../views/ReportsView.vue')
 const AdminView = () => import('../views/AdminView.vue')
+const TravelView = () => import('../views/TravelView.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -22,6 +23,7 @@ const routes = [
   { path: '/ledger', component: LedgerView },
   { path: '/investment', component: InvestmentView },
   { path: '/reports', component: ReportsView },
+  { path: '/travel', component: TravelView },
   { path: '/admin', component: AdminView }
 ]
 

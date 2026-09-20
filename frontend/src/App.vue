@@ -32,6 +32,9 @@
         <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }" :aria-current="route.path === '/reports' ? 'page' : null">
           <img :src="iconBeaver" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 月度报告
         </router-link>
+        <router-link to="/travel" class="nav-item" :class="{ active: route.path === '/travel' }" :aria-current="route.path === '/travel' ? 'page' : null">
+          <span class="nav-icon nav-emoji" aria-hidden="true">🧳</span> 旅行计划
+        </router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" :aria-current="route.path === '/admin' ? 'page' : null">
           <img :src="iconFox" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 用户管理
         </router-link>
@@ -105,6 +108,9 @@
           </router-link>
           <router-link to="/reports" class="nav-item" :class="{ active: route.path === '/reports' }" @click="showDrawer=false">
             <img :src="iconBeaver" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 月度报告
+          </router-link>
+          <router-link to="/travel" class="nav-item" :class="{ active: route.path === '/travel' }" @click="showDrawer=false">
+            <span class="nav-icon nav-emoji" aria-hidden="true">🧳</span> 旅行计划
           </router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-item" :class="{ active: route.path === '/admin' }" @click="showDrawer=false">
             <img :src="iconFox" class="nav-icon nav-avatar" alt="" aria-hidden="true"> 用户管理

@@ -113,11 +113,12 @@ from routes.receipts import receipts_bp
 from routes.tips import tips_bp
 from routes.decide import decide_bp
 from routes.checkup import checkup_bp
+from routes.travel import travel_bp
 
 for bp in [auth_bp, chat_bp, records_bp, income_bp,
            categories_bp, budgets_bp, stats_bp, admin_bp,
            investment_bp, reports_bp, export_bp, import_bp, health_bp,
-           recurring_bp, receipts_bp, tips_bp, decide_bp, checkup_bp]:
+           recurring_bp, receipts_bp, tips_bp, decide_bp, checkup_bp, travel_bp]:
     app.register_blueprint(bp)
 
 # 启动时一次性收尸：进程崩溃 / 重启会让 reports 表里 pending/running 行永远卡死

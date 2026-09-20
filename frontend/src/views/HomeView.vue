@@ -96,6 +96,7 @@ const TILES = [
   { path: '/ledger',     label: '账本管理', desc: '收支明细 · 预算 · 图表',           avatar: iconShiba,  color: '#f7cd67' },
   { path: '/investment', label: '投资理财', desc: '持仓 · 攒钱目标 · AI 顾问',        avatar: iconOwl,    color: '#889df0' },
   { path: '/reports',    label: '月度报告', desc: 'AI 月报和本月回顾卡',              avatar: iconBeaver, color: '#f8a6b2' },
+  { path: '/travel',     label: '旅行计划', desc: '日历式行程本 · 手记 · 打包',       avatar: iconOwl,    color: '#8fc7d4' },
   { path: '/admin',      label: '用户管理', desc: '用户与 LLM 用量看板',              avatar: iconFox,    color: '#e59266', adminOnly: true },
 ]
 
