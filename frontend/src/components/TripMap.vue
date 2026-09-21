@@ -241,6 +241,7 @@ let labelLayer = null
 let routeGroup = null
 let markerGroup = null
 let markerById = new Map()
+let litId = null
 let ro = null
 
 /** 收集所有带坐标的点,按天顺序;顺带把当天 spots 的时长、以及提到这个地名的
@@ -312,13 +313,13 @@ function fitBounds() {
 
 /** 两点之间的弧线:直线看着像网络拓扑图,弧线才像航线。
  *  控制点沿弦的垂线外推,飞行段拱得更明显。 */
-function arc(a, b, bend) {
+function arc(a, b, bend, segments = 28) {
   const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
   const k = Math.max(Math.cos(mid[0] * Math.PI / 180), 0.1)
   const dx = (b[1] - a[1]) * k, dy = b[0] - a[0]
   const cp = [mid[0] + dx * bend, mid[1] - dy * bend / k]
   const out = []
-  const N = 28
+  const N = segments
   for (let i = 0; i <= N; i++) {
     const t = i / N, u = 1 - t
     out.push([
@@ -328,6 +329,10 @@ function arc(a, b, bend) {
   }
   return out
 }
+
+const hasHover = typeof window !== 'undefined'
+  && window.matchMedia?.('(hover: hover)').matches !== false
+
 
 function accentColor() {
   const el = mapEl.value
@@ -349,7 +354,11 @@ function draw() {
     const b = coord(ps[i])
     if (a[0] === b[0] && a[1] === b[1]) continue
     const air = ps[i].air, sea = ps[i].sea
-    L.polyline(arc(a, b, air ? 0.17 : 0.09), {
+    // 采样数按航段长短来:同城两个点之间画 28 段纯属浪费,
+    // 一趟行程几十段加起来就是上千个点。
+    const span = Math.hypot(a[0] - b[0], (a[1] - b[1]) * 0.6)
+    const segs = span < 0.05 ? 2 : (span < 0.5 ? 8 : (span < 3 ? 16 : 28))
+    L.polyline(arc(a, b, air ? 0.17 : 0.09, segs), {
       color: air ? '#8A9EA3' : color,
       weight: air ? 2 : 3,
       opacity: air ? 0.75 : 0.9,
@@ -359,24 +368,33 @@ function draw() {
     }).addTo(routeGroup)
   }
 
+  const pins = []
   ps.forEach((p, i) => {
-    const kind = i === 0 ? 'start' : (i === ps.length - 1 ? 'end' : '')
-    const m = L.marker(coord(p), {
-      icon: L.divIcon({
-        className: 'tm-pin-wrap',
-        html: `<span class="tm-pin ${kind}"></span>`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-      }),
-      title: p.t,
-      keyboard: true,
-      alt: p.t,
+    const first = i === 0, last = i === ps.length - 1
+    const m = L.circleMarker(coord(p), {
+      radius: first || last ? 7 : 6,
+      fillColor: first ? '#1d2b32' : (last ? '#3C8C6E' : color),
+      fillOpacity: 1,
+      color: '#fff',              // 白圈,压在底图上才看得清
+      weight: 2.5,
+      interactive: true,
+      bubblingMouseEvents: false,
     })
-    m.bindTooltip(p.t, { direction: 'top', offset: [0, -8] })
     m.on('click', () => openStop(p))
-    m.addTo(markerGroup)
+    // 触屏设备没有 hover:浮动名字根本出不来,却要为每个点多挂三组监听,
+    // 六七十个点加起来不是小数目。只在有指针设备时才绑。
+    if (hasHover) {
+      m.bindTooltip(p.t, { direction: 'top', offset: [0, -8] })
+      m.on('mouseover', () => m.setStyle({ weight: 3.5 }))
+      m.on('mouseout', () => m.setStyle({ weight: 2.5 }))
+    }
+    m.options.__base = m.options.fillColor     // 高亮后要还原
+    pins.push(m)
     markerById.set(p.id, m)
   })
+  // 一次性加进去:逐个 addTo 会触发多次布局
+  L.layerGroup(pins).addTo(markerGroup)
+  litId = null
 }
 
 function setLayer(key) {
@@ -434,6 +452,9 @@ onMounted(() => {
     attributionControl: true,
     scrollWheelZoom: true,
     worldCopyJump: true,
+    // 画布渲染:一趟行程六七十个点,用 DOM 标记就是六七十个元素,
+    // 切换行程时全删全建,手机上肉眼可见地卡。画布下它们都落在一张 canvas 上。
+    preferCanvas: true,
   })
   routeGroup = L.layerGroup().addTo(map)
   markerGroup = L.layerGroup().addTo(map)
@@ -446,14 +467,22 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (redrawHandle) cancelAnimationFrame(redrawHandle)
   ro?.disconnect()
   map?.remove()
   map = null
 })
 
+/** 换行程时先让标题、日历这些便宜的东西画出来,地图下一帧再重绘。
+ *  否则一次点击要同步做完几十个图层,手机上就是"点了卡一下"。 */
+let redrawHandle = 0
 watch(points, () => {
-  draw()
-  fitAll()
+  if (redrawHandle) cancelAnimationFrame(redrawHandle)
+  redrawHandle = requestAnimationFrame(() => {
+    redrawHandle = 0
+    draw()
+    fitAll()
+  })
 })
 
 /* ---------- 详情 ---------- */
@@ -491,6 +520,18 @@ function openStop(p) {
   detail.value = describe(p)
   absorbDesc()          // 这个点之前发起过生成、结果已经回来了的话,直接接上
 }
+
+/** 选中的那个点高亮。画布渲染没有 CSS class 可用,直接改样式。 */
+watch(activeStopId, (id) => {
+  const prev = litId && markerById.get(litId)
+  if (prev) prev.setStyle({ fillColor: prev.options.__base, weight: 2.5 })
+  const cur = id && markerById.get(id)
+  if (cur) {
+    if (cur.options.__base === undefined) cur.options.__base = cur.options.fillColor
+    cur.setStyle({ fillColor: '#b4562f', weight: 3.5 })
+  }
+  litId = id
+})
 
 /** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。 */
 function focusStop(p) {
@@ -662,16 +703,6 @@ async function saveDesc() {
 
 <style>
 /* Leaflet 的类名在组件外,加上 teleport 到 body 的弹窗,这一段不能 scoped */
-.tm-pin-wrap { background: none; border: 0; }
-.tm-pin {
-  display: block; width: 12px; height: 12px; margin: 2px; border-radius: 50%;
-  background: var(--trip-accent, #2B6A80);
-  box-shadow: 0 0 0 2.5px #fff, 0 1px 3px rgba(0, 0, 0, .35);
-  cursor: pointer; transition: transform .12s ease;
-}
-.tm-pin:hover { transform: scale(1.35); }
-.tm-pin.start { background: #1d2b32; width: 14px; height: 14px; margin: 1px; }
-.tm-pin.end { background: #3C8C6E; width: 14px; height: 14px; margin: 1px; }
 .leaflet-container { font: inherit; }
 .leaflet-container .leaflet-control-attribution { font-size: 10px; }
 .leaflet-tooltip { font-size: 12px; padding: 2px 8px; }
