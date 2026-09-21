@@ -122,11 +122,13 @@ from routes.tips import tips_bp
 from routes.decide import decide_bp
 from routes.checkup import checkup_bp
 from routes.travel import travel_bp
+from routes.travel_ai import travel_ai_bp
 
 for bp in [auth_bp, chat_bp, records_bp, income_bp,
            categories_bp, budgets_bp, stats_bp, admin_bp,
            investment_bp, reports_bp, export_bp, import_bp, health_bp,
-           recurring_bp, receipts_bp, tips_bp, decide_bp, checkup_bp, travel_bp]:
+           recurring_bp, receipts_bp, tips_bp, decide_bp, checkup_bp, travel_bp,
+           travel_ai_bp]:
     app.register_blueprint(bp)
 
 # 启动时一次性收尸：进程崩溃 / 重启会让 reports 表里 pending/running 行永远卡死
@@ -137,6 +139,11 @@ with app.app_context():
         cleanup_orphan_reports()
     except Exception:  # noqa: BLE001
         _logger.exception("启动时清理孤儿 pending/running 报告失败（不阻断启动）")
+    try:
+        from services.travel_jobs import cleanup_orphans
+        cleanup_orphans()
+    except Exception:  # noqa: BLE001
+        _logger.exception("启动时清理中断的行程 AI 任务失败（不阻断启动）")
 
 # LLM 成本敏感端点的用户级限流（IP 级仍由 llm_security_middleware 兜底）
 apply_endpoint_limits(app, {
@@ -148,6 +155,10 @@ apply_endpoint_limits(app, {
     "reports.api_generate_report": "5/minute",
     "reports.api_recap": "20/minute",
     "checkup.api_compute": "10/minute",
+    # 整趟生成会连着跑十几次 LLM,按次数限更合适
+    "travel_ai.ai_generate": "5/minute",
+    "travel_ai.ai_fill_days": "5/minute",
+    "travel_ai.ai_block": "30/minute",
 })
 
 if __name__ == "__main__":
