@@ -21,15 +21,24 @@
         <div class="header-btns">
           <el-button size="small" @click="openAi(0)">✨ AI 生成</el-button>
           <el-button size="small" type="primary" @click="showCreate = true">+ 新建</el-button>
-          <el-dropdown v-if="trip" trigger="click" @command="onTripCmd">
-            <el-button size="small">⋯</el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="share">🔗 分享 / 导出</el-dropdown-item>
-                <el-dropdown-item command="delete" divided>🗑 删除这趟行程</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <!-- 不用 el-dropdown:它的触发器是个 el-button,动森主题给按钮的粗描边
+               加投影,内容只有三个点时会鼓成一坨方块,看着像多了一圈框。 -->
+          <div v-if="trip" class="more-wrap">
+            <button
+              type="button"
+              class="more-btn"
+              :class="{ on: showMore }"
+              aria-label="更多操作"
+              @click="showMore = !showMore"
+            >⋯</button>
+            <div v-if="showMore" class="more-mask" @click="showMore = false"></div>
+            <div v-if="showMore" class="more-menu">
+              <button type="button" @click="showMore = false; openShare()">🔗 分享 / 导出</button>
+              <button type="button" class="danger" @click="showMore = false; removeTrip()">
+                🗑 删除这趟行程
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -337,6 +346,7 @@ function exportUrl(scope) {
     + `?scope=${scope}&photos=${exportPhotos.value ? 1 : 0}`
 }
 
+const showMore = ref(false)
 const showShare = ref(false)
 const sharing = ref(false)
 const shareToken = ref('')
@@ -440,11 +450,6 @@ async function createTrip() {
   } finally {
     creating.value = false
   }
-}
-
-function onTripCmd(cmd) {
-  if (cmd === 'share') openShare()
-  else if (cmd === 'delete') removeTrip()
 }
 
 async function removeTrip() {
@@ -585,6 +590,33 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
 }
 
 .header-btns { display: flex; gap: 8px; align-items: center; }
+.more-wrap { position: relative; flex-shrink: 0; }
+.more-btn {
+  appearance: none; cursor: pointer; font: inherit; line-height: 1;
+  width: 34px; height: 30px; padding: 0; border-radius: 10px;
+  border: 1px solid var(--color-border-light); background: var(--color-surface);
+  color: var(--color-text-muted); font-size: 17px;
+}
+.more-btn.on, .more-btn:hover {
+  border-color: var(--color-primary); color: var(--color-primary);
+}
+.more-mask { position: fixed; inset: 0; z-index: 30; }
+.more-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 31;
+  min-width: 168px; padding: 4px; border-radius: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+}
+.more-menu button {
+  display: block; width: 100%; text-align: left; appearance: none; border: 0;
+  background: none; cursor: pointer; font: inherit; font-size: 13px;
+  padding: 9px 12px; border-radius: 8px; color: var(--color-text);
+  white-space: nowrap;
+}
+.more-menu button:hover { background: var(--color-primary-light); }
+.more-menu button.danger { color: var(--color-error, #e05a5a); }
+.more-menu button.danger:hover { background: rgba(224, 90, 90, .1); }
 
 .blank-tip {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -602,7 +634,8 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
 .ai-strip {
   width: 100%; appearance: none; cursor: pointer; font: inherit; text-align: left;
   display: flex; align-items: center; gap: 10px;
-  margin: 0 0 14px; padding: 9px 14px; border-radius: 999px;
+  /* 上面那排按钮带动森主题的投影,会探出自身盒子几像素,顶上得留够 */
+  margin: 10px 0 14px; padding: 9px 14px; border-radius: 999px;
   border: 1px solid var(--color-primary); background: var(--color-primary-light);
   color: var(--color-text-strong);
 }
@@ -662,7 +695,7 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
   .page-header-actions { width: 100%; flex-wrap: wrap; gap: 8px; }
   .trip-select { flex: 1 0 100%; min-width: 0; }
   .header-btns { width: 100%; }
-  .header-btns :deep(.el-button) { flex: 1; }
+  .header-btns > :deep(.el-button) { flex: 1; }
   .trip-hero { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; }
   .hero-count { align-self: flex-end; text-align: right; }
 }
