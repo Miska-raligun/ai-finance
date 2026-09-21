@@ -27,15 +27,14 @@ def test_checkup_requires_login(client):
     assert client.get("/api/checkup/history").status_code == 401
 
 
-def test_checkup_fallback_without_llm(auth_client, app, monkeypatch):
+def test_checkup_fallback_without_llm(auth_client, app, monkeypatch, ai_job):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with auth_client.session_transaction() as s:
         uid = s["user_id"]
     period = _seed(app, uid)
 
-    r = auth_client.post(f"/api/checkup/compute?month={period}")
-    assert r.status_code == 200
-    body = r.get_json()
+    body = ai_job(auth_client,
+                  auth_client.post(f"/api/checkup/compute?month={period}"))["result"]
     assert body["source"] == "fallback"
     assert 0 <= body["score"] <= 100
     assert len(body["dimensions"]) == 4
@@ -48,7 +47,7 @@ def test_checkup_fallback_without_llm(auth_client, app, monkeypatch):
     assert any(h["period"] == period for h in hist)
 
 
-def test_checkup_uses_llm_score(auth_client, app, monkeypatch):
+def test_checkup_uses_llm_score(auth_client, app, monkeypatch, ai_job):
     from services.llm_config import save_llm_config
     with auth_client.session_transaction() as s:
         uid = s["user_id"]
@@ -67,14 +66,15 @@ def test_checkup_uses_llm_score(auth_client, app, monkeypatch):
     fake = {"choices": [{"message": {"content": content}}], "usage": {"total_tokens": 20}}
     monkeypatch.setattr("services.checkup._call_llm", lambda **kw: fake)
 
-    body = auth_client.post(f"/api/checkup/compute?month={period}").get_json()
+    body = ai_job(auth_client, auth_client.post(
+        f"/api/checkup/compute?month={period}"))["result"]
     assert body["source"] == "llm"
     assert body["score"] == 78
     assert body["grade"] == "良好"
     assert len(body["dimensions"]) == 4
 
 
-def test_checkup_fallback_on_bad_json(auth_client, app, monkeypatch):
+def test_checkup_fallback_on_bad_json(auth_client, app, monkeypatch, ai_job):
     from services.llm_config import save_llm_config
     with auth_client.session_transaction() as s:
         uid = s["user_id"]
@@ -85,14 +85,16 @@ def test_checkup_fallback_on_bad_json(auth_client, app, monkeypatch):
     bad = {"choices": [{"message": {"content": "你的财务挺健康的~"}}], "usage": {"total_tokens": 5}}
     monkeypatch.setattr("services.checkup._call_llm", lambda **kw: bad)
 
-    body = auth_client.post(f"/api/checkup/compute?month={period}").get_json()
+    body = ai_job(auth_client, auth_client.post(
+        f"/api/checkup/compute?month={period}"))["result"]
     assert body["source"] == "fallback"
     assert 0 <= body["score"] <= 100
 
 
-def test_checkup_empty_month(auth_client, monkeypatch):
+def test_checkup_empty_month(auth_client, monkeypatch, ai_job):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    body = auth_client.post("/api/checkup/compute?month=2099-02").get_json()
+    body = ai_job(auth_client, auth_client.post(
+        "/api/checkup/compute?month=2099-02"))["result"]
     assert body["source"] == "empty"
     assert body["score"] == 0
     # 空月不应写入历史

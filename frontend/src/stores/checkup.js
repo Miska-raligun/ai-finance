@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import api from '@/api'
+import { runAiJob } from '@/utils/aiJobs'
 
 /**
  * 财务体检 Pinia store。
@@ -32,10 +33,12 @@ export const useCheckupStore = defineStore('checkup', {
       this.computing = true
       try {
         const url = month ? `/api/checkup/compute?month=${month}` : '/api/checkup/compute'
-        const res = await api.post(url, { llm }, signal ? { signal } : undefined)
-        this.current = res.data
+        // 后端改成异步了:POST 只排队,结果轮询取。同步的话连接要挂几分钟,
+        // 会踩 nginx 超时 / 熔断和 waitress 线程占满。
+        const data = await runAiJob(url, { llm }, { signal })
+        this.current = data
         await this.fetchHistory()
-        return res.data
+        return data
       } finally {
         this.computing = false
       }

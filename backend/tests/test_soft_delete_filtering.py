@@ -44,29 +44,29 @@ def test_recap_excludes_deleted(auth_client, app, monkeypatch):
     assert body["highest_day"]["date"].endswith("-10")
 
 
-def test_checkup_excludes_deleted(auth_client, app, monkeypatch):
+def test_checkup_excludes_deleted(auth_client, app, monkeypatch, ai_job):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with auth_client.session_transaction() as s:
         uid = s["user_id"]
     period = datetime.now().strftime("%Y-%m")
     _seed(app, uid, period)
 
-    body = auth_client.post(f"/api/checkup/compute?month={period}").get_json()
+    body = ai_job(auth_client, auth_client.post(
+        f"/api/checkup/compute?month={period}"))["result"]
     ctx = body["context"]
     assert ctx["spend_total"] == 250.0
     assert ctx["income_total"] == 3000.0
 
 
-def test_decide_excludes_deleted(auth_client, app, monkeypatch):
+def test_decide_excludes_deleted(auth_client, app, monkeypatch, ai_job):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with auth_client.session_transaction() as s:
         uid = s["user_id"]
     period = datetime.now().strftime("%Y-%m")
     _seed(app, uid, period)
 
-    body = auth_client.post(
-        "/api/decide", json={"item": "键盘", "price": 500}
-    ).get_json()
+    body = ai_job(auth_client, auth_client.post(
+        "/api/decide", json={"item": "键盘", "price": 500}))["result"]
     ctx = body["context_used"]
     # 月均支出按近 3 月算：本月只有 250 活记录 → 月均≈83，不该被 9999 拖到 ~3416
     assert ctx["spend_avg_monthly"] < 200

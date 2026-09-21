@@ -67,10 +67,11 @@ def app(temp_db, monkeypatch):
     from routes.checkup import checkup_bp
     from routes.travel import travel_bp
     from routes.travel_ai import travel_ai_bp
+    from routes.ai_jobs import ai_jobs_bp
 
     for bp in [auth_bp, records_bp, income_bp, categories_bp, budgets_bp, stats_bp, admin_bp,
                investment_bp, reports_bp, export_bp, import_bp, health_bp, recurring_bp, receipts_bp,
-               tips_bp, decide_bp, checkup_bp, travel_bp, travel_ai_bp]:
+               tips_bp, decide_bp, checkup_bp, travel_bp, travel_ai_bp, ai_jobs_bp]:
         flask_app.register_blueprint(bp)
 
     yield flask_app
@@ -79,6 +80,28 @@ def app(temp_db, monkeypatch):
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture
+def ai_job():
+    """财务体检 / 购前决策现在是异步的:POST 只排队,结果轮询取。
+
+    同步会把 HTTP 连接挂上几分钟,踩 nginx 超时 / 熔断和 waitress 线程占满。
+    """
+    import time
+
+    def _wait(client, resp, timeout: float = 8.0):
+        assert resp.status_code == 201, resp.get_json()
+        job_id = resp.get_json()["job_id"]
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            job = client.get(f"/api/ai-jobs/{job_id}").get_json()
+            if job["status"] in ("done", "failed"):
+                return job
+            time.sleep(0.03)
+        raise AssertionError(f"AI 任务 {job_id} 在 {timeout}s 内没结束")
+
+    return _wait
 
 
 @pytest.fixture

@@ -129,6 +129,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { runAiJob } from '@/utils/aiJobs'
 import { useUserStore } from '@/stores/user'
 import AiThinking from '@/components/AiThinking.vue'
 
@@ -174,7 +175,9 @@ async function submit() {
   loading.value = true
   controller.value = new AbortController()
   try {
-    const res = await api.post('/api/decide', {
+    // 后端改成异步了:POST 只排队,结果轮询取。同步的话连接要挂几分钟,
+    // 会踩 nginx 超时 / 熔断和 waitress 线程占满。
+    result.value = await runAiJob('/api/decide', {
       item: form.value.item.trim(),
       price: Number(form.value.price),
       category: form.value.category.trim() || undefined,
@@ -182,11 +185,10 @@ async function submit() {
       // 用户在前端选了「自定义 LLM」时把 key 直接传过去；'default' 模式下为 null
       llm: userStore.llmPayload,
     }, { signal: controller.value.signal })
-    result.value = res.data
   } catch (e) {
     // 用户主动取消：axios 把 AbortController.abort 转成 CanceledError，静默处理
     if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return
-    const msg = e?.response?.data?.error || '分析失败，稍后再试'
+    const msg = e?.response?.data?.error || e?.message || '分析失败，稍后再试'
     ElMessage.error(msg)
   } finally {
     loading.value = false

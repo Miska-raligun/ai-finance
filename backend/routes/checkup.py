@@ -6,6 +6,7 @@ from datetime import datetime
 from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
+from services import ai_jobs
 from services.checkup import compute_checkup, get_checkup, get_checkup_history
 from services.llm_config import current_llm
 
@@ -29,9 +30,20 @@ def api_compute():
     use_cached = str(
         request.args.get("use_cached") or data.get("use_cached") or ""
     ).lower() in {"1", "true", "yes", "on"}
-    return jsonify(compute_checkup(
-        g.user_id, period, llm=current_llm(data), force=not use_cached,
-    ))
+    # 排队立刻返回,结果轮询 /api/ai-jobs/<id> 取。同步的话这条要挂着等 LLM
+    # 几分钟,会踩 nginx 超时 / 熔断和 waitress 线程占满三个坑。
+    job_id = ai_jobs.submit(
+        g.user_id, "checkup",
+        {"period": period, "force": not use_cached},
+        current_llm(data),
+        dedup_key=f"checkup:{period}",      # 连点几下只跑一次
+    )
+    return jsonify({"job_id": job_id}), 201
+
+
+def _run_checkup(user_id: int, payload: dict, llm: dict | None) -> dict:
+    return compute_checkup(user_id, payload["period"], llm=llm,
+                           force=bool(payload.get("force")))
 
 
 @checkup_bp.route("/api/checkup/current", methods=["GET"])
@@ -52,3 +64,6 @@ def api_history():
         months = 12
     months = max(1, min(36, months))
     return jsonify(get_checkup_history(g.user_id, months))
+
+
+ai_jobs.register("checkup", _run_checkup)

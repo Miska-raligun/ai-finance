@@ -8,7 +8,7 @@
 from datetime import datetime
 
 
-def test_checkup_month_value_change_with_many_snapshots(auth_client, app, monkeypatch):
+def test_checkup_month_value_change_with_many_snapshots(auth_client, app, monkeypatch, ai_job):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     from db import get_db
     with auth_client.session_transaction() as s:
@@ -73,7 +73,8 @@ def test_checkup_month_value_change_with_many_snapshots(auth_client, app, monkey
             "VALUES (?, '餐饮', 50, '', ?)", (uid, f"{period}-05"))
         db.commit()
 
-    body = auth_client.post(f"/api/checkup/compute?month={period}").get_json()
+    body = ai_job(auth_client, auth_client.post(
+        f"/api/checkup/compute?month={period}"))["result"]
     portfolio = body["context"]["portfolio"]
 
     # 月差精确 = 5 * 50 = 250；软删资产的 +949999 不该混进来

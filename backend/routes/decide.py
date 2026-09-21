@@ -13,6 +13,7 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
 from constants import LLM_TIMEOUT_LONG
+from services import ai_jobs
 from db import get_db
 from services.llm import _call_llm
 from services.llm_config import current_llm
@@ -111,8 +112,34 @@ _RUBRIC_FALLBACK = [
 @decide_bp.route("/api/decide", methods=["POST"])
 @login_required
 def decide():
-    """POST {item, price, category?, note?}  → {verdict, reason, alternatives[], impact{}}"""
+    """排一个作业立刻返回 job_id,结果由前端轮询 /api/ai-jobs/<id> 取。
+
+    为什么不同步:这条要跑一大段 LLM,慢的时候几分钟,HTTP 连接一直挂着会
+    同时踩三个坑——nginx 的 proxy_read_timeout、nginx 连续超时后把上游熔断
+    (表现就是莫名其妙的 503)、waitress 默认只有 4 个工作线程被长请求占满。
+    """
     payload = request.get_json(silent=True) or {}
+    item = str(payload.get("item") or "").strip()[:80]
+    try:
+        price_check = float(payload.get("price") or 0)
+    except (TypeError, ValueError):
+        price_check = 0.0
+    if not item or price_check <= 0:
+        return jsonify({"error": "请填写物品名称和价格（>0）"}), 400
+    if price_check > 1_000_000:
+        return jsonify({"error": "金额过大，请检查输入"}), 400
+
+    job_id = ai_jobs.submit(g.user_id, "decide", {
+        "item": item,
+        "price": price_check,
+        "category": str(payload.get("category") or "").strip()[:30],
+        "note": str(payload.get("note") or "").strip()[:200],
+    }, current_llm(payload))
+    return jsonify({"job_id": job_id}), 201
+
+
+def _advise(user_id: int, payload: dict, llm_cfg: dict | None) -> dict:
+    """真正干活的:这段原来就在请求线程里跑,现在挪到作业里,逻辑没动。"""
     item = str(payload.get("item") or "").strip()[:80]
     note = str(payload.get("note") or "").strip()[:200]
     category = str(payload.get("category") or "").strip()[:30]
@@ -121,16 +148,7 @@ def decide():
     except (TypeError, ValueError):
         price = 0.0
 
-    if not item or price <= 0:
-        return jsonify({"error": "请填写物品名称和价格（>0）"}), 400
-    if price > 1_000_000:
-        return jsonify({"error": "金额过大，请检查输入"}), 400
-
-    # 前端可显式传 llm 配置；无用户自有 key 时 current_llm 会把 url/model 归到
-    # constants.py 系统默认(见 services.llm_config.current_llm)。
-    llm_cfg = current_llm(payload)
-
-    ctx = _gather_context(g.user_id)
+    ctx = _gather_context(user_id)
 
     # 客观影响估算（不依赖 LLM，先算好作为答复 base）
     impact = {
@@ -154,14 +172,14 @@ def decide():
     import os as _os
     has_any_key = bool(llm_cfg.get("apikey")) or bool(_os.getenv("DEEPSEEK_API_KEY"))
     if not has_any_key:
-        return jsonify({
+        return {
             "verdict": "建议谨慎",
             "reason": "\n".join(_RUBRIC_FALLBACK),
             "alternatives": [],
             "impact": impact,
             "context_used": ctx,
             "source": "fallback",
-        })
+        }
 
     # 拼 prompt — 关键：让 LLM 严格按 JSON 返回，前端好渲染
     system_prompt = (
@@ -225,11 +243,11 @@ def decide():
         reason = str(parsed.get("reason") or "")[:500]
         alts = [str(x)[:80] for x in (parsed.get("alternatives") or [])][:5]
         tips = [str(x)[:80] for x in (parsed.get("tips") or [])][:5]
-        return jsonify({
+        return {
             "verdict": verdict, "reason": reason,
             "alternatives": alts, "tips": tips,
             "impact": impact, "context_used": ctx, "source": "llm",
-        })
+        }
     except Exception as e:  # noqa: BLE001
         logger.warning("decide LLM 失败，回退本地建议: %s", e)
         # LLM 调通了但失败（超时 / 配额 / 解析失败） vs 完全没调通：文案区分
@@ -241,9 +259,12 @@ def decide():
             )
         else:
             fallback_reason = "\n".join(_RUBRIC_FALLBACK)
-        return jsonify({
+        return {
             "verdict": "建议谨慎",
             "reason": fallback_reason,
             "alternatives": [], "tips": [],
             "impact": impact, "context_used": ctx, "source": "fallback",
-        })
+        }
+
+
+ai_jobs.register("decide", _advise)

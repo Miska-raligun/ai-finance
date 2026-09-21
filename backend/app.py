@@ -123,12 +123,13 @@ from routes.decide import decide_bp
 from routes.checkup import checkup_bp
 from routes.travel import travel_bp
 from routes.travel_ai import travel_ai_bp
+from routes.ai_jobs import ai_jobs_bp
 
 for bp in [auth_bp, chat_bp, records_bp, income_bp,
            categories_bp, budgets_bp, stats_bp, admin_bp,
            investment_bp, reports_bp, export_bp, import_bp, health_bp,
            recurring_bp, receipts_bp, tips_bp, decide_bp, checkup_bp, travel_bp,
-           travel_ai_bp]:
+           travel_ai_bp, ai_jobs_bp]:
     app.register_blueprint(bp)
 
 # 启动时一次性收尸：进程崩溃 / 重启会让 reports 表里 pending/running 行永远卡死
@@ -144,6 +145,11 @@ with app.app_context():
         cleanup_orphans()
     except Exception:  # noqa: BLE001
         _logger.exception("启动时清理中断的行程 AI 任务失败（不阻断启动）")
+    try:
+        from services.ai_jobs import cleanup_orphans as _cleanup_ai_jobs
+        _cleanup_ai_jobs()
+    except Exception:  # noqa: BLE001
+        _logger.exception("启动时清理中断的 AI 任务失败（不阻断启动）")
 
 # LLM 成本敏感端点的用户级限流（IP 级仍由 llm_security_middleware 兜底）
 apply_endpoint_limits(app, {
