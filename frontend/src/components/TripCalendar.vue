@@ -1,40 +1,38 @@
 <!-- components/TripCalendar.vue — 行程日历:按月网格铺开,行程内的日子显示当天概览 -->
 <template>
   <div class="cal">
-    <div v-for="m in months" :key="m.key" class="cal-month">
-      <div class="cal-month-title">{{ m.label }}</div>
+    <div class="cal-span">{{ spanLabel }}</div>
 
-      <div class="cal-grid" role="grid">
-        <div v-for="w in WEEK" :key="w" class="cal-wd" role="columnheader">{{ w }}</div>
+    <div class="cal-grid" role="grid">
+      <div v-for="w in WEEK" :key="w" class="cal-wd" role="columnheader">{{ w }}</div>
 
-        <button
-          v-for="(cell, i) in m.cells"
-          :key="i"
-          class="cal-cell"
-          :class="{
-            'is-blank': !cell,
-            'in-trip': cell && cell.day,
-            'is-selected': cell && cell.day && cell.day.day_no === selectedDayNo,
-            'is-today': cell && cell.iso === todayIso,
-          }"
-          :disabled="!cell || !cell.day"
-          :aria-selected="!!(cell && cell.day && cell.day.day_no === selectedDayNo)"
-          role="gridcell"
-          @click="cell && cell.day && $emit('select', cell.day.day_no)"
-        >
-          <template v-if="cell">
-            <span class="cal-date">{{ cell.dom }}</span>
-            <template v-if="cell.day">
-              <span class="cal-dayno">D{{ cell.day.day_no }}</span>
-              <span class="cal-route">{{ shortRoute(cell.day) }}</span>
-              <span v-if="cell.day.transport" class="cal-icon" :title="cell.day.transport">
-                {{ transportIcon(cell.day.transport) }}
-              </span>
-              <span v-if="cell.day.journal" class="cal-flag" title="已有手记">✎</span>
-            </template>
-          </template>
-        </button>
-      </div>
+      <button
+        v-for="cell in cells"
+        :key="cell.iso"
+        class="cal-cell"
+        :class="{
+          'in-trip': !!cell.day,
+          'is-outside': !cell.day,
+          'is-selected': cell.day && cell.day.day_no === selectedDayNo,
+          'is-today': cell.iso === todayIso,
+        }"
+        :disabled="!cell.day"
+        :aria-selected="!!(cell.day && cell.day.day_no === selectedDayNo)"
+        role="gridcell"
+        @click="cell.day && $emit('select', cell.day.day_no)"
+      >
+        <span class="cal-date">
+          <b v-if="cell.dom === 1" class="cal-mon">{{ cell.month }}月</b>{{ cell.dom }}
+        </span>
+        <template v-if="cell.day">
+          <span class="cal-dayno">D{{ cell.day.day_no }}</span>
+          <span class="cal-route">{{ shortRoute(cell.day) }}</span>
+          <span v-if="transportIcon(cell.day)" class="cal-icon" :title="cell.day.transport">
+            {{ transportIcon(cell.day) }}
+          </span>
+          <span v-if="cell.day.journal" class="cal-flag" title="已有手记">✎</span>
+        </template>
+      </button>
     </div>
   </div>
 </template>
@@ -58,28 +56,51 @@ const dayByIso = computed(() => {
   return m
 })
 
-/** 行程跨越的每个自然月各渲染一张网格(周一为首列,空位补 null)。 */
-const months = computed(() => {
+function iso(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    + `-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** 一张连续的周网格,只铺行程所在的那几行,前后各多给一行。
+ *
+ *  原来是按自然月铺:一趟 14 天的行程只要跨了月,就画出两整月六十多格,
+ *  绝大多数是空的,又长又难看。现在从"行程开始那一周的周一再往前一周"
+ *  铺到"结束那一周的周日再往后一周",多出来的格子淡显,只为让人看清
+ *  行程落在一周里的哪几天。 */
+const cells = computed(() => {
   if (!props.trip?.start_date) return []
   const start = new Date(props.trip.start_date + 'T00:00:00')
   const end = new Date(props.trip.end_date + 'T00:00:00')
+
+  const from = new Date(start)
+  from.setDate(from.getDate() - ((from.getDay() + 6) % 7) - 7)   // 周一为首列
+  const to = new Date(end)
+  to.setDate(to.getDate() + (6 - ((to.getDay() + 6) % 7)) + 7)
+
   const out = []
-  const cur = new Date(start.getFullYear(), start.getMonth(), 1)
-  while (cur <= end) {
-    const y = cur.getFullYear(), mo = cur.getMonth()
-    const first = new Date(y, mo, 1)
-    const daysInMonth = new Date(y, mo + 1, 0).getDate()
-    // JS getDay(): 0=周日 → 转成周一为 0
-    const lead = (first.getDay() + 6) % 7
-    const cells = new Array(lead).fill(null)
-    for (let d = 1; d <= daysInMonth; d++) {
-      const iso = `${y}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-      cells.push({ iso, dom: d, day: dayByIso.value[iso] || null })
-    }
-    out.push({ key: `${y}-${mo}`, label: `${y} 年 ${mo + 1} 月`, cells })
-    cur.setMonth(mo + 1)
+  for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    const key = iso(d)
+    out.push({
+      iso: key,
+      dom: d.getDate(),
+      month: d.getMonth() + 1,
+      day: dayByIso.value[key] || null,
+    })
   }
   return out
+})
+
+const spanLabel = computed(() => {
+  const t = props.trip
+  if (!t?.start_date) return ''
+  const a = new Date(t.start_date + 'T00:00:00')
+  const b = new Date(t.end_date + 'T00:00:00')
+  const sameYear = a.getFullYear() === b.getFullYear()
+  const head = `${a.getFullYear()} 年 ${a.getMonth() + 1} 月 ${a.getDate()} 日`
+  const tail = sameYear
+    ? `${b.getMonth() + 1} 月 ${b.getDate()} 日`
+    : `${b.getFullYear()} 年 ${b.getMonth() + 1} 月 ${b.getDate()} 日`
+  return `${head} — ${tail}`
 })
 
 /** 日历格子窄,路线只取目的地(箭头后那段),太长再截断。 */
@@ -90,24 +111,43 @@ function shortRoute(day) {
   return dest.length > 6 ? dest.slice(0, 6) + '…' : dest
 }
 
-function transportIcon(t) {
-  const s = (t || '').toLowerCase()
-  if (/船|邮轮|ferry|cruise/.test(s)) return '🚢'
-  if (/火车|铁路|train|rail/.test(s)) return '🚆'
-  if (/巴士|大巴|bus|coach/.test(s)) return '🚌'
-  if (/自驾|租车|drive|car/.test(s)) return '🚗'
-  return '✈️'
+/** 当天的交通图标。
+ *
+ *  原来匹配不上就默认给 ✈️,结果几乎每天都挂着飞机——陆路 420km 也是飞机。
+ *  现在先看地图停留点上的 air / sea 标记(那是结构化数据,最可信),
+ *  再按文字匹配,**都认不出来就不显示**,而不是硬塞一个。 */
+function transportIcon(day) {
+  const stops = day?.detail?.stops || []
+  if (stops.some(x => x && x.air)) return '✈️'
+  if (stops.some(x => x && x.sea)) return '🚢'
+
+  const s = (day?.transport || '').toLowerCase()
+  if (!s) return ''
+  if (/飞|航班|机场|空运|航空|fly|flight|air|✈/.test(s)) return '✈️'
+  if (/船|邮轮|渡轮|快船|航船|ferry|cruise|⛴/.test(s)) return '🚢'
+  if (/火车|高铁|铁路|列车|train|rail/.test(s)) return '🚆'
+  if (/缆车|索道|cable/.test(s)) return '🚡'
+  if (/巴士|大巴|客车|bus|coach/.test(s)) return '🚌'
+  if (/自驾|租车|包车|专车|drive|car/.test(s)) return '🚗'
+  if (/陆路|车程|公路|km|公里/.test(s)) return '🚌'
+  if (/步行|徒步|walk/.test(s)) return '🚶'
+  return ''
 }
 </script>
 
 <style scoped>
-.cal-month + .cal-month { margin-top: 18px; }
-.cal-month-title {
+.cal-span {
   font-size: 13px;
   font-weight: 700;
   color: var(--trip-ink-2, var(--color-text-muted));
   letter-spacing: .04em;
   margin-bottom: 8px;
+}
+.cal-mon {
+  font-size: 10px;
+  font-weight: 800;
+  margin-right: 2px;
+  color: var(--trip-accent, var(--color-primary));
 }
 .cal-grid {
   display: grid;
@@ -138,9 +178,14 @@ function transportIcon(t) {
   overflow: hidden;
   transition: transform .14s ease, box-shadow .14s ease, background .14s ease;
 }
-.cal-cell.is-blank { border: none; background: none; cursor: default; }
+/* 行程外的那几格只为撑出一周的形状,淡显、不可点 */
+.cal-cell.is-outside {
+  opacity: .34;
+  cursor: default;
+  background: none;
+}
 /* 不在行程内的日子:可见但明显弱化,不可点 */
-.cal-cell:not(.in-trip):not(.is-blank) { opacity: .38; cursor: default; }
+
 .cal-cell.in-trip:hover { transform: translateY(-2px); box-shadow: 0 4px 0 0 var(--shadow-anchor-light); }
 .cal-cell.is-selected {
   border-color: var(--trip-accent, var(--color-primary));
@@ -168,11 +213,12 @@ function transportIcon(t) {
 .cal-icon { position: absolute; right: 4px; top: 4px; font-size: 10px; }
 .cal-flag { position: absolute; right: 4px; bottom: 3px; font-size: 10px; color: var(--trip-accent, var(--color-primary)); }
 
-/* 移动端竖屏:格子更紧凑,路线文字让位给日期+天数 */
+/* 移动端竖屏:格子更紧凑,路线文字让位给日期 + 天数。
+   交通图标留着——一眼扫过去哪天飞、哪天坐车,比路线文字更有用,也不占地方。 */
 @media (max-width: 768px) {
   .cal-grid { gap: 4px; }
-  .cal-cell { min-height: 40px; padding: 3px 4px; border-radius: 8px; }
+  .cal-cell { min-height: 44px; padding: 3px 4px; border-radius: 8px; }
   .cal-route { display: none; }
-  .cal-icon { display: none; }
+  .cal-icon { right: 3px; top: 3px; font-size: 11px; }
 }
 </style>
