@@ -41,12 +41,17 @@
       </ul>
     </section>
 
-    <section v-for="grp in tipGroups" :key="grp.key" class="dd-sec">
-      <template v-if="grp.items.length">
-        <h4 class="dd-h">{{ grp.label }}</h4>
-        <ul class="dd-list dd-tips"><li v-for="(t, i) in grp.items" :key="i">{{ t }}</li></ul>
-      </template>
-    </section>
+    <TripListEditor
+      v-for="grp in tipGroups"
+      :key="grp.key"
+      :items="grp.items"
+      :label="grp.label"
+      can-edit
+      :ai-kind="grp.ai"
+      :trip-id="tripId"
+      :day-no="day.day_no"
+      @save="saveList(grp.key, $event)"
+    />
 
     <section v-if="stay && (stay.h || stay.a)" class="dd-sec">
       <h4 class="dd-h">住宿</h4>
@@ -115,6 +120,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import TripMap from '@/components/TripMap.vue'
 import TripPhotoSheet from '@/components/TripPhotoSheet.vue'
+import TripListEditor from '@/components/TripListEditor.vue'
 import { mapUrl } from '@/utils/maplink'
 import { photoList, photoUrl } from '@/utils/tripPhotos'
 
@@ -168,11 +174,28 @@ const photoCount = computed(() => allShas.value.length)
 const coverShas = computed(() => allShas.value.slice(0, 3))
 function coverUrl(sha) { return photoUrl({ tripId: props.tripId }, sha) }
 const tipGroups = computed(() => [
-  { key: 'todo', label: '贴士', items: detail.value.todo || [] },
-  { key: 'cam', label: '拍摄建议', items: detail.value.cam || [] },
-  { key: 'buy', label: '买什么', items: detail.value.buy || [] },
-  { key: 'warn', label: '注意', items: detail.value.warn || [] },
+  { key: 'todo', label: '贴士', ai: 'day_tips', items: detail.value.todo || [] },
+  { key: 'cam', label: '拍摄建议', ai: 'day_cam', items: detail.value.cam || [] },
+  { key: 'buy', label: '买什么', ai: 'day_buy', items: detail.value.buy || [] },
+  { key: 'warn', label: '注意', ai: 'day_warn', items: detail.value.warn || [] },
 ])
+
+/** 这几条都挂在 detail_json 里,所以整块 detail 一起 PATCH。
+ *  直接改 props.day 上那个对象——父组件 days 里就是同一个,改完各处同步。 */
+async function saveList(key, items) {
+  const d = props.day?.detail
+  if (!d) return
+  const before = d[key]
+  if (items.length) d[key] = items
+  else delete d[key]
+  try {
+    await api.patch(`/api/trips/${props.tripId}/days/${props.day.day_no}`, { detail: d })
+  } catch {
+    if (before === undefined) delete d[key]
+    else d[key] = before
+    ElMessage.error('保存失败')
+  }
+}
 
 function prettyDate(iso) {
   if (!iso) return ''

@@ -7,7 +7,37 @@
       <span class="pk-count">{{ checkedCount }} / {{ items.length }}</span>
     </div>
 
-    <el-empty v-if="!items.length" description="还没有打包清单，在下面加第一条" :image-size="60" />
+    <div class="pk-ai">
+      <button type="button" class="pk-ai-b" :disabled="genning" @click="propose">
+        {{ genning ? '生成中…' : '✨ 让 AI 按这趟行程列一份' }}
+      </button>
+      <span v-if="aiErr" class="pk-ai-err">{{ aiErr }}</span>
+    </div>
+
+    <!-- AI 出的是建议:逐条挑,挑中的才入库,之后照常可改可删 -->
+    <div v-if="proposed.length" class="pk-prop">
+      <div class="pk-prop-h">
+        <span>AI 建议 {{ picked.size }} / {{ proposed.length }}</span>
+        <button type="button" class="pk-ai-b" @click="toggleAll">
+          {{ picked.size === proposed.length ? '全不选' : '全选' }}
+        </button>
+        <button type="button" class="pk-ai-b" @click="proposed = []">丢弃</button>
+        <button
+          type="button"
+          class="pk-ai-b primary"
+          :disabled="!picked.size || adding"
+          @click="acceptPicked"
+        >{{ adding ? '加入中…' : `加入选中的 ${picked.size} 条` }}</button>
+      </div>
+      <label v-for="(it, i) in proposed" :key="i" class="pk-prop-i" :class="{ on: picked.has(i) }">
+        <input type="checkbox" :checked="picked.has(i)" @change="togglePick(i)">
+        <span class="pk-prop-g">{{ it.grp }}</span>
+        <span class="pk-prop-l">{{ it.label }}</span>
+        <span v-if="it.hint" class="pk-prop-hint">{{ it.hint }}</span>
+      </label>
+    </div>
+
+    <el-empty v-if="!items.length && !proposed.length" description="还没有打包清单，在下面加第一条或让 AI 起一份" :image-size="60" />
 
     <section v-for="g in grouped" :key="g.name" class="pk-grp">
       <h4 class="pk-grp-t">{{ g.name || '未分组' }}</h4>
@@ -54,6 +84,61 @@ const emit = defineEmits(['changed'])
 const items = computed(() => props.packing)
 const saving = ref(false)
 const draft = reactive({ grp: '', label: '', hint: '' })
+
+// AI 建议:先摆出来让人挑,挑中的才入库
+const genning = ref(false)
+const adding = ref(false)
+const aiErr = ref('')
+const proposed = ref([])
+const picked = ref(new Set())
+
+async function propose() {
+  genning.value = true
+  aiErr.value = ''
+  try {
+    const res = await api.post(`/api/trips/${props.tripId}/ai/block`, { kind: 'packing' })
+    const have = new Set(items.value.map(i => i.label))
+    proposed.value = (res.data.items || []).filter(x => !have.has(x.label))
+    picked.value = new Set(proposed.value.map((_, i) => i))
+    if (!proposed.value.length) aiErr.value = 'AI 想到的都已经在清单里了'
+  } catch (e) {
+    aiErr.value = e?.response?.data?.error || 'AI 生成失败'
+  } finally {
+    genning.value = false
+  }
+}
+
+function togglePick(i) {
+  const s = new Set(picked.value)
+  s.has(i) ? s.delete(i) : s.add(i)
+  picked.value = s
+}
+function toggleAll() {
+  picked.value = picked.value.size === proposed.value.length
+    ? new Set()
+    : new Set(proposed.value.map((_, i) => i))
+}
+
+async function acceptPicked() {
+  adding.value = true
+  try {
+    let n = items.value.length
+    for (let i = 0; i < proposed.value.length; i++) {
+      if (!picked.value.has(i)) continue
+      const it = proposed.value[i]
+      await api.post(`/api/trips/${props.tripId}/packing`, {
+        grp: it.grp, label: it.label, hint: it.hint, sort_order: n++,
+      })
+    }
+    proposed.value = []
+    picked.value = new Set()
+    emit('changed')
+  } catch (e) {
+    aiErr.value = e?.response?.data?.error || '加入失败'
+  } finally {
+    adding.value = false
+  }
+}
 
 const checkedCount = computed(() => items.value.filter(i => i.checked).length)
 const pct = computed(() => items.value.length
@@ -109,6 +194,35 @@ async function remove(it) {
 </script>
 
 <style scoped>
+.pk-ai { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.pk-ai-b {
+  appearance: none; border: 1px solid var(--trip-accent, var(--color-primary));
+  background: var(--color-surface); color: var(--trip-accent, var(--color-primary));
+  font: inherit; font-size: 12px; padding: 3px 12px; border-radius: 999px; cursor: pointer;
+}
+.pk-ai-b:disabled { opacity: .55; cursor: default; }
+.pk-ai-b.primary {
+  background: var(--trip-accent, var(--color-primary)); color: #fff; font-weight: 700;
+}
+.pk-ai-err { font-size: 12px; color: var(--color-text-muted); }
+.pk-prop {
+  border: 1px dashed var(--trip-accent, var(--color-primary));
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 14px;
+}
+.pk-prop-h {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; color: var(--color-text-muted); margin-bottom: 8px;
+}
+.pk-prop-h span { margin-right: auto; }
+.pk-prop-i {
+  display: flex; align-items: baseline; gap: 8px; padding: 3px 0;
+  font-size: 13px; cursor: pointer; opacity: .55;
+}
+.pk-prop-i.on { opacity: 1; }
+.pk-prop-g { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; min-width: 4em; }
+.pk-prop-l { font-weight: 600; }
+.pk-prop-hint { font-size: 11.5px; color: var(--color-text-muted); }
+
 .pk-prog { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 12px; color: var(--color-text-muted); }
 .pk-bar { flex: 1; height: 7px; border-radius: 999px; background: var(--color-surface-2, rgba(0,0,0,.07)); overflow: hidden; }
 .pk-bar i { display: block; height: 100%; background: var(--trip-accent, var(--color-primary)); transition: width .25s ease; }

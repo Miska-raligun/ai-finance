@@ -21,6 +21,34 @@
       <div class="fx-body" v-html="linkifyPhones(f.body || '')"></div>
     </section>
 
+    <div v-if="!readonly" class="fx-ai">
+      <button type="button" class="fx-ai-b" :disabled="genning" @click="propose">
+        {{ genning ? '生成中…' : '✨ 让 AI 补几条(时差 / 货币 / 插头…)' }}
+      </button>
+      <span v-if="aiErr" class="fx-ai-err">{{ aiErr }}</span>
+    </div>
+
+    <!-- AI 出的是建议:逐条挑,挑中的才入库。加进来同样默认私密。 -->
+    <div v-if="!readonly && proposed.length" class="fx-prop">
+      <div class="fx-prop-h">
+        <span>AI 建议 {{ picked.size }} / {{ proposed.length }}</span>
+        <button type="button" class="fx-ai-b" @click="proposed = []">丢弃</button>
+        <button
+          type="button"
+          class="fx-ai-b primary"
+          :disabled="!picked.size || adding"
+          @click="acceptPicked"
+        >{{ adding ? '加入中…' : `加入选中的 ${picked.size} 条` }}</button>
+      </div>
+      <label v-for="(it, i) in proposed" :key="i" class="fx-prop-i" :class="{ on: picked.has(i) }">
+        <input type="checkbox" :checked="picked.has(i)" @change="togglePick(i)">
+        <span class="fx-prop-t">
+          <b>{{ it.label }}</b>
+          <span>{{ it.body }}</span>
+        </span>
+      </label>
+    </div>
+
     <div v-if="!readonly" class="fx-add">
       <el-input v-model="draft.label" size="small" placeholder="标题（如 中国使馆）" class="fx-in-label" />
       <el-input
@@ -54,6 +82,57 @@ const emit = defineEmits(['changed'])
 
 const saving = ref(false)
 const draft = reactive({ label: '', body: '', is_public: false })
+
+// AI 建议:先摆出来让人挑,挑中的才入库
+const genning = ref(false)
+const adding = ref(false)
+const aiErr = ref('')
+const proposed = ref([])
+const picked = ref(new Set())
+
+async function propose() {
+  genning.value = true
+  aiErr.value = ''
+  try {
+    const res = await api.post(`/api/trips/${props.tripId}/ai/block`, { kind: 'facts' })
+    const have = new Set(props.facts.map(f => f.label))
+    proposed.value = (res.data.items || []).filter(x => !have.has(x.label))
+    picked.value = new Set(proposed.value.map((_, i) => i))
+    if (!proposed.value.length) aiErr.value = 'AI 想到的都已经在速查里了'
+  } catch (e) {
+    aiErr.value = e?.response?.data?.error || 'AI 生成失败'
+  } finally {
+    genning.value = false
+  }
+}
+
+function togglePick(i) {
+  const s = new Set(picked.value)
+  s.has(i) ? s.delete(i) : s.add(i)
+  picked.value = s
+}
+
+async function acceptPicked() {
+  adding.value = true
+  try {
+    let n = props.facts.length
+    for (let i = 0; i < proposed.value.length; i++) {
+      if (!picked.value.has(i)) continue
+      const it = proposed.value[i]
+      // is_public 不传,后端默认私密——AI 写的也要自己过目了再公开
+      await api.post(`/api/trips/${props.tripId}/facts`, {
+        label: it.label, body: it.body, sort_order: n++,
+      })
+    }
+    proposed.value = []
+    picked.value = new Set()
+    emit('changed')
+  } catch (e) {
+    aiErr.value = e?.response?.data?.error || '加入失败'
+  } finally {
+    adding.value = false
+  }
+}
 
 /** 先整体 HTML 转义,再把电话号码替换成 tel: 链接——顺序不能反,
  *  否则用户输入的内容会变成可执行 HTML。 */
@@ -107,6 +186,30 @@ async function remove(f) {
 </script>
 
 <style scoped>
+.fx-ai { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.fx-ai-b {
+  appearance: none; border: 1px solid var(--trip-accent, var(--color-primary));
+  background: var(--color-surface); color: var(--trip-accent, var(--color-primary));
+  font: inherit; font-size: 12px; padding: 3px 12px; border-radius: 999px; cursor: pointer;
+}
+.fx-ai-b:disabled { opacity: .55; cursor: default; }
+.fx-ai-b.primary { background: var(--trip-accent, var(--color-primary)); color: #fff; font-weight: 700; }
+.fx-ai-err { font-size: 12px; color: var(--color-text-muted); }
+.fx-prop {
+  border: 1px dashed var(--trip-accent, var(--color-primary));
+  border-radius: 12px; padding: 10px 12px; margin-top: 10px;
+}
+.fx-prop-h {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; color: var(--color-text-muted); margin-bottom: 8px;
+}
+.fx-prop-h span { margin-right: auto; }
+.fx-prop-i { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; cursor: pointer; opacity: .55; }
+.fx-prop-i.on { opacity: 1; }
+.fx-prop-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fx-prop-t b { font-size: 12.5px; }
+.fx-prop-t span { font-size: 12px; color: var(--color-text-muted); white-space: pre-wrap; }
+
 .fx-item { padding: 10px 0; border-bottom: 1px solid var(--trip-line, var(--color-border-light)); }
 .fx-item:last-of-type { border-bottom: none; }
 .fx-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

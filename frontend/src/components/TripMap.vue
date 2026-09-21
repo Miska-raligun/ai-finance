@@ -88,6 +88,13 @@
                 placeholder="写点介绍：为什么值得来、看什么、注意什么…"
               ></textarea>
               <div class="spot-edit-foot">
+                <button
+                  type="button"
+                  class="spot-b spot-ai"
+                  :disabled="genning || saving"
+                  @click="genDesc"
+                >{{ genning ? '生成中…' : '✨ 让 AI 写' }}</button>
+                <span class="spot-gap"></span>
                 <button type="button" class="spot-b" @click="editing = false">取消</button>
                 <button type="button" class="spot-b primary" :disabled="saving" @click="saveDesc">
                   {{ saving ? '保存中…' : '保存' }}
@@ -97,9 +104,14 @@
             <template v-else>
               <p v-if="detail.desc" class="spot-desc">{{ detail.desc }}</p>
               <p v-else class="spot-desc spot-desc-none">这个点还没有写介绍。</p>
-              <button v-if="canEdit" type="button" class="spot-edit-b" @click="startEdit">
-                ✎ {{ detail.desc ? '改介绍' : '写介绍' }}
-              </button>
+              <div v-if="canEdit" class="spot-edit-row">
+                <button type="button" class="spot-edit-b" @click="startEdit">
+                  ✎ {{ detail.desc ? '改介绍' : '写介绍' }}
+                </button>
+                <button type="button" class="spot-edit-b" :disabled="genning" @click="genDesc(true)">
+                  {{ genning ? '生成中…' : '✨ 让 AI 写' }}
+                </button>
+              </div>
             </template>
 
             <p v-if="uploadErr" class="spot-err">{{ uploadErr }}</p>
@@ -485,11 +497,34 @@ const siblings = computed(() => {
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
+const genning = ref(false)
 const uploadErr = ref('')
 
 function startEdit() {
   draft.value = detail.value?.desc || ''
   editing.value = true
+}
+
+/** AI 写的是**草稿**:填进编辑框,存不存由用户决定。
+ *  直接写库会盖掉人家自己写的那段,不能这么干。 */
+async function genDesc() {
+  if (!canEdit.value || !detail.value) return
+  genning.value = true
+  uploadErr.value = ''
+  if (!editing.value) { draft.value = detail.value.desc || ''; editing.value = true }
+  try {
+    const { default: api } = await import('@/api')
+    const res = await api.post(`/api/trips/${props.tripId}/ai/block`, {
+      kind: 'spot_desc',
+      spot: detail.value.t,
+      day_no: detail.value.dayNo,
+    })
+    draft.value = res.data.text || draft.value
+  } catch (e) {
+    uploadErr.value = e?.response?.data?.error || 'AI 生成失败'
+  } finally {
+    genning.value = false
+  }
 }
 
 /** 把改动写回当天的 detail 并 PATCH。
@@ -670,7 +705,7 @@ async function saveDesc() {
   resize: vertical; background: var(--color-surface); color: var(--color-text);
 }
 .spot-edit:focus { outline: none; border-color: var(--trip-accent, var(--color-primary)); }
-.spot-edit-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.spot-edit-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .spot-b {
   appearance: none; border: 1px solid var(--color-border-light); background: var(--color-surface);
   color: var(--color-text); font: inherit; font-size: 12.5px;
@@ -680,10 +715,14 @@ async function saveDesc() {
   background: var(--trip-accent, var(--color-primary));
   border-color: var(--trip-accent, var(--color-primary)); color: #fff; font-weight: 700;
 }
+.spot-edit-row { display: flex; gap: 14px; }
 .spot-edit-b {
   appearance: none; border: 0; background: none; cursor: pointer; padding: 4px 0;
   font: inherit; font-size: 12px; color: var(--trip-accent, var(--color-primary));
 }
+.spot-edit-b:disabled { opacity: .55; cursor: default; }
+.spot-gap { flex: 1; }
+.spot-ai { color: var(--trip-accent, var(--color-primary)); border-color: currentColor; }
 .spot-err { margin: 8px 0 0; font-size: 12px; color: var(--color-error, #e05a5a); }
 .spot-ps { margin-top: 16px; }
 .spot-tips { margin-top: 14px; }

@@ -19,15 +19,22 @@
           />
         </el-select>
         <el-button v-if="trip" size="small" @click="openShare">🔗 分享</el-button>
+        <el-button size="small" @click="openAi(0)">✨ AI 生成</el-button>
+        <el-button
+          v-if="trip && blankDays"
+          size="small"
+          @click="openAi(trip.id)"
+        >✨ 补全 {{ blankDays }} 天</el-button>
         <el-button size="small" type="primary" @click="showCreate = true">+ 新建行程</el-button>
       </div>
     </div>
 
     <el-empty
       v-if="!loading && !trips.length"
-      description="还没有行程。新建一个，日历会按起止日期自动铺好每一天。"
+      description="还没有行程。可以粘贴旅行社的行程单让 AI 整理，或者自己新建。"
     >
-      <el-button type="primary" @click="showCreate = true">新建行程</el-button>
+      <el-button type="primary" @click="openAi(0)">✨ AI 生成行程</el-button>
+      <el-button @click="showCreate = true">手动新建</el-button>
     </el-empty>
 
     <template v-else-if="trip">
@@ -110,6 +117,14 @@
       </el-drawer>
     </template>
 
+    <TripAiDialog
+      :open="showAi"
+      :accents="ACCENT_LIST"
+      :trip-id="aiTripId"
+      @close="showAi = false"
+      @created="onAiDone"
+    />
+
     <!-- 分享链接 -->
     <el-dialog v-model="showShare" title="分享这份行程" :width="dialogWidth">
       <p class="share-note">
@@ -189,6 +204,7 @@ import TripMap from '@/components/TripMap.vue'
 import TripPacking from '@/components/TripPacking.vue'
 import TripFacts from '@/components/TripFacts.vue'
 import TripDayDetail from '@/components/TripDayDetail.vue'
+import TripAiDialog from '@/components/TripAiDialog.vue'
 
 // 每趟旅行的主题色预设(与后端 ACCENTS 对齐)
 const ACCENTS = {
@@ -219,6 +235,19 @@ const TABS = [
   { key: 'facts', label: '速查' },
 ]
 const tab = ref('days')
+const showAi = ref(false)
+const aiTripId = ref(0)
+function openAi(tripId) {
+  aiTripId.value = tripId || 0
+  showAi.value = true
+}
+async function onAiDone(tripId) {
+  await loadTrips()
+  currentTripId.value = tripId
+  await loadTrip()
+  ElMessage.success('行程已生成，内容都可以直接改')
+}
+
 const showShare = ref(false)
 const sharing = ref(false)
 const shareToken = ref('')
@@ -243,6 +272,10 @@ const accentVars = computed(() => {
     '--trip-accent-ink': a.ink,
   }
 })
+
+/** 还空着的天数:有这几天才值得提示「让 AI 补全」。 */
+const blankDays = computed(() =>
+  days.value.filter(d => !Object.keys(d.detail || {}).length).length)
 
 const selectedDay = computed(() =>
   days.value.find(d => d.day_no === selectedDayNo.value) || null)
