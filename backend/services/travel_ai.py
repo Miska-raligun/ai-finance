@@ -16,8 +16,8 @@ import re
 from datetime import date, datetime, timedelta
 
 from prompts.travel import (
-    BLOCK_KINDS, DAY_SYSTEM, OUTLINE_SYSTEM,
-    build_block_prompt, build_day_prompt,
+    BLOCK_KINDS, DAY_SYSTEM, FACTS_EXTRACT_SYSTEM, OUTLINE_SYSTEM,
+    build_block_prompt, build_day_prompt, build_facts_extract_prompt,
     build_outline_from_idea, build_outline_from_notice,
 )
 
@@ -157,6 +157,7 @@ def clean_outline(raw) -> dict:
         "title": _s(raw.get("title"), 60) or "新的行程",
         "subtitle": _s(raw.get("subtitle"), 120),
         "code": _s(raw.get("code"), 60),
+        "cover_note": _s(raw.get("cover_note"), 200),
         "start_date": start,
         "end_date": end,
         "days": days,
@@ -311,6 +312,29 @@ def gen_day_detail(trip: dict, day: dict, raw_slice: str | None = None,
                      endpoint="travel.day", timeout=LLM_TIMEOUT_LONG,
                      temperature=0.4, llm=llm)
     return clean_day_detail(raw)
+
+
+def extract_facts(notice: str, llm: dict | None = None) -> list[dict]:
+    """从行程单原文里抽速查信息。
+
+    只抽不编:领队电话、航班号这类是原文才有的事实,编一个像模像样的假号码
+    比没有糟得多。原文里没有就返回空列表,由用户自己填或者单独点 AI 起草
+    (那条路走的是常识性信息:时差、货币、插头)。
+    """
+    from constants import LLM_TIMEOUT_LONG
+    raw = _json_call(FACTS_EXTRACT_SYSTEM, build_facts_extract_prompt(notice),
+                     endpoint="travel.facts_extract", timeout=LLM_TIMEOUT_LONG,
+                     temperature=0.1, llm=llm)
+    if not isinstance(raw, dict):
+        return []
+    out = []
+    for it in (raw.get("items") or [])[:12]:
+        if not isinstance(it, dict):
+            continue
+        label, body = _s(it.get("label"), 40), _s(it.get("body"), 800)
+        if label and body:
+            out.append({"label": label, "body": body})
+    return out
 
 
 def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:

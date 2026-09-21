@@ -94,7 +94,12 @@ _DAY = {
 }
 
 
-def _stub_llm(monkeypatch, *, outline=None, day=None, fail_days=(), block=None):
+_PACKING = {"items": [{"grp": "外层", "label": "冲锋衣", "hint": "风大"},
+                      {"grp": "电器", "label": "转换插头", "hint": None}]}
+
+
+def _stub_llm(monkeypatch, *, outline=None, day=None, fail_days=(), block=None,
+              facts=None, packing=None):
     """按 endpoint 分派预设回复;fail_days 里的天返回坏 JSON。"""
     calls = []
 
@@ -109,6 +114,10 @@ def _stub_llm(monkeypatch, *, outline=None, day=None, fail_days=(), block=None):
             if n in fail_days:
                 return {"choices": [{"message": {"content": "抱歉，我写不出来"}}]}
             payload = day if day is not None else _DAY
+        elif endpoint == "travel.facts_extract":
+            payload = facts if facts is not None else {"items": []}
+        elif endpoint == "travel.block.packing":
+            payload = packing if packing is not None else _PACKING
         else:
             payload = block if block is not None else {"text": "一段介绍草稿。"}
         return {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]}
@@ -134,9 +143,12 @@ def test_generate_from_idea_builds_trip_and_fills_days(app, auth_client, monkeyp
     job = _wait(auth_client, r.get_json()["job_id"])
 
     assert job["status"] == "done"
-    assert job["done"] == job["total"] == 4          # 骨架 + 3 天
+    assert job["done"] == job["total"] == 5          # 骨架 + 3 天 + 打包
     assert calls.count("travel.outline") == 1
     assert calls.count("travel.day") == 3
+    # 一句话生成没有原文,不排「抽速查」那一步——领队电话这类只能从原文来
+    assert "travel.facts_extract" not in calls
+    assert {s["key"] for s in job["steps"]} >= {"outline", "day-1", "packing"}
 
     trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()
     assert trip["trip"]["title"] == "逃离地球计划"
@@ -155,6 +167,7 @@ def test_one_bad_day_does_not_sink_the_job_and_retry_only_redoes_it(app, auth_cl
     steps = {s["key"]: s["status"] for s in job["steps"]}
     assert steps["day-1"] == "done" and steps["day-3"] == "done"
     assert steps["day-2"] == "failed"
+    assert steps["packing"] == "done"          # 某天失败不影响后面的步骤
 
     # 重试:只重跑失败那天,已完成的不动
     calls.clear()
@@ -162,7 +175,7 @@ def test_one_bad_day_does_not_sink_the_job_and_retry_only_redoes_it(app, auth_cl
     auth_client.post(f"/api/trips/ai/jobs/{job_id}/retry")
     job2 = _wait(auth_client, job_id)
     assert job2["status"] == "done"
-    assert all(s["status"] == "done" for s in job2["steps"])
+    assert all(s["status"] in ("done", "skipped") for s in job2["steps"])
 
     trip = auth_client.get(f"/api/trips/{job2['trip_id']}").get_json()
     assert trip["days"][1]["detail"]["sched"]
@@ -269,3 +282,82 @@ def test_job_is_scoped_to_its_owner(app, auth_client, client, monkeypatch):
     with client.session_transaction() as s:
         s["user_id"] = uid
     assert client.get(f"/api/trips/ai/jobs/{job_id}").status_code == 404
+
+
+# ---------- 导入时的速查与打包 ----------
+
+_NOTICE = """逃离地球计划 团号 T-2026
+领队 张三 13800000000
+第1天 上海 → 赫尔辛基 HO1607 09:05/14:00
+第2天 赫尔辛基 → 塔林
+第3天 塔林 → 上海
+"""
+
+
+def test_notice_import_extracts_facts_and_fills_packing(app, auth_client, monkeypatch):
+    """行程单里有的(领队 / 航班)从原文抽;打包清单按行程拟。"""
+    calls = _stub_llm(monkeypatch, facts={"items": [
+        {"label": "领队", "body": "张三 13800000000"},
+        {"label": "航班", "body": "HO1607 09:05/14:00"},
+    ]})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"notice": _NOTICE}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    assert job["status"] == "done"
+    assert "travel.facts_extract" in calls
+
+    got = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()
+    labels = [f["label"] for f in got["facts"]]
+    assert labels == ["领队", "航班"]
+    # 里面可能有领队手机号,是第三方个人信息,默认不跟着分享链接出去
+    assert all(f["is_public"] == 0 for f in got["facts"])
+    assert [p["label"] for p in got["packing"]] == ["冲锋衣", "转换插头"]
+
+
+def test_facts_step_skipped_when_notice_has_nothing(app, auth_client, monkeypatch):
+    """原文里一条都没有就老实跳过,不编。"""
+    _stub_llm(monkeypatch, facts={"items": []})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"notice": _NOTICE}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    steps = {s["key"]: s["status"] for s in job["steps"]}
+    assert steps["facts"] == "skipped"
+    assert auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["facts"] == []
+
+
+def test_extras_do_not_overwrite_existing(app, auth_client, monkeypatch):
+    """补全已有行程时,不能把用户整理好的速查和打包盖掉。"""
+    _stub_llm(monkeypatch, facts={"items": [{"label": "AI 的", "body": "x"}]})
+    tid = auth_client.post("/api/trips", json={
+        "title": "手建的", "start_date": "2026-10-01", "end_date": "2026-10-02",
+    }).get_json()["id"]
+    auth_client.post(f"/api/trips/{tid}/facts", json={"label": "我写的", "body": "别动"})
+    auth_client.post(f"/api/trips/{tid}/packing", json={"label": "我的护照"})
+
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/fill",
+                              json={"notice": _NOTICE}).get_json()["job_id"]
+    _wait(auth_client, job_id)
+    got = auth_client.get(f"/api/trips/{tid}").get_json()
+    assert [f["label"] for f in got["facts"]] == ["我写的"]
+    assert [p["label"] for p in got["packing"]] == ["我的护照"]
+
+
+def test_cover_note_is_saved(app, auth_client, monkeypatch):
+    _stub_llm(monkeypatch, outline={**_OUTLINE, "cover_note": "十月的极光季,四晚都在圈内。"})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "北欧"}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    assert trip["cover_note"] == "十月的极光季,四晚都在圈内。"
+
+
+def test_jobs_list_lets_you_come_back(app, auth_client, monkeypatch):
+    """离开页面再回来要能接上:列表给最近的任务。"""
+    _stub_llm(monkeypatch)
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "北欧"}).get_json()["job_id"]
+    _wait(auth_client, job_id)
+    jobs = auth_client.get("/api/trips/ai/jobs").get_json()
+    assert jobs[0]["id"] == job_id
+    assert jobs[0]["status"] == "done"
+    assert jobs[0]["trip_id"]

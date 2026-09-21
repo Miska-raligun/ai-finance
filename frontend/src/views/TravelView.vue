@@ -44,6 +44,7 @@
           <div v-if="trip.code" class="hero-code">{{ trip.code }}</div>
           <h3 class="hero-title">{{ trip.title }}</h3>
           <div v-if="trip.subtitle" class="hero-sub">{{ trip.subtitle }}</div>
+          <p v-if="trip.cover_note" class="hero-note">{{ trip.cover_note }}</p>
           <div class="hero-range">{{ trip.start_date }} — {{ trip.end_date }} · 共 {{ days.length }} 天</div>
         </div>
         <div class="hero-count">
@@ -117,11 +118,25 @@
       </el-drawer>
     </template>
 
+    <!-- 后台还在跑的任务:从别的页面回来能接上 -->
+    <button
+      v-if="activeJob && !showAi"
+      type="button"
+      class="ai-strip"
+      @click="resumeAi"
+    >
+      <span class="ai-strip-dot"></span>
+      <span class="ai-strip-t">AI 正在生成行程</span>
+      <span class="ai-strip-n">{{ activeJob.done }} / {{ activeJob.total || '…' }}</span>
+      <span class="ai-strip-go">查看 ›</span>
+    </button>
+
     <TripAiDialog
       :open="showAi"
       :accents="ACCENT_LIST"
       :trip-id="aiTripId"
-      @close="showAi = false"
+      :job-id="aiJobId"
+      @close="onAiClose"
       @created="onAiDone"
     />
 
@@ -237,15 +252,50 @@ const TABS = [
 const tab = ref('days')
 const showAi = ref(false)
 const aiTripId = ref(0)
+const aiJobId = ref(0)
+const activeJob = ref(null)
+let jobTimer = null
+
 function openAi(tripId) {
   aiTripId.value = tripId || 0
+  aiJobId.value = 0
   showAi.value = true
+}
+function resumeAi() {
+  aiTripId.value = 0
+  aiJobId.value = activeJob.value.id
+  showAi.value = true
+}
+function onAiClose() {
+  showAi.value = false
+  watchJobs()            // 关掉弹窗后接着在页面上盯着
 }
 async function onAiDone(tripId) {
   await loadTrips()
   currentTripId.value = tripId
   await loadTrip()
   ElMessage.success('行程已生成，内容都可以直接改')
+}
+
+/** 生成跑在后端,关页面也不会停。回到这一页时接上最近那个没跑完的,
+ *  跑完了就自动把行程刷出来——省得用户守在弹窗前面等。 */
+async function watchJobs() {
+  clearTimeout(jobTimer)
+  try {
+    const res = await api.get('/api/trips/ai/jobs')
+    const job = (res.data || [])[0]
+    const running = job && ['pending', 'running'].includes(job.status)
+    const wasRunning = !!activeJob.value
+    activeJob.value = running ? job : null
+    if (running) {
+      jobTimer = setTimeout(watchJobs, 3000)
+    } else if (wasRunning && job?.trip_id) {
+      await loadTrips()
+      currentTripId.value = job.trip_id
+      await loadTrip()
+      ElMessage.success('AI 生成完了，内容都可以直接改')
+    }
+  } catch { /* 静默:这只是个锦上添花的提示 */ }
 }
 
 const showShare = ref(false)
@@ -396,7 +446,11 @@ async function copyShare() {
   }
 }
 
-onMounted(loadTrips)
+onMounted(async () => {
+  await loadTrips()
+  watchJobs()
+})
+onBeforeUnmount(() => clearTimeout(jobTimer))
 </script>
 
 <style scoped>
@@ -420,6 +474,11 @@ onMounted(loadTrips)
 }
 .hero-title { margin: 2px 0 0; font-size: 20px; font-weight: 800; color: var(--trip-accent-ink); }
 .hero-sub { font-size: 13px; color: var(--trip-accent-ink); opacity: .8; margin-top: 2px; }
+.hero-note {
+  margin: 8px 0 0; padding-left: 9px; max-width: 46ch;
+  border-left: 3px solid var(--trip-accent); font-size: 12.5px; line-height: 1.65;
+  color: var(--trip-accent-ink); opacity: .85;
+}
 .hero-range { font-size: 12px; color: var(--trip-accent-ink); opacity: .7; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .hero-count { text-align: center; flex-shrink: 0; }
 .hero-count b { display: block; font-size: 22px; font-weight: 900; color: var(--trip-accent); font-variant-numeric: tabular-nums; }
@@ -457,6 +516,22 @@ onMounted(loadTrips)
   box-shadow: 0 4px 0 0 var(--shadow-anchor-light);
   padding: 16px;
 }
+
+.ai-strip {
+  width: 100%; appearance: none; cursor: pointer; font: inherit; text-align: left;
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 14px; padding: 9px 14px; border-radius: 999px;
+  border: 1px solid var(--color-primary); background: var(--color-primary-light);
+  color: var(--color-text-strong);
+}
+.ai-strip-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--color-primary);
+  animation: ai-pulse 1.1s ease-in-out infinite;
+}
+@keyframes ai-pulse { 50% { opacity: .25; } }
+.ai-strip-t { font-size: 13px; font-weight: 700; }
+.ai-strip-n { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.ai-strip-go { margin-left: auto; font-size: 12px; color: var(--color-primary); font-weight: 700; }
 
 .share-note { font-size: 13px; line-height: 1.7; color: var(--color-text); margin: 0 0 12px; }
 .share-box { display: flex; flex-direction: column; gap: 10px; }

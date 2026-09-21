@@ -20,6 +20,7 @@ OUTLINE_SYSTEM = (
     + _JSON_RULE + "\n"
     "输出结构:\n"
     '{"title":"行程名","subtitle":"一句副标题或 null","code":"团号或 null",'
+    '"cover_note":"一两句这趟的看点或 null",'
     '"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD",'
     '"days":[{"day_no":1,"date":"YYYY-MM-DD","route":"上海 → 赫尔辛基",'
     '"transport":"HO1607 PVG–HEL 09:05/14:00 或 null","meal":"早 / 午 或 null"}]}\n'
@@ -28,7 +29,8 @@ OUTLINE_SYSTEM = (
     "- transport 写航班号 / 车程 / 船班这类一句话说明\n"
     "- meal 只写当天含的餐,如「早 / 午」\n"
     "- days 必须覆盖 start_date 到 end_date 的每一天,day_no 从 1 连续不跳号\n"
-    "- 日期一律 YYYY-MM-DD"
+    "- 日期一律 YYYY-MM-DD\n"
+    "- cover_note 是打开行程时最上面那句话,写这趟最值得期待的是什么,不超过 40 字"
 )
 
 
@@ -91,6 +93,29 @@ def build_day_prompt(trip: dict, day: dict, raw: str | None) -> str:
     if raw:
         return head + "\n这一天在原始行程单里的相关段落:\n```\n" + raw[:4000] + "\n```\n请据此展开。"
     return head + "\n没有原文,请按这条主线安排一天合理的内容。"
+
+
+# ---------- 2.5 从行程单里抽速查 ----------
+
+FACTS_EXTRACT_SYSTEM = (
+    "你从旅行社行程单里**抽取**速查信息,注意是抽取,不是创作。\n"
+    + _JSON_RULE + "\n"
+    '输出结构:{"items":[{"label":"标题","body":"正文,可多行"}]}\n'
+    "规则:\n"
+    "- **只抽原文里明确写了的**。领队姓名电话、集合时间地点、航班号与起降时间、\n"
+    "  团号、使馆电话、退税节点、硬性规定——原文有就抽,原文没有就不要这一条。\n"
+    "- 一个字都不许编。宁可只返回一条,也不要靠常识补全一个像模像样的电话或航班号。\n"
+    "- 原文里一条都没有就返回 {\"items\":[]}。\n"
+    "- body 写纯文本,多行用换行分隔,不要 HTML 和 markdown 表格。\n"
+    "- 同类信息合并成一条,比如四个航班段合成一条「航班」。"
+)
+
+
+def build_facts_extract_prompt(notice: str) -> str:
+    return (
+        "从下面这份行程单里抽出速查信息。再强调一次:原文没写的一条都不要出现。\n\n"
+        f"```\n{notice[:12000]}\n```"
+    )
 
 
 # ---------- 3. 单块重写 ----------

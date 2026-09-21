@@ -86,6 +86,9 @@
 
     <!-- 进度 -->
     <template v-else>
+      <p class="ai-hint ai-bg">
+        生成在后台跑,关掉这个框、去别的页面都不会停。回到旅行计划就能接着看。
+      </p>
       <div class="ai-prog">
         <div class="ai-prog-bar">
           <div class="ai-prog-fill" :style="{ width: pct + '%' }"></div>
@@ -141,6 +144,8 @@ const props = defineProps({
   accents: { type: Array, default: () => [] },
   // 给已有行程补全空白天时传进来;不传就是新建一趟
   tripId: { type: Number, default: 0 },
+  // 接上一个已经在跑的任务(从别的页面回来时)
+  jobId: { type: Number, default: 0 },
 })
 const emit = defineEmits(['close', 'created'])
 
@@ -175,7 +180,14 @@ const canRetry = computed(() =>
   job.value && ['failed', 'cancelled'].includes(job.value.status) ||
   (job.value?.status === 'done' && job.value.steps.some(s => s.status === 'failed')))
 
-watch(() => props.open, (v) => { if (!v) stopPoll() })
+watch(() => props.open, (v) => {
+  if (!v) { stopPoll(); return }
+  // 带着 jobId 打开 = 从别的地方回来接进度,不用再填一遍表单
+  if (props.jobId) {
+    job.value = { status: 'running', steps: [], done: 0, total: 0, id: props.jobId }
+    poll(props.jobId)
+  }
+}, { immediate: true })
 
 function stopPoll() {
   if (timer) { clearTimeout(timer); timer = null }
@@ -262,6 +274,7 @@ onBeforeUnmount(stopPoll)
 }
 .ai-tab.on { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
 
+.ai-bg { margin-bottom: 12px; }
 .ai-hint { font-size: 12.5px; line-height: 1.7; color: var(--color-text-muted); margin: 0 0 8px; }
 .ai-count { text-align: right; font-size: 11px; color: var(--color-text-muted); margin-top: 4px; }
 .ai-count.over { color: var(--color-error, #e05a5a); }

@@ -69,6 +69,14 @@ def ai_fill_days(trip_id: int):
     return jsonify({"job_id": job_id}), 201
 
 
+@travel_ai_bp.route("/api/trips/ai/jobs", methods=["GET"])
+@login_required
+def ai_jobs():
+    """最近的任务。离开页面再回来时用它接上进度——生成在后台跑,不会因为
+    关掉这一页就停。"""
+    return jsonify(travel_jobs.list_jobs(g.user_id))
+
+
 @travel_ai_bp.route("/api/trips/ai/jobs/<int:job_id>", methods=["GET"])
 @login_required
 def ai_job_status(job_id: int):

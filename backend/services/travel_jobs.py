@@ -71,6 +71,17 @@ def get_job(user_id: int, job_id: int) -> dict | None:
     return d
 
 
+def list_jobs(user_id: int, *, limit: int = 5) -> list[dict]:
+    """最近几个任务。前端回到页面时靠它接上没跑完的那个——
+    生成本来就在后台线程里跑,不在这一页等着也不会停。"""
+    rows = get_db().execute(
+        "SELECT id, trip_id, kind, status, done, total, error, created_at, updated_at "
+        "FROM trip_ai_jobs WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, max(1, min(limit, 20))),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def cancel_job(user_id: int, job_id: int) -> bool:
     db = get_db()
     cur = db.execute(
@@ -143,6 +154,7 @@ def _run(job_id: int, user_id: int, llm: dict | None) -> None:
                 return
 
         _step_days(conn, job_id, user_id, trip_id, notice, llm)
+        _step_extras(conn, job_id, user_id, trip_id, notice, llm)
 
         if not _is_cancelled(conn, job_id):
             _update(conn, job_id, status="done")
@@ -179,7 +191,8 @@ def _step_outline(conn, job_id: int, user_id: int, payload: dict, llm) -> int | 
         "INSERT INTO trips (user_id, title, subtitle, code, start_date, end_date, "
         "accent, cover_note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (user_id, outline["title"], outline["subtitle"], outline["code"],
-         outline["start_date"], outline["end_date"], accent, None, now, now),
+         outline["start_date"], outline["end_date"], accent,
+         outline.get("cover_note"), now, now),
     )
     trip_id = cur.lastrowid
     for d in outline["days"]:
@@ -197,9 +210,77 @@ def _step_outline(conn, job_id: int, user_id: int, payload: dict, llm) -> int | 
         "label": f"第 {d['day_no']} 天 · {d['route'] or d['date']}",
         "status": "pending", "error": None,
     } for d in outline["days"])
+    if payload.get("notice"):
+        # 领队电话、航班号这类只有行程单原文才有,所以这一步只在导入时排
+        steps.append({"key": "facts", "label": "抽取速查信息", "status": "pending", "error": None})
+    steps.append({"key": "packing", "label": "拟一份打包清单", "status": "pending", "error": None})
     _set_steps(conn, job_id, steps)
     _update(conn, job_id, trip_id=trip_id)
     return trip_id
+
+
+def _step_extras(conn, job_id: int, user_id: int, trip_id: int,
+                 notice: str | None, llm) -> None:
+    """速查 + 打包。两者都只在表为空时写——不覆盖用户已经整理好的内容。"""
+    raw = conn.execute("SELECT steps_json FROM trip_ai_jobs WHERE id = ?", (job_id,)).fetchone()
+    steps = json.loads(raw["steps_json"] or "[]")
+    trip = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if not trip:
+        return
+    trip = dict(trip)
+
+    for step in steps:
+        if step["key"] not in ("facts", "packing") or step["status"] == "done":
+            continue
+        if _is_cancelled(conn, job_id):
+            return
+        step.update(status="running", error=None)
+        _set_steps(conn, job_id, steps)
+        try:
+            if step["key"] == "facts":
+                n = _fill_facts(conn, user_id, trip_id, notice, llm)
+            else:
+                n = _fill_packing(conn, user_id, trip_id, trip, llm)
+            step.update(status="done" if n else "skipped")
+        except travel_ai.AIError as e:
+            step.update(status="failed", error=str(e)[:200])
+        _set_steps(conn, job_id, steps)
+
+
+def _fill_facts(conn, user_id: int, trip_id: int, notice: str | None, llm) -> int:
+    if not notice:
+        return 0
+    if conn.execute("SELECT COUNT(*) FROM trip_facts WHERE trip_id = ?",
+                    (trip_id,)).fetchone()[0]:
+        return 0
+    items = travel_ai.extract_facts(notice, llm=llm)
+    now = _now()
+    for i, it in enumerate(items):
+        # is_public 一律 0:里面可能有领队手机号,是第三方个人信息,
+        # 要不要跟着分享链接出去由本人逐条决定
+        conn.execute(
+            "INSERT INTO trip_facts (trip_id, user_id, label, body, is_public, sort_order, "
+            "created_at, updated_at) VALUES (?,?,?,?,0,?,?,?)",
+            (trip_id, user_id, it["label"], it["body"], i, now, now),
+        )
+    conn.commit()
+    return len(items)
+
+
+def _fill_packing(conn, user_id: int, trip_id: int, trip: dict, llm) -> int:
+    if conn.execute("SELECT COUNT(*) FROM trip_pack_items WHERE trip_id = ?",
+                    (trip_id,)).fetchone()[0]:
+        return 0
+    got = travel_ai.gen_block("packing", {"trip": trip}, llm=llm)
+    items = got.get("items") or []
+    for i, it in enumerate(items):
+        conn.execute(
+            "INSERT INTO trip_pack_items (trip_id, user_id, grp, label, hint, checked, "
+            "sort_order) VALUES (?,?,?,?,?,0,?)",
+            (trip_id, user_id, it.get("grp"), it["label"], it.get("hint"), i),
+        )
+    conn.commit()
+    return len(items)
 
 
 def _step_days(conn, job_id: int, user_id: int, trip_id: int,
