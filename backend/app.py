@@ -164,4 +164,11 @@ apply_endpoint_limits(app, {
 
 if __name__ == "__main__":
     from waitress import serve
-    serve(app, host="0.0.0.0", port=5000)
+    from constants import LLM_TIMEOUT_LONG
+
+    # waitress 默认 channel_timeout=120s:请求拖过两分钟,它自己就把连接掐了,
+    # 哪怕后端还在等 LLM。LLM_TIMEOUT_LONG 调到 300 时这条线必须跟着抬,
+    # 否则表现是"点了没反应",而日志里什么错都看不到。
+    # 留 30s 余量给收尾;这个值同时也是空闲连接的回收时间,个人用量无所谓。
+    serve(app, host="0.0.0.0", port=5000,
+          channel_timeout=max(120, LLM_TIMEOUT_LONG + 30))

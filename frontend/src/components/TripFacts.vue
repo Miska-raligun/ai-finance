@@ -22,9 +22,11 @@
     </section>
 
     <div v-if="!readonly" class="fx-ai">
-      <button type="button" class="fx-ai-b" :disabled="genning" @click="propose">
-        {{ genning ? '生成中…' : '✨ 让 AI 补几条(时差 / 货币 / 插头…)' }}
+      <button type="button" class="fx-ai-b" :disabled="ai.state.running" @click="propose">
+        <span v-if="ai.state.running" class="fx-spin" aria-hidden="true"></span>
+        {{ ai.state.running ? `生成中… ${ai.elapsed.value}s` : '✨ 让 AI 补几条(时差 / 货币 / 插头…)' }}
       </button>
+      <span v-if="ai.state.running" class="fx-ai-err">要十几秒,切到别的页面也不会断</span>
       <span v-if="aiErr" class="fx-ai-err">{{ aiErr }}</span>
     </div>
 
@@ -69,7 +71,8 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiBlocks'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -83,27 +86,31 @@ const emit = defineEmits(['changed'])
 const saving = ref(false)
 const draft = reactive({ label: '', body: '', is_public: false })
 
-// AI 建议:先摆出来让人挑,挑中的才入库
-const genning = ref(false)
+// AI 建议:先摆出来让人挑,挑中的才入库。
+// 在途状态放模块级 store,切走再回来还能接上(见 utils/aiBlocks.js)
 const adding = ref(false)
-const aiErr = ref('')
 const proposed = ref([])
 const picked = ref(new Set())
+const localErr = ref('')
+const aiKey = `facts:${props.tripId}`
+const ai = useAiBlock(aiKey)
+const aiErr = computed(() => ai.state.error || localErr.value)
+
+function absorb() {
+  const data = ai.state.result
+  if (!data) return
+  const have = new Set(props.facts.map(f => f.label))
+  proposed.value = (data.items || []).filter(x => !have.has(x.label))
+  picked.value = new Set(proposed.value.map((_, i) => i))
+  localErr.value = proposed.value.length ? '' : 'AI 想到的都已经在速查里了'
+  clearAiBlock(aiKey)
+}
+watch(() => ai.state.result, absorb)
+onMounted(absorb)
 
 async function propose() {
-  genning.value = true
-  aiErr.value = ''
-  try {
-    const res = await api.post(`/api/trips/${props.tripId}/ai/block`, { kind: 'facts' })
-    const have = new Set(props.facts.map(f => f.label))
-    proposed.value = (res.data.items || []).filter(x => !have.has(x.label))
-    picked.value = new Set(proposed.value.map((_, i) => i))
-    if (!proposed.value.length) aiErr.value = 'AI 想到的都已经在速查里了'
-  } catch (e) {
-    aiErr.value = e?.response?.data?.error || 'AI 生成失败'
-  } finally {
-    genning.value = false
-  }
+  localErr.value = ''
+  await runAiBlock(aiKey, `/api/trips/${props.tripId}/ai/block`, { kind: 'facts' })
 }
 
 function togglePick(i) {
@@ -128,7 +135,7 @@ async function acceptPicked() {
     picked.value = new Set()
     emit('changed')
   } catch (e) {
-    aiErr.value = e?.response?.data?.error || '加入失败'
+    localErr.value = e?.response?.data?.error || '加入失败'
   } finally {
     adding.value = false
   }
@@ -195,6 +202,13 @@ async function remove(f) {
 .fx-ai-b:disabled { opacity: .55; cursor: default; }
 .fx-ai-b.primary { background: var(--trip-accent, var(--color-primary)); color: #fff; font-weight: 700; }
 .fx-ai-err { font-size: 12px; color: var(--color-text-muted); }
+.fx-spin {
+  display: inline-block; width: 10px; height: 10px; margin-right: 5px;
+  vertical-align: -1px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: fx-rot .7s linear infinite;
+}
+@keyframes fx-rot { to { transform: rotate(360deg); } }
 .fx-prop {
   border: 1px dashed var(--trip-accent, var(--color-primary));
   border-radius: 12px; padding: 10px 12px; margin-top: 10px;

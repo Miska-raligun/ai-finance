@@ -91,9 +91,12 @@
                 <button
                   type="button"
                   class="spot-b spot-ai"
-                  :disabled="genning || saving"
+                  :disabled="descAi.running || saving"
                   @click="genDesc"
-                >{{ genning ? '生成中…' : '✨ 让 AI 写' }}</button>
+                >
+                  <span v-if="descAi.running" class="spot-spin" aria-hidden="true"></span>
+                  {{ descAi.running ? `生成中… ${descSecs}s` : '✨ 让 AI 写' }}
+                </button>
                 <span class="spot-gap"></span>
                 <button type="button" class="spot-b" @click="editing = false">取消</button>
                 <button type="button" class="spot-b primary" :disabled="saving" @click="saveDesc">
@@ -108,13 +111,24 @@
                 <button type="button" class="spot-edit-b" @click="startEdit">
                   ✎ {{ detail.desc ? '改介绍' : '写介绍' }}
                 </button>
-                <button type="button" class="spot-edit-b" :disabled="genning" @click="genDesc(true)">
-                  {{ genning ? '生成中…' : '✨ 让 AI 写' }}
+                <button
+                  type="button"
+                  class="spot-edit-b"
+                  :disabled="descAi.running"
+                  @click="genDesc"
+                >
+                  <span v-if="descAi.running" class="spot-spin" aria-hidden="true"></span>
+                  {{ descAi.running ? `生成中… ${descSecs}s` : '✨ 让 AI 写' }}
                 </button>
               </div>
             </template>
 
-            <p v-if="uploadErr" class="spot-err">{{ uploadErr }}</p>
+            <p v-if="uploadErr || descAi.error" class="spot-err">
+              {{ uploadErr || descAi.error }}
+            </p>
+            <p v-else-if="descAi.running" class="spot-dim-note">
+              AI 正在写,要十几秒。这期间关掉弹窗也不影响,写完回来还在。
+            </p>
 
             <div v-if="canEdit || detail.photos.length" class="spot-ps">
               <TripPhotoStrip
@@ -167,6 +181,7 @@ import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
 import { mapUrl } from '@/utils/maplink'
 import { wgs2gcj, gcj2wgs } from '@/utils/gcj02'
 import { photoList, photoUrl } from '@/utils/tripPhotos'
+import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiBlocks'
 
 const props = defineProps({
   // [{ day_no, date, route, detail:{ stops:[{t,lat,lng,air,sea,desc,photo}], spots, todo, cam, warn } }]
@@ -474,6 +489,7 @@ function openStop(p) {
   editing.value = false
   uploadErr.value = ''
   detail.value = describe(p)
+  absorbDesc()          // 这个点之前发起过生成、结果已经回来了的话,直接接上
 }
 
 /** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。 */
@@ -497,7 +513,6 @@ const siblings = computed(() => {
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
-const genning = ref(false)
 const uploadErr = ref('')
 
 function startEdit() {
@@ -506,25 +521,32 @@ function startEdit() {
 }
 
 /** AI 写的是**草稿**:填进编辑框,存不存由用户决定。
- *  直接写库会盖掉人家自己写的那段,不能这么干。 */
+ *  直接写库会盖掉人家自己写的那段,不能这么干。
+ *
+ *  在途状态放模块级 store:弹窗关了、切到别的天再回来,进度和结果都还在。 */
+const descKey = computed(() =>
+  `spot_desc:${props.tripId}:${detail.value?.dayNo || 0}:${detail.value?.si ?? 0}`)
+const descAi = computed(() => aiState(descKey.value))
+const descSecs = computed(() => aiElapsed(descKey.value))
+
+function absorbDesc() {
+  const data = descAi.value.result
+  if (!data?.text) return
+  draft.value = data.text
+  editing.value = true
+  clearAiBlock(descKey.value)
+}
+watch(() => descAi.value.result, absorbDesc)
+
 async function genDesc() {
   if (!canEdit.value || !detail.value) return
-  genning.value = true
   uploadErr.value = ''
   if (!editing.value) { draft.value = detail.value.desc || ''; editing.value = true }
-  try {
-    const { default: api } = await import('@/api')
-    const res = await api.post(`/api/trips/${props.tripId}/ai/block`, {
-      kind: 'spot_desc',
-      spot: detail.value.t,
-      day_no: detail.value.dayNo,
-    })
-    draft.value = res.data.text || draft.value
-  } catch (e) {
-    uploadErr.value = e?.response?.data?.error || 'AI 生成失败'
-  } finally {
-    genning.value = false
-  }
+  await runAiBlock(descKey.value, `/api/trips/${props.tripId}/ai/block`, {
+    kind: 'spot_desc',
+    spot: detail.value.t,
+    day_no: detail.value.dayNo,
+  })
 }
 
 /** 把改动写回当天的 detail 并 PATCH。
@@ -698,6 +720,7 @@ async function saveDesc() {
 .spot-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
 .spot-desc { margin: 12px 0 0; font-size: 13.5px; line-height: 1.75; color: var(--color-text); white-space: pre-wrap; }
 .spot-desc-none { color: var(--color-text-muted); }
+.spot-dim-note { margin: 8px 0 0; font-size: 11.5px; color: var(--color-text-muted); }
 .spot-edit {
   width: 100%; margin-top: 12px; box-sizing: border-box;
   border: 1px solid var(--color-border-light, #e3ddd0); border-radius: 10px;
@@ -724,6 +747,13 @@ async function saveDesc() {
 .spot-gap { flex: 1; }
 .spot-ai { color: var(--trip-accent, var(--color-primary)); border-color: currentColor; }
 .spot-err { margin: 8px 0 0; font-size: 12px; color: var(--color-error, #e05a5a); }
+.spot-spin {
+  display: inline-block; width: 9px; height: 9px; margin-right: 4px;
+  vertical-align: -1px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: spot-rot .7s linear infinite;
+}
+@keyframes spot-rot { to { transform: rotate(360deg); } }
 .spot-ps { margin-top: 16px; }
 .spot-tips { margin-top: 14px; }
 .spot-tips h4 {

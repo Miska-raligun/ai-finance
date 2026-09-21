@@ -364,9 +364,12 @@ def extract_facts(notice: str, llm: dict | None = None) -> list[dict]:
 def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:
     if kind not in BLOCK_KINDS:
         raise AIError(f"不支持的生成类型:{kind}")
+    # 和其它生成一样用 LLM_TIMEOUT_LONG。原来写死 60 秒:打包清单和速查要吐
+    # 十几二十条 JSON,共享端点高峰期根本跑不完,表现就是点了没反应。
+    from constants import LLM_TIMEOUT_LONG
     system, user = build_block_prompt(kind, ctx)
     raw = _json_call(system, user, endpoint=f"travel.block.{kind}",
-                     timeout=60, temperature=0.6, llm=llm)
+                     timeout=LLM_TIMEOUT_LONG, temperature=0.6, llm=llm)
     return clean_block(kind, raw)
 
 

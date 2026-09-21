@@ -16,9 +16,12 @@
           v-if="!editing && aiKind"
           type="button"
           class="le-b le-ai"
-          :disabled="genning"
+          :disabled="ai.state.running"
           @click="generate(true)"
-        >{{ genning ? '生成中…' : '✨ AI 起草' }}</button>
+        >
+          <span v-if="ai.state.running" class="le-spin" aria-hidden="true"></span>
+          {{ ai.state.running ? `${ai.elapsed.value}s` : '✨ AI 起草' }}
+        </button>
       </div>
     </div>
 
@@ -39,9 +42,12 @@
           v-if="aiKind"
           type="button"
           class="le-b le-ai"
-          :disabled="genning"
+          :disabled="ai.state.running"
           @click="generate(false)"
-        >{{ genning ? '生成中…' : '✨ 让 AI 补几条' }}</button>
+        >
+          <span v-if="ai.state.running" class="le-spin" aria-hidden="true"></span>
+          {{ ai.state.running ? `生成中… ${ai.elapsed.value}s` : '✨ 让 AI 补几条' }}
+        </button>
         <span class="le-spacer"></span>
         <button type="button" class="le-b" @click="editing = false">取消</button>
         <button type="button" class="le-b primary" :disabled="saving" @click="save">
@@ -54,8 +60,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/api'
+import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiBlocks'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -71,16 +78,34 @@ const emit = defineEmits(['save'])
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
-const genning = ref(false)
-const err = ref('')
+const localErr = ref('')
+// 在途状态放模块级 store:切走再回来、弹窗关了再开都还在
+const aiKey = computed(() => `${props.aiKind}:${props.tripId}:${props.dayNo}`)
+const ai = useAiBlock(aiKey.value)
+const err = computed(() => ai.state.error || localErr.value)
 
 function start() {
   draft.value = props.items.join('\n')
-  err.value = ''
+  localErr.value = ''
   editing.value = true
 }
 
+/** store 里有结果就并进草稿(去重),并打开编辑框等人改。 */
+function absorb() {
+  const data = ai.state.result
+  if (!data) return
+  const lines = (editing.value ? draft.value : props.items.join('\n'))
+    .split('\n').map(x => x.trim()).filter(Boolean)
+  for (const x of (data.items || [])) if (!lines.includes(x)) lines.push(x)
+  draft.value = lines.join('\n')
+  editing.value = true
+  clearAiBlock(aiKey.value)
+}
+watch(() => ai.state.result, absorb)
+onMounted(absorb)
+
 async function save() {
+  localErr.value = ''
   saving.value = true
   try {
     const next = draft.value.split('\n').map(x => x.trim()).filter(Boolean)
@@ -91,28 +116,18 @@ async function save() {
   }
 }
 
-/** AI 出的是草稿,填进编辑框等人改;直接开编辑态(open=true)时也一样。 */
+/** AI 出的是草稿,填进编辑框等人改。结果由 absorb() 接手。 */
 async function generate(openEditor) {
   if (!props.aiKind || !props.tripId) return
-  genning.value = true
-  err.value = ''
-  try {
-    const res = await api.post(`/api/trips/${props.tripId}/ai/block`, {
-      kind: props.aiKind,
-      day_no: props.dayNo || undefined,
-    })
-    const got = res.data.items || []
-    if (openEditor) draft.value = props.items.join('\n')
-    const lines = draft.value.split('\n').map(x => x.trim()).filter(Boolean)
-    for (const x of got) if (!lines.includes(x)) lines.push(x)
-    draft.value = lines.join('\n')
-    editing.value = true
-  } catch (e) {
-    err.value = e?.response?.data?.error || 'AI 生成失败'
-    if (openEditor) { draft.value = props.items.join('\n'); editing.value = true }
-  } finally {
-    genning.value = false
+  localErr.value = ''
+  if (openEditor && !editing.value) {
+    draft.value = props.items.join('\n')
+    editing.value = true        // 先把编辑框开出来,好让人看见在跑
   }
+  await runAiBlock(aiKey.value, `/api/trips/${props.tripId}/ai/block`, {
+    kind: props.aiKind,
+    day_no: props.dayNo || undefined,
+  })
 }
 </script>
 
@@ -146,4 +161,11 @@ async function generate(openEditor) {
 .le-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .le-spacer { flex: 1; }
 .le-err { margin: 6px 0 0; font-size: 12px; color: var(--color-error, #e05a5a); }
+.le-spin {
+  display: inline-block; width: 9px; height: 9px; margin-right: 4px;
+  vertical-align: -1px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: le-rot .7s linear infinite;
+}
+@keyframes le-rot { to { transform: rotate(360deg); } }
 </style>
