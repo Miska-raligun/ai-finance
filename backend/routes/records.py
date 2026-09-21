@@ -5,6 +5,7 @@ from db import get_db, cleanup_empty_category
 from auth import login_required
 from cache import invalidate_user
 from services.llm_config import current_llm
+from services.trip_spending import validate_trip_id
 
 records_bp = Blueprint('records', __name__)
 
@@ -59,6 +60,17 @@ def get_records():
             r"(note LIKE ? ESCAPE '\' OR category LIKE ? ESCAPE '\')"
         )
         outer_params.extend([f"%{esc}%", f"%{esc}%"])
+    # 按行程筛:trip_id=<id> 只看那趟的账,trip_id=none 只看还没归属的
+    trip_arg = (request.args.get("trip_id") or "").strip()
+    if trip_arg:
+        if trip_arg.lower() in ("none", "null", "0"):
+            outer_conditions.append("trip_id IS NULL")
+        else:
+            try:
+                outer_conditions.append("trip_id = ?")
+                outer_params.append(int(trip_arg))
+            except ValueError:
+                outer_conditions.pop()
     outer_where = ("WHERE " + " AND ".join(outer_conditions)) if outer_conditions else ""
 
     # 一次拿到筛选结果集的条数 + 金额合计(合计跟筛选走:搜索/日期/分类怎么筛,
@@ -66,7 +78,7 @@ def get_records():
     total_row = db.execute(
         f"""
         WITH base AS (
-            SELECT id, category, note, date, amount FROM records
+            SELECT id, category, note, date, amount, trip_id FROM records
             WHERE user_id = ? AND deleted_at IS NULL
         )
         SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM base {outer_where}
@@ -84,7 +96,7 @@ def get_records():
         f"""
         WITH base AS (
             SELECT r.id, r.category, r.amount, r.note, r.date,
-                   r.anomaly_score, r.anomaly_flag,
+                   r.anomaly_score, r.anomaly_flag, r.trip_id,
                    strftime('%Y-%m', r.date) as month,
                    SUM(r.amount) OVER (
                        PARTITION BY r.user_id, r.category, strftime('%Y-%m', r.date)
@@ -95,7 +107,7 @@ def get_records():
         ),
         enriched AS (
             SELECT base.id, base.category, base.amount, base.note, base.date, base.month,
-                   base.anomaly_score, base.anomaly_flag,
+                   base.anomaly_score, base.anomaly_flag, base.trip_id,
                    CASE WHEN b.amount IS NOT NULL
                         THEN ROUND(b.amount - base.cumulative_spend, 2)
                         ELSE NULL END as left_budget
@@ -213,9 +225,20 @@ def update_record(record_id):
         "SELECT category FROM records WHERE id = ? AND user_id = ?",
         (record_id, g.user_id),
     ).fetchone()
+    # 只有请求里明确带了 trip_id 才动归属——普通的改金额/改备注
+    # 不应该把这条记录从它所属的行程里踢出去。
+    sets = "category = ?, amount = ?, note = ?, date = ?"
+    args = [category, amount, note, date]
+    if "trip_id" in data:
+        try:
+            tid = validate_trip_id(g.user_id, data.get("trip_id"))
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        sets += ", trip_id = ?"
+        args.append(tid)
     db.execute(
-        "UPDATE records SET category = ?, amount = ?, note = ?, date = ? WHERE id = ? AND user_id = ?",
-        (category, amount, note, date, record_id, g.user_id),
+        f"UPDATE records SET {sets} WHERE id = ? AND user_id = ?",
+        (*args, record_id, g.user_id),
     )
     db.commit()
     if old_row and old_row["category"] != category:

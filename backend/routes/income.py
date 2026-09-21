@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify, g
 from db import get_db, cleanup_empty_category
 from auth import login_required
 from cache import invalidate_user
+from services.trip_spending import validate_trip_id
 
 income_bp = Blueprint('income', __name__)
 
@@ -118,9 +119,20 @@ def update_income(income_id):
         "SELECT category FROM income WHERE id = ? AND user_id = ?",
         (income_id, g.user_id),
     ).fetchone()
+    # 只有请求里明确带了 trip_id 才动归属——普通的改金额/改备注
+    # 不应该把这条记录从它所属的行程里踢出去。
+    sets = "category = ?, amount = ?, note = ?, date = ?"
+    args = [category, amount, note, date]
+    if "trip_id" in data:
+        try:
+            tid = validate_trip_id(g.user_id, data.get("trip_id"))
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        sets += ", trip_id = ?"
+        args.append(tid)
     db.execute(
-        "UPDATE income SET category = ?, amount = ?, note = ?, date = ? WHERE id = ? AND user_id = ?",
-        (category, amount, note, date, income_id, g.user_id),
+        f"UPDATE income SET {sets} WHERE id = ? AND user_id = ?",
+        (*args, income_id, g.user_id),
     )
     db.commit()
     if old_row and old_row["category"] != category:

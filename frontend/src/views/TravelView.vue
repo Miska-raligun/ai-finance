@@ -112,6 +112,11 @@
         <TripFacts :trip-id="trip.id" :facts="facts" @changed="loadTrip" />
       </div>
 
+      <!-- 花费:和账本打通的那一头 -->
+      <div v-else-if="tab === 'cost'" class="trip-panel animal-pop" :style="{ '--i': 1 }">
+        <TripSpending :trip="trip" />
+      </div>
+
       <!-- 行程:宽屏 日历 + 右侧详情(master-detail);窄屏 点开抽屉 -->
       <div v-else class="trip-body">
         <div class="trip-cal animal-pop" :style="{ '--i': 1 }">
@@ -267,6 +272,7 @@ import TripCalendar from '@/components/TripCalendar.vue'
 import TripMap from '@/components/TripMap.vue'
 import TripPacking from '@/components/TripPacking.vue'
 import TripFacts from '@/components/TripFacts.vue'
+import TripSpending from '@/components/TripSpending.vue'
 import TripDayDetail from '@/components/TripDayDetail.vue'
 import TripAiDialog from '@/components/TripAiDialog.vue'
 import { resumeAiBlocks } from '@/utils/aiBlocks'
@@ -298,6 +304,7 @@ const TABS = [
   { key: 'days', label: '行程' },
   { key: 'pack', label: '打包' },
   { key: 'facts', label: '速查' },
+  { key: 'cost', label: '花费' },
 ]
 const tab = ref('days')
 const showAi = ref(false)

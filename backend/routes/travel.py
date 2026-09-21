@@ -346,6 +346,46 @@ def get_trip_photo(trip_id: int, sha: str):
     return send_file(path, mimetype=info["mime"])
 
 
+# ---------- 行程花费:和账本打通 ----------
+
+@travel_bp.route("/api/trips/<int:trip_id>/spending", methods=["GET"])
+@login_required
+def trip_spending(trip_id: int):
+    """这趟花了多少。归属靠 records/income 上的 trip_id,不按日期现算。"""
+    from services.trip_spending import summary
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    return jsonify(summary(g.user_id, trip_id))
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/spending/attach", methods=["POST"])
+@login_required
+def trip_spending_attach(trip_id: int):
+    """把一段日期内、还没归属的账归到这趟。默认就是这趟的起止日期。"""
+    from services.trip_spending import attach_range
+    trip = _own_trip(trip_id)
+    if not trip:
+        return jsonify({"error": "行程不存在"}), 404
+    data = request.get_json() or {}
+    start = (data.get("start") or trip["start_date"]).strip()
+    end = (data.get("end") or trip["end_date"]).strip()
+    if not _valid_date(start) or not _valid_date(end):
+        return jsonify({"error": "日期格式应为 YYYY-MM-DD"}), 400
+    if _parse_date(end) < _parse_date(start):
+        return jsonify({"error": "结束日期不能早于开始日期"}), 400
+    return jsonify(attach_range(g.user_id, trip_id, start, end))
+
+
+@travel_bp.route("/api/trips/<int:trip_id>/spending/attach", methods=["DELETE"])
+@login_required
+def trip_spending_detach(trip_id: int):
+    """把这趟的账全部解除归属(账目本身不动)。"""
+    from services.trip_spending import detach_all
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    return jsonify(detach_all(g.user_id, trip_id))
+
+
 # ---------- 离线导出 ----------
 
 @travel_bp.route("/api/trips/<int:trip_id>/export.html", methods=["GET"])

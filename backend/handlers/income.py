@@ -39,9 +39,13 @@ def add_income(user_id: int, params: dict[str, Any]) -> str:
             (user_id, category, CATEGORY_INCOME)
         )
 
+    # 和支出一样:日期落在某趟行程里就自动归过去(退税、退款是旅行里
+    # 真实存在的回流,只算支出会把这趟成本算高)
+    from services.trip_spending import auto_trip_for
     db.execute(
-        "INSERT INTO income (user_id, category, amount, note, date) VALUES (?, ?, ?, ?, ?)",
-        (user_id, category, amount, note, date)
+        "INSERT INTO income (user_id, category, amount, note, date, trip_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date, auto_trip_for(user_id, date))
     )
     db.commit()
     invalidate_user(user_id)

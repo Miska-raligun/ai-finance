@@ -41,10 +41,15 @@ def add_record(user_id: int, params: dict[str, Any]) -> str:
     from services.anomaly import detect as _detect_anomaly
     anomaly = _detect_anomaly(user_id, category, amount, date)
 
+    # 这一天正好在某趟行程里就自动归过去——旅行当中记的账十有八九就是这趟的。
+    # 只有恰好一趟覆盖时才归(见 auto_trip_for),猜错比不猜糟;用户随时能改。
+    from services.trip_spending import auto_trip_for
+    trip_id = auto_trip_for(user_id, date)
+
     db.execute(
-        "INSERT INTO records (user_id, category, amount, note, date, anomaly_score, anomaly_flag) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, category, amount, note, date, anomaly["score"], anomaly["flag"])
+        "INSERT INTO records (user_id, category, amount, note, date, anomaly_score, "
+        "anomaly_flag, trip_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (user_id, category, amount, note, date, anomaly["score"], anomaly["flag"], trip_id)
     )
     db.commit()
     invalidate_user(user_id)
