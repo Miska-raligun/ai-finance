@@ -66,6 +66,20 @@
       </div>
     </section>
 
+    <!-- 照片:到了现场直接拍了传,每个点一个位置 -->
+    <section v-if="stops.length" class="dd-sec">
+      <h4 class="dd-h">照片</h4>
+      <div v-for="(st, si) in stops" :key="si" class="dd-ph">
+        <div class="dd-ph-name">{{ st.t || `地点 ${si + 1}` }}</div>
+        <TripPhotoStrip
+          :photos="photosOf(st)"
+          can-edit
+          :trip-id="tripId"
+          @change="savePhotos(si, $event)"
+        />
+      </div>
+    </section>
+
     <!-- 手记:存库,多端同步(原静态页只存本机) -->
     <section class="dd-sec">
       <h4 class="dd-h">我的手记</h4>
@@ -91,7 +105,9 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import TripMap from '@/components/TripMap.vue'
+import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
 import { mapUrl } from '@/utils/maplink'
+import { photoList } from '@/utils/tripPhotos'
 
 const props = defineProps({
   tripId: { type: Number, required: true },
@@ -117,8 +133,29 @@ const stayMap = computed(() => {
   const s = stay.value
   return s ? mapUrl({ lat: s.lat, lng: s.lng, name: s.h, addr: s.a }) : ''
 })
+const stops = computed(() => detail.value.stops || [])
 const hasStops = computed(() =>
-  (detail.value.stops || []).some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
+  stops.value.some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
+
+function photosOf(st) { return photoList(st) }
+
+/** 照片挂在 detail_json 的停留点上,所以要连着整个 detail 一起 PATCH。
+ *  直接改 props.day 里那个对象——它就是父组件 days 里的同一个,
+ *  改完地图那边的封面图也同步。 */
+async function savePhotos(si, photos) {
+  const st = props.day?.detail?.stops?.[si]
+  if (!st) return
+  const before = { photos: st.photos, photo: st.photo }
+  st.photos = photos
+  delete st.photo                    // 统一到数组,别留两份真相
+  try {
+    await api.patch(`/api/trips/${props.tripId}/days/${props.day.day_no}`,
+                    { detail: props.day.detail })
+  } catch {
+    Object.assign(st, before)        // 失败回滚,不然界面显示的是没存上的状态
+    ElMessage.error('照片保存失败')
+  }
+}
 const tipGroups = computed(() => [
   { key: 'todo', label: '贴士', items: detail.value.todo || [] },
   { key: 'cam', label: '拍摄建议', items: detail.value.cam || [] },
@@ -208,4 +245,6 @@ async function saveJournal() {
 }
 .dd-maplink:hover { background: var(--trip-accent, var(--color-primary)); color: #fff; }
 .dd-journal-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.dd-ph + .dd-ph { margin-top: 12px; }
+.dd-ph-name { font-size: 12.5px; font-weight: 700; color: var(--color-text); margin-bottom: 5px; }
 </style>

@@ -523,9 +523,11 @@ if (typeof window !== 'undefined') {
 
 body {
   margin: 0;
-  font-family: 'Nunito', 'Noto Sans SC', 'Zen Maru Gothic',
-               -apple-system, BlinkMacSystemFont, 'PingFang SC',
-               'Helvetica Neue', sans-serif;
+  /* Nunito 自托管(拉丁 / 数字);中文交给系统字体——自托管 CJK 要几十 MB,
+     而且这几款本来就因为 CSP 从没加载成功过。 */
+  font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+               'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
+               'Noto Sans SC', 'Helvetica Neue', sans-serif;
   font-weight: 500;
   letter-spacing: 0.01em;
   background: var(--color-bg);

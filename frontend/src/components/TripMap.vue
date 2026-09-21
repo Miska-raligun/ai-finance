@@ -59,25 +59,10 @@
         <div class="spot" :style="accentStyle" role="dialog" aria-modal="true">
           <button class="spot-x" aria-label="关闭" @click="detail = null">×</button>
 
-          <div class="spot-photo" :class="{ empty: !detail.photo }">
-            <img v-if="detail.photo" :src="detail.photo" :alt="detail.t" />
+          <div class="spot-photo" :class="{ empty: !detail.cover }">
+            <img v-if="detail.cover" :src="detail.cover" :alt="detail.t" />
             <div v-else class="spot-photo-ph">
               <span>{{ detail.t.slice(0, 1) }}</span>
-            </div>
-            <div v-if="canEdit" class="spot-photo-act">
-              <button type="button" :disabled="saving" @click="fileRef?.click()">
-                {{ detail.photo ? '换一张' : '＋ 加张照片' }}
-              </button>
-              <button v-if="detail.photo" type="button" :disabled="saving" @click="removePhoto">
-                移除
-              </button>
-              <input
-                ref="fileRef"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                hidden
-                @change="onPickPhoto"
-              >
             </div>
           </div>
 
@@ -119,6 +104,17 @@
 
             <p v-if="uploadErr" class="spot-err">{{ uploadErr }}</p>
 
+            <div v-if="canEdit || detail.photos.length" class="spot-ps">
+              <TripPhotoStrip
+                :photos="detail.photos"
+                :can-edit="canEdit"
+                :trip-id="tripId"
+                :share-token="shareToken"
+                label="照片"
+                @change="savePhotos"
+              />
+            </div>
+
             <div v-if="detail.tips.length" class="spot-tips">
               <h4>相关贴士</h4>
               <ul><li v-for="(t, i) in detail.tips" :key="i">{{ t }}</li></ul>
@@ -155,8 +151,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
 import { mapUrl } from '@/utils/maplink'
 import { wgs2gcj } from '@/utils/gcj02'
+import { photoList, photoUrl } from '@/utils/tripPhotos'
 
 const props = defineProps({
   // [{ day_no, date, route, detail:{ stops:[{t,lat,lng,air,sea,desc,photo}], spots, todo, cam, warn } }]
@@ -169,14 +167,6 @@ const props = defineProps({
 const emit = defineEmits(['changed'])
 
 const canEdit = computed(() => !!props.tripId && !props.shareToken)
-
-/** 停留点只存 sha,URL 前缀在私有页和分享页是两套。 */
-function photoUrl(sha) {
-  if (!sha) return ''
-  return props.shareToken
-    ? `/api/public/trips/${encodeURIComponent(props.shareToken)}/photos/${sha}`
-    : (props.tripId ? `/api/trips/${props.tripId}/photos/${sha}` : '')
-}
 
 /* ---------- 底图 ---------- */
 
@@ -229,7 +219,7 @@ const points = computed(() => {
         glat, glng,               // GCJ-02,画在高德底图上用
         air: !!st.air, sea: !!st.sea,
         desc: st.desc || st.note || '',
-        photoSha: st.photo || '',
+        photos: photoList(st),
         dur: durOf[name] || '',
         tips: tipPool.filter(x => typeof x === 'string' && x.includes(name)),
         dayNo: d.day_no,
@@ -402,9 +392,10 @@ function snapshotAccent() {
 
 function describe(p) {
   activeStopId.value = p.id
+  const ctx = { tripId: props.tripId, shareToken: props.shareToken }
   return {
     ...p,
-    photo: photoUrl(p.photoSha),
+    cover: photoUrl(ctx, p.photos[0]),
     mapUrl: mapUrl({ lat: p.lat, lng: p.lng, name: p.t }),
   }
 }
@@ -438,7 +429,6 @@ const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const uploadErr = ref('')
-const fileRef = ref(null)
 
 function startEdit() {
   draft.value = detail.value?.desc || ''
@@ -455,9 +445,21 @@ async function persist(patch) {
   Object.assign(stop, patch)
   const { default: api } = await import('@/api')
   await api.patch(`/api/trips/${props.tripId}/days/${d.day_no}`, { detail: d.detail })
-  detail.value = describe({ ...detail.value, ...patch, photoSha: stop.photo || '' })
+  detail.value = describe({ ...detail.value, ...patch, photos: photoList(stop) })
   emit('changed')
   return true
+}
+
+async function savePhotos(photos) {
+  saving.value = true
+  uploadErr.value = ''
+  try {
+    await persist({ photos, photo: undefined })   // 统一到数组,旧的单张字段清掉
+  } catch (e) {
+    uploadErr.value = e?.response?.data?.error || '保存失败'
+  } finally {
+    saving.value = false
+  }
 }
 
 async function saveDesc() {
@@ -473,45 +475,6 @@ async function saveDesc() {
   }
 }
 
-/** 上传前先在浏览器里缩到 1280px 的 JPEG:原图动辄 5MB,
- *  服务端单请求上限 8MB,而且这张图只是弹窗里的一张配图。 */
-async function shrink(file, max = 1280, quality = 0.82) {
-  const bmp = await createImageBitmap(file)
-  const k = Math.min(1, max / Math.max(bmp.width, bmp.height))
-  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k)
-  const c = document.createElement('canvas')
-  c.width = w; c.height = h
-  c.getContext('2d').drawImage(bmp, 0, 0, w, h)
-  bmp.close?.()
-  return c.toDataURL('image/jpeg', quality)
-}
-
-async function onPickPhoto(e) {
-  const file = e.target.files?.[0]
-  e.target.value = ''
-  if (!file) return
-  saving.value = true
-  uploadErr.value = ''
-  try {
-    const dataUrl = await shrink(file)
-    const { default: api } = await import('@/api')
-    const res = await api.post(`/api/trips/${props.tripId}/photos`, { image: dataUrl })
-    await persist({ photo: res.data.sha256 })
-  } catch (err) {
-    uploadErr.value = err?.response?.data?.error || '上传失败'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function removePhoto() {
-  saving.value = true
-  try {
-    await persist({ photo: '' })
-  } finally {
-    saving.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -660,15 +623,7 @@ async function removePhoto() {
   font: inherit; font-size: 12px; color: var(--trip-accent, var(--color-primary));
 }
 .spot-err { margin: 8px 0 0; font-size: 12px; color: var(--color-error, #e05a5a); }
-.spot-photo-act {
-  position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px;
-}
-.spot-photo-act button {
-  appearance: none; border: 0; cursor: pointer; font: inherit; font-size: 11.5px;
-  background: rgba(255, 255, 255, .86); color: #2A3D45;
-  padding: 3px 10px; border-radius: 999px;
-}
-.spot-photo-act button:disabled { opacity: .55; cursor: default; }
+.spot-ps { margin-top: 16px; }
 .spot-tips { margin-top: 14px; }
 .spot-tips h4 {
   margin: 0 0 4px; font-size: 11px; font-weight: 800; letter-spacing: .08em;

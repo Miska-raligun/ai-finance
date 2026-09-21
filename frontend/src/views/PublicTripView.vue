@@ -57,7 +57,7 @@
       <div class="pub-wrap">
         <!-- 地图:整个分享页的视觉主角,给满宽 -->
         <section v-if="hasAnyStop" class="card map-card">
-          <TripMap :days="days" :share-token="String(route.params.token || '')" title="全程路线" />
+          <TripMap :days="days" :share-token="token" title="全程路线" />
         </section>
 
         <div class="cols" :class="{ solo: !facts.length }">
@@ -114,6 +114,14 @@
                       rel="noopener noreferrer"
                     >📍 地图</a>
                   </div>
+
+                  <TripPhotoStrip
+                    v-if="dayPhotos(d).length"
+                    class="day-ps"
+                    :photos="dayPhotos(d)"
+                    :share-token="token"
+                    label="照片"
+                  />
                 </div>
               </li>
             </ol>
@@ -143,7 +151,9 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import TripMap from '@/components/TripMap.vue'
 import TripFacts from '@/components/TripFacts.vue'
+import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
 import { mapUrl } from '@/utils/maplink'
+import { photoList } from '@/utils/tripPhotos'
 
 const ACCENTS = {
   glacier: { color: '#2B6A80', weak: '#D9E6EB', ink: '#17414f' },
@@ -179,6 +189,17 @@ function coords(d) {
 const hasAnyStop = computed(() => days.value.some(d => coords(d).length))
 const stopCount = computed(() => days.value.reduce((n, d) => n + coords(d).length, 0))
 
+const token = computed(() => String(route.params.token || ''))
+
+/** 一天里所有停留点的照片,合起来在卡片底部铺一条。 */
+function dayPhotos(d) {
+  const out = []
+  for (const st of (d.detail?.stops || [])) {
+    for (const sha of photoList(st)) if (!out.includes(sha)) out.push(sha)
+  }
+  return out
+}
+
 function schedOf(d) { return d.detail?.sched || [] }
 function stayOf(d) {
   const s = d.detail?.stay
@@ -202,7 +223,7 @@ function tipGroups(d) {
 
 /** 没有任何内容的一天:渲染成一行提示,而不是一张空卡片(原来大片留白就是这么来的)。 */
 function isBlank(d) {
-  return !schedOf(d).length && !tipGroups(d).length && !stayOf(d)
+  return !schedOf(d).length && !tipGroups(d).length && !stayOf(d) && !dayPhotos(d).length
 }
 
 function prettyDate(iso) {
@@ -438,6 +459,7 @@ onBeforeUnmount(() => {
 }
 .stay-txt { display: flex; flex-direction: column; min-width: 0; font-size: 13px; }
 .stay-txt span { font-size: 12px; color: var(--color-text-muted); }
+.day-ps { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--color-border-light, #e3ddd0); }
 .maplink {
   flex-shrink: 0; font-size: 12px; font-weight: 700; text-decoration: none;
   color: var(--trip-accent); border: 1px solid var(--trip-accent);

@@ -218,6 +218,11 @@ def update_day(trip_id: int, day_no: int):
     db.execute(f"UPDATE trip_days SET {sets} WHERE id = ?",
                list(updates.values()) + [_now(), row["id"]])
     db.commit()
+
+    if "detail_json" in updates:
+        # 从某个停留点上移掉的照片,顺手收尾——否则文件留着,旧链接还能取到
+        from services.trip_photos import gc_trip_photos
+        gc_trip_photos(trip_id)
     return jsonify({"success": True})
 
 

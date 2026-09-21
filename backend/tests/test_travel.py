@@ -311,3 +311,49 @@ def test_photo_path_traversal_rejected(app, auth_client, tmp_path, monkeypatch):
     anon = app.test_client()
     for bad in ["../../etc/passwd", "a" * 64, "nope", "%2e%2e%2fetc%2fpasswd"]:
         assert anon.get(f"/api/public/trips/{token}/photos/{bad}").status_code in (404, 308)
+
+
+def test_photo_gc_on_detail_update(app, auth_client, tmp_path, monkeypatch):
+    """从停留点上移掉照片后,文件和记录都该被收走,旧链接立刻失效。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
+    token = _share_token(auth_client, tid)
+
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "detail": {"stops": [{"t": "岩石教堂", "lat": 60.17, "lng": 24.92, "photos": [sha]}]},
+    })
+    anon = app.test_client()
+    assert anon.get(f"/api/public/trips/{token}/photos/{sha}").status_code == 200
+
+    # 把照片从停留点上去掉
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "detail": {"stops": [{"t": "岩石教堂", "lat": 60.17, "lng": 24.92, "photos": []}]},
+    })
+    assert anon.get(f"/api/public/trips/{token}/photos/{sha}").status_code == 404
+    assert auth_client.get(f"/api/trips/{tid}/photos/{sha}").status_code == 404
+
+
+def test_photo_gc_keeps_photos_used_by_other_days(app, auth_client, tmp_path, monkeypatch):
+    """同一趟行程里别的天还在用这张图,就不能删。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
+    for day in (1, 2):
+        auth_client.patch(f"/api/trips/{tid}/days/{day}", json={
+            "detail": {"stops": [{"t": f"D{day}", "lat": 60, "lng": 24, "photos": [sha]}]},
+        })
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={"detail": {"stops": []}})
+    assert auth_client.get(f"/api/trips/{tid}/photos/{sha}").status_code == 200
+
+
+def test_photo_gc_understands_legacy_single_field(app, auth_client, tmp_path, monkeypatch):
+    """早先存的是单数的 photo 字段,收尾时不能把它当成没人用。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "detail": {"stops": [{"t": "旧数据", "lat": 60, "lng": 24, "photo": sha}]},
+    })
+    auth_client.patch(f"/api/trips/{tid}/days/2", json={"route": "无关改动"})
+    assert auth_client.get(f"/api/trips/{tid}/photos/{sha}").status_code == 200

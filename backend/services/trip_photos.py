@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import datetime
 
@@ -70,3 +71,52 @@ def find_photo(trip_id: int, sha: str):
 
 def absolute_path(rel_path: str) -> str:
     return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", rel_path))
+
+
+def gc_trip_photos(trip_id: int) -> int:
+    """清掉这趟行程里已经没人引用的照片。
+
+    从界面上移掉一张照片,只是把 sha 从 detail_json 里去掉;不收尾的话
+    文件和记录会一直留着,而且拿着旧链接还能取到——对个人照片来说,
+    "删了就该是删了"。所以每次改完某天的 detail 就扫一遍这趟行程。
+
+    物理文件按 sha 去重共享,只有在**所有**行程都不再引用时才删。
+    """
+    db = get_db()
+    used: set[str] = set()
+    for row in db.execute(
+        "SELECT detail_json FROM trip_days WHERE trip_id = ?", (trip_id,),
+    ).fetchall():
+        try:
+            detail = json.loads(row["detail_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        for stop in (detail.get("stops") or []):
+            if not isinstance(stop, dict):
+                continue
+            photos = stop.get("photos")
+            if isinstance(photos, list):
+                used.update(p for p in photos if isinstance(p, str))
+            elif isinstance(stop.get("photo"), str):
+                used.add(stop["photo"])
+
+    rows = db.execute(
+        "SELECT id, sha256, path FROM trip_photos WHERE trip_id = ?", (trip_id,),
+    ).fetchall()
+    removed = 0
+    for r in rows:
+        if r["sha256"] in used:
+            continue
+        db.execute("DELETE FROM trip_photos WHERE id = ?", (r["id"],))
+        removed += 1
+        others = db.execute(
+            "SELECT COUNT(*) FROM trip_photos WHERE sha256 = ?", (r["sha256"],),
+        ).fetchone()[0]
+        if others == 0:
+            try:
+                os.remove(absolute_path(r["path"]))
+            except OSError:
+                pass
+    if removed:
+        db.commit()
+    return removed

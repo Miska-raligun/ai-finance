@@ -1,3 +1,4 @@
+import '@/styles/fonts.css'
 // src/main.js
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
