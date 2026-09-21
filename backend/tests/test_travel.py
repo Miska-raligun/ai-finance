@@ -357,3 +357,93 @@ def test_photo_gc_understands_legacy_single_field(app, auth_client, tmp_path, mo
     })
     auth_client.patch(f"/api/trips/{tid}/days/2", json={"route": "无关改动"})
     assert auth_client.get(f"/api/trips/{tid}/photos/{sha}").status_code == 200
+
+
+# ---------- 离线导出 ----------
+
+def _rich_trip(auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "route": "上海 → 赫尔辛基",
+        "transport": "HO1607",
+        "detail": {
+            "sched": [["09:05", "起飞", "飞 11 小时", 1]],
+            "spots": [["岩石教堂", "15min"]],
+            "stops": [{"t": "岩石教堂", "lat": 60.17, "lng": 24.92, "photos": [sha]},
+                      {"t": "塔林老城", "lat": 59.44, "lng": 24.75}],
+            "todo": ["赶上管风琴试音值得多站一会儿"],
+            "stay": {"h": "Heymo 1", "a": "Espoo"},
+        },
+        "journal": "这是我的私人手记",
+    })
+    auth_client.post(f"/api/trips/{tid}/packing", json={"grp": "证件", "label": "护照"})
+    auth_client.post(f"/api/trips/{tid}/facts",
+                     json={"label": "领队", "body": "张三 13800000000"})
+    auth_client.post(f"/api/trips/{tid}/facts",
+                     json={"label": "时差", "body": "慢 6 小时", "is_public": True})
+    return tid
+
+
+def test_export_html_is_self_contained(app, auth_client, tmp_path, monkeypatch):
+    """离线可看的前提:文件里不能有任何外部引用。"""
+    tid = _rich_trip(auth_client, tmp_path, monkeypatch)
+    r = auth_client.get(f"/api/trips/{tid}/export.html")
+    assert r.status_code == 200
+    doc = r.data.decode("utf-8")
+
+    assert "<!DOCTYPE html>" in doc and "window.print()" in doc
+    assert "data:image/png;base64," in doc          # 照片内嵌
+    for bad in ("http://", "https://", "<script src", "<link rel=\"stylesheet\""):
+        assert bad not in doc, f"导出的文件里不该出现 {bad}"
+    assert 'filename*=UTF-8' in r.headers["Content-Disposition"]
+    assert r.headers["Content-Type"].count("charset") == 1
+
+
+def test_export_full_vs_share_scope(app, auth_client, tmp_path, monkeypatch):
+    """完整版给自己看;分享版口径和分享链接一致。"""
+    tid = _rich_trip(auth_client, tmp_path, monkeypatch)
+    full = auth_client.get(f"/api/trips/{tid}/export.html").data.decode()
+    assert "这是我的私人手记" in full and "护照" in full and "13800000000" in full
+
+    share = auth_client.get(f"/api/trips/{tid}/export.html?scope=share").data.decode()
+    assert "这是我的私人手记" not in share      # 手记
+    assert "护照" not in share                  # 打包清单
+    assert "13800000000" not in share           # 私密速查
+    assert "慢 6 小时" in share                 # 公开速查还在
+    assert "岩石教堂" in share
+
+
+def test_export_can_skip_photos(app, auth_client, tmp_path, monkeypatch):
+    tid = _rich_trip(auth_client, tmp_path, monkeypatch)
+    doc = auth_client.get(f"/api/trips/{tid}/export.html?photos=0").data.decode()
+    assert "data:image/png;base64," not in doc
+    assert "岩石教堂" in doc
+
+
+def test_export_escapes_user_content(app, auth_client, tmp_path, monkeypatch):
+    """行程里的文字是用户和模型写的,拼进 HTML 前必须转义。"""
+    tid = _mk_trip(auth_client, title="<img src=x onerror=alert(1)>").get_json()["id"]
+    auth_client.patch(f"/api/trips/{tid}/days/1",
+                      json={"route": "<script>bad()</script>"})
+    doc = auth_client.get(f"/api/trips/{tid}/export.html").data.decode()
+    assert "<img src=x onerror" not in doc
+    assert "<script>bad()</script>" not in doc
+    assert "&lt;script&gt;" in doc
+
+
+def test_export_is_owner_only(app, auth_client, client):
+    tid = _mk_trip(auth_client).get_json()["id"]
+    assert app.test_client().get(f"/api/trips/{tid}/export.html").status_code == 401
+    from werkzeug.security import generate_password_hash
+    from db import get_db
+    with app.app_context():
+        db = get_db()
+        db.execute("INSERT INTO users (username, password, is_admin) VALUES (?,?,0)",
+                   ("nosy", generate_password_hash("p")))
+        db.commit()
+        uid = db.execute("SELECT id FROM users WHERE username='nosy'").fetchone()[0]
+    with client.session_transaction() as s:
+        s["user_id"] = uid
+    assert client.get(f"/api/trips/{tid}/export.html").status_code == 404

@@ -163,6 +163,27 @@
       <div v-else class="share-box">
         <el-button type="primary" :loading="sharing" @click="createShare">生成分享链接</el-button>
       </div>
+
+      <!-- 离线文件:在飞机上、没开漫游的时候,链接是打不开的 -->
+      <div class="share-off">
+        <h4>存成离线文件</h4>
+        <p>
+          整份行程装进<b>一个 HTML 文件</b>——样式、照片、路线示意图都在里面,
+          没网也能看。用浏览器打开后按打印,就能存成 PDF。
+        </p>
+        <label class="share-ck">
+          <input type="checkbox" v-model="exportPhotos">
+          <span>包含照片（文件会大不少）</span>
+        </label>
+        <div class="share-dl">
+          <a class="share-dl-b primary" :href="exportUrl('full')">完整版</a>
+          <a class="share-dl-b" :href="exportUrl('share')">分享版</a>
+        </div>
+        <p class="share-dim">
+          完整版含手记和打包清单,自己留着看;分享版和上面那个链接口径一致,
+          可以直接发给同行的人。
+        </p>
+      </div>
     </el-dialog>
 
     <!-- 新建行程 -->
@@ -296,6 +317,12 @@ async function watchJobs() {
       ElMessage.success('AI 生成完了，内容都可以直接改')
     }
   } catch { /* 静默:这只是个锦上添花的提示 */ }
+}
+
+const exportPhotos = ref(true)
+function exportUrl(scope) {
+  return `/api/trips/${trip.value?.id}/export.html`
+    + `?scope=${scope}&photos=${exportPhotos.value ? 1 : 0}`
 }
 
 const showShare = ref(false)
@@ -532,6 +559,22 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
 .ai-strip-t { font-size: 13px; font-weight: 700; }
 .ai-strip-n { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .ai-strip-go { margin-left: auto; font-size: 12px; color: var(--color-primary); font-weight: 700; }
+
+.share-off {
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--color-border-light);
+}
+.share-off h4 { margin: 0 0 4px; font-size: 13px; font-weight: 800; color: var(--color-text-strong); }
+.share-off p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.7; color: var(--color-text-muted); }
+.share-ck { display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
+.share-ck input { accent-color: var(--color-primary); }
+.share-dl { display: flex; gap: 8px; margin-top: 10px; }
+.share-dl-b {
+  text-decoration: none; font-size: 13px; font-weight: 700;
+  padding: 6px 18px; border-radius: 999px;
+  border: 1px solid var(--color-primary); color: var(--color-primary);
+}
+.share-dl-b.primary { background: var(--color-primary); color: #fff; }
+.share-dim { margin-top: 8px !important; font-size: 11.5px !important; }
 
 .share-note { font-size: 13px; line-height: 1.7; color: var(--color-text); margin: 0 0 12px; }
 .share-box { display: flex; flex-direction: column; gap: 10px; }

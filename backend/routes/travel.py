@@ -346,6 +346,39 @@ def get_trip_photo(trip_id: int, sha: str):
     return send_file(path, mimetype=info["mime"])
 
 
+# ---------- 离线导出 ----------
+
+@travel_bp.route("/api/trips/<int:trip_id>/export.html", methods=["GET"])
+@login_required
+def export_trip_html(trip_id: int):
+    """导出成一个自带全部内容的 HTML:样式内联、照片转 data URI、
+    地图换成不依赖瓦片的路线示意图——在飞机上、没开漫游时也能看。
+
+    PDF 不在服务端生成(要额外拖一个渲染器进来),文件里带打印按钮,
+    浏览器自己存 PDF 就行。
+    """
+    from flask import Response
+    from services.trip_export import build_html
+
+    trip = _own_trip(trip_id)
+    if not trip:
+        return jsonify({"error": "行程不存在"}), 404
+    scope = "share" if (request.args.get("scope") or "").strip() == "share" else "full"
+    with_photos = (request.args.get("photos") or "1") not in ("0", "false", "no")
+
+    html_doc = build_html(g.user_id, dict(trip), scope=scope, with_photos=with_photos)
+    name = (trip["title"] or "行程").replace('"', "").replace("\\", "")[:40]
+    # mimetype 里不要再写 charset,Flask 会自己补,写了就成了重复的两段
+    resp = Response(html_doc, mimetype="text/html")
+    # RFC 5987:中文文件名得用 filename*,否则下载下来是乱码
+    from urllib.parse import quote
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=trip-{trip_id}.html; "
+        f"filename*=UTF-8''{quote(name)}.html"
+    )
+    return resp
+
+
 # ---------- 分享:公开只读链接 ----------
 # 安全边界:公开端点不走 login_required,因此**必须**逐字段白名单输出。
 # 明确排除:journal(手记)、打包清单、user_id、内部时间戳。
