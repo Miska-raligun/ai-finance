@@ -29,11 +29,40 @@
           把旅行社发的行程单整段粘进来。AI 会先理出每天的主线,再逐天展开成
           时间轴、景点、贴士和住宿——<b>之后每一项你都能自己改</b>。
         </p>
+        <!-- 点整块区域或者把文件拖进来都行 -->
+        <div
+          class="ai-drop"
+          :class="{ busy: reading }"
+          role="button"
+          tabindex="0"
+          @click="fileRef?.click()"
+          @keydown.enter="fileRef?.click()"
+          @dragover.prevent
+          @drop.prevent="onDrop"
+        >
+          <span v-if="reading">正在读取 {{ pickedName }}…</span>
+          <span v-else-if="pickedName" class="ai-drop-ok">
+            ✓ 已读入 <b>{{ pickedName }}</b> · {{ notice.length }} 字,下面可以改
+          </span>
+          <template v-else>
+            <b>选择文件</b> 或拖进来 · 支持 Word(.docx)、PDF、HTML、txt
+          </template>
+        </div>
+        <input
+          ref="fileRef"
+          type="file"
+          accept=".docx,.pdf,.html,.htm,.txt,.md"
+          hidden
+          :disabled="reading"
+          @change="onPick"
+        >
+        <p v-if="readErr" class="ai-err">{{ readErr }}</p>
+
         <el-input
           v-model="notice"
           type="textarea"
           :rows="9"
-          placeholder="粘贴行程单原文…"
+          placeholder="也可以直接把行程单粘在这里…"
         />
         <div class="ai-count" :class="{ over: notice.length > 20000 }">
           {{ notice.length }} / 20000
@@ -68,6 +97,12 @@
         <el-form-item label="主题色">
           <div class="accent-picker">
             <button
+              type="button"
+              class="accent-auto"
+              :class="{ on: !accent }"
+              @click="accent = ''"
+            >自动</button>
+            <button
               v-for="a in accents"
               :key="a.key"
               type="button"
@@ -78,6 +113,7 @@
               @click="accent = a.key"
             />
           </div>
+          <div class="ai-dim">自动 = 让 AI 按行程气质挑一个</div>
         </el-form-item>
       </el-form>
 
@@ -160,7 +196,11 @@ const notice = ref('')
 const idea = ref('')
 const range = ref([])
 const days = ref(7)
-const accent = ref('glacier')
+const accent = ref('')          // 空 = 交给 AI 挑
+const reading = ref(false)
+const pickedName = ref('')
+const readErr = ref('')
+const fileRef = ref(null)
 const submitting = ref(false)
 const err = ref('')
 const job = ref(null)
@@ -205,9 +245,35 @@ async function poll(id) {
   }
 }
 
+/** 只抽文本,不直接生成:行程单里常有排版垃圾,让用户过目一眼再生成更稳。 */
+async function readFile(file) {
+  if (!file) return
+  reading.value = true
+  readErr.value = ''
+  pickedName.value = file.name
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await api.post('/api/trips/ai/extract', fd)
+    notice.value = res.data.text || ''
+  } catch (e) {
+    readErr.value = e?.response?.data?.error || '读取失败'
+    pickedName.value = ''
+  } finally {
+    reading.value = false
+  }
+}
+function onPick(e) {
+  const f = e.target.files?.[0]
+  e.target.value = ''
+  readFile(f)
+}
+function onDrop(e) { readFile(e.dataTransfer?.files?.[0]) }
+
 async function submit() {
   err.value = ''
-  const body = { accent: accent.value }
+  const body = {}
+  if (accent.value) body.accent = accent.value
   if (tab.value === 'notice') {
     if (!notice.value.trim()) { err.value = '先把行程单粘进来'; return }
     body.notice = notice.value
@@ -258,6 +324,8 @@ function close() {
   job.value = null
   notice.value = ''
   idea.value = ''
+  pickedName.value = ''
+  readErr.value = ''
   emit('close')
   if (tid && finished) emit('created', tid)
 }
@@ -302,7 +370,26 @@ onBeforeUnmount(stopPoll)
 .ai-step-l { flex: 1; min-width: 0; }
 .ai-step-e { font-size: 11px; color: var(--color-error, #e05a5a); }
 
-.accent-picker { display: flex; gap: 8px; }
+.ai-drop {
+  display: block; text-align: center; cursor: pointer;
+  border: 1.5px dashed var(--color-primary); border-radius: 12px;
+  padding: 14px 12px; margin-bottom: 10px; font-size: 12.5px;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-light) 45%, transparent);
+}
+.ai-drop:hover { background: var(--color-primary-light); }
+.ai-drop.busy { opacity: .6; cursor: default; }
+.ai-drop-ok { color: var(--color-text); }
+
+.accent-picker { display: flex; gap: 8px; align-items: center; }
+.accent-auto {
+  appearance: none; border: 1px solid var(--color-border-light); background: var(--color-surface);
+  color: var(--color-text-muted); font: inherit; font-size: 12px;
+  padding: 2px 12px; border-radius: 999px; cursor: pointer;
+}
+.accent-auto.on {
+  background: var(--color-primary); border-color: var(--color-primary); color: #fff; font-weight: 700;
+}
 .accent-dot {
   width: 24px; height: 24px; border-radius: 50%;
   border: 2px solid transparent; cursor: pointer; padding: 0;

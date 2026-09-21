@@ -157,6 +157,7 @@ apply_endpoint_limits(app, {
     "checkup.api_compute": "10/minute",
     # 整趟生成会连着跑十几次 LLM,按次数限更合适
     "travel_ai.ai_generate": "5/minute",
+    "travel_ai.ai_extract": "20/minute",
     "travel_ai.ai_fill_days": "5/minute",
     "travel_ai.ai_block": "30/minute",
 })

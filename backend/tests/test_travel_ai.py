@@ -361,3 +361,98 @@ def test_jobs_list_lets_you_come_back(app, auth_client, monkeypatch):
     assert jobs[0]["id"] == job_id
     assert jobs[0]["status"] == "done"
     assert jobs[0]["trip_id"]
+
+
+# ---------- 行程单文件导入 ----------
+
+def _docx(paragraphs):
+    """造一个最小 .docx——它就是个 zip,正文在 word/document.xml 里。"""
+    import io as _io
+    import zipfile
+    body = "".join(f"<w:p><w:r><w:t>{p}</w:t></w:r></w:p>" for p in paragraphs)
+    doc = ('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/'
+           f'wordprocessingml/2006/main"><w:body>{body}</w:body></w:document>')
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", doc)
+    return buf.getvalue()
+
+
+def _upload(client, name, data):
+    import io as _io
+    return client.post("/api/trips/ai/extract", content_type="multipart/form-data",
+                       data={"file": (_io.BytesIO(data), name)})
+
+
+def test_extract_docx(app, auth_client):
+    r = _upload(auth_client, "行程单.docx",
+                _docx(["逃离地球计划 团号 T-1", "第1天 上海 → 赫尔辛基 HO1607",
+                       "第2天 赫尔辛基 → 塔林 快船", "领队 张三 13800000000"]))
+    assert r.status_code == 200
+    text = r.get_json()["text"]
+    assert "第1天 上海 → 赫尔辛基 HO1607" in text
+    assert "13800000000" in text
+
+
+def test_extract_html_drops_script_and_style(app, auth_client):
+    html = ('<html><head><style>p{color:red}</style></head><body>'
+            '<h1>逃离地球计划</h1><table><tr><td>第1天</td><td>上海 → 赫尔辛基</td></tr></table>'
+            '<p>领队 张三 13800000000</p><script>alert(1)</script></body></html>')
+    text = _upload(auth_client, "x.html", html.encode()).get_json()["text"]
+    assert "上海 → 赫尔辛基" in text and "13800000000" in text
+    assert "alert(1)" not in text and "color:red" not in text
+
+
+def test_extract_txt_handles_gbk(app, auth_client):
+    """旅行社的 txt 十有八九是 GBK,别读成乱码。"""
+    raw = "第1天 上海 → 赫尔辛基\n第2天 塔林 快船\n领队 张三".encode("gb18030")
+    text = _upload(auth_client, "x.txt", raw).get_json()["text"]
+    assert "赫尔辛基" in text
+
+
+def test_extract_rejects_unsupported_with_a_useful_message(app, auth_client):
+    for name, data, hint in [
+        ("x.doc", b"old binary" * 10, ".docx"),
+        ("x.xlsx", b"whatever" * 10, "粘贴"),
+        ("x.docx", b"not a zip" * 10, "打不开"),
+    ]:
+        r = _upload(auth_client, name, data)
+        assert r.status_code == 400
+        assert hint in r.get_json()["error"]
+
+
+def test_extract_requires_login(app, auth_client):
+    import io as _io
+    anon = app.test_client()
+    r = anon.post("/api/trips/ai/extract", content_type="multipart/form-data",
+                  data={"file": (_io.BytesIO(b"x" * 50), "x.txt")})
+    assert r.status_code in (401, 403)
+
+
+# ---------- 主题色 ----------
+
+def test_accent_comes_from_ai_when_not_chosen(app, auth_client, monkeypatch):
+    _stub_llm(monkeypatch, outline={**_OUTLINE, "accent": "aurora"})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "去冰岛看极光"}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    assert trip["accent"] == "aurora"
+
+
+def test_user_choice_beats_ai(app, auth_client, monkeypatch):
+    _stub_llm(monkeypatch, outline={**_OUTLINE, "accent": "aurora"})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "去冰岛", "accent": "sakura"}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    assert trip["accent"] == "sakura"
+
+
+def test_bogus_accent_from_ai_falls_back(app, auth_client, monkeypatch):
+    _stub_llm(monkeypatch, outline={**_OUTLINE, "accent": "rainbow"})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "随便"}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    assert trip["accent"] == "glacier"

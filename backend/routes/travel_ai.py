@@ -28,6 +28,26 @@ def _own_trip(trip_id: int):
     ).fetchone()
 
 
+@travel_ai_bp.route("/api/trips/ai/extract", methods=["POST"])
+@login_required
+def ai_extract():
+    """从上传的行程单里取出纯文本。
+
+    只抽不生成:文本原样回给前端,用户过目(可以改)之后再点生成。
+    旅行社的行程单里常有排版垃圾,让用户先看一眼比直接喂给模型稳。
+    """
+    from services.doc_text import DocError, extract_text
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "没有收到文件"}), 400
+    try:
+        text = extract_text(f.filename, f.read())
+    except DocError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"text": text, "chars": len(text), "filename": f.filename})
+
+
 @travel_ai_bp.route("/api/trips/ai/generate", methods=["POST"])
 @login_required
 def ai_generate():
@@ -46,7 +66,8 @@ def ai_generate():
         "start_date": (data.get("start_date") or "").strip() or None,
         "end_date": (data.get("end_date") or "").strip() or None,
         "days": data.get("days"),
-        "accent": (data.get("accent") or "glacier").strip(),
+        # 留空 = 交给 AI 按行程气质挑
+        "accent": (data.get("accent") or "").strip() or None,
     }
     kind = "import_notice" if notice else "from_idea"
     job_id = travel_jobs.create_job(g.user_id, kind, payload)

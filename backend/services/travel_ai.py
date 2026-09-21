@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _DATE_FMT = "%Y-%m-%d"
 MAX_DAYS = 30                  # AI 细化的上限,兜住 token 成本
+ACCENTS = ("glacier", "aurora", "ember", "sakura", "desert", "violet")
 
 
 class AIError(Exception):
@@ -158,6 +159,8 @@ def clean_outline(raw) -> dict:
         "subtitle": _s(raw.get("subtitle"), 120),
         "code": _s(raw.get("code"), 60),
         "cover_note": _s(raw.get("cover_note"), 200),
+        # 模型挑的主题色;不在预设里就留空,由调用方兜底
+        "accent": (raw.get("accent") if raw.get("accent") in ACCENTS else None),
         "start_date": start,
         "end_date": end,
         "days": days,

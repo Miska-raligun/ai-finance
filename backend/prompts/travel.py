@@ -21,6 +21,7 @@ OUTLINE_SYSTEM = (
     "输出结构:\n"
     '{"title":"行程名","subtitle":"一句副标题或 null","code":"团号或 null",'
     '"cover_note":"一两句这趟的看点或 null",'
+    '"accent":"glacier|aurora|ember|sakura|desert|violet",'
     '"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD",'
     '"days":[{"day_no":1,"date":"YYYY-MM-DD","route":"上海 → 赫尔辛基",'
     '"transport":"HO1607 PVG–HEL 09:05/14:00 或 null","meal":"早 / 午 或 null"}]}\n'
@@ -30,7 +31,11 @@ OUTLINE_SYSTEM = (
     "- meal 只写当天含的餐,如「早 / 午」\n"
     "- days 必须覆盖 start_date 到 end_date 的每一天,day_no 从 1 连续不跳号\n"
     "- 日期一律 YYYY-MM-DD\n"
-    "- cover_note 是打开行程时最上面那句话,写这趟最值得期待的是什么,不超过 40 字"
+    "- cover_note 是打开行程时最上面那句话,写这趟最值得期待的是什么,不超过 40 字\n"
+    "- accent 按这趟行程的气质挑一个主题色:\n"
+    "  glacier 冰川蓝(极地 / 雪山 / 北欧)、aurora 极光绿(极光 / 森林 / 湖区)、\n"
+    "  ember 余烬橙(沙漠 / 秋色 / 古城)、sakura 樱粉(日本 / 春季 / 海岛度假)、\n"
+    "  desert 沙金(中东 / 非洲 / 戈壁)、violet 夜紫(都市 / 夜景 / 音乐节)"
 )
 
 

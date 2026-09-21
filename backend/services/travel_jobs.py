@@ -186,7 +186,8 @@ def _step_outline(conn, job_id: int, user_id: int, payload: dict, llm) -> int | 
         return None
 
     now = _now()
-    accent = payload.get("accent") or "glacier"
+    # 用户显式选了就听用户的;没选(前端传"自动")就用模型按行程气质挑的
+    accent = payload.get("accent") or outline.get("accent") or "glacier"
     cur = conn.execute(
         "INSERT INTO trips (user_id, title, subtitle, code, start_date, end_date, "
         "accent, cover_note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
