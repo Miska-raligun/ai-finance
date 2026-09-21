@@ -6,13 +6,51 @@
 <template>
   <el-dialog
     :model-value="open"
-    :title="job ? 'AI 正在生成行程' : '✨ AI 生成行程'"
+    :title="dialogTitle"
     :width="dialogWidth"
     :close-on-click-modal="false"
     @update:model-value="close"
   >
-    <!-- 输入 -->
-    <template v-if="!job">
+    <!-- 补全已有行程:只补空白的天,不问标题日期主题色 -->
+    <template v-if="!job && isFill">
+      <p class="ai-hint">
+        把这趟行程里<b>还没有内容的 {{ blankDays || '' }} 天</b>补上。
+        已经填过的天不会动——包括你自己改过的。
+      </p>
+      <p class="ai-hint">
+        有行程单原文的话一起给,补出来更贴近实际;没有就让 AI 按每天的主线发挥。
+      </p>
+
+      <div
+        class="ai-drop"
+        :class="{ busy: reading }"
+        role="button"
+        tabindex="0"
+        @click="fileRef?.click()"
+        @keydown.enter="fileRef?.click()"
+        @dragover.prevent
+        @drop.prevent="onDrop"
+      >
+        <span v-if="reading">正在读取 {{ pickedName }}…</span>
+        <span v-else-if="pickedName" class="ai-drop-ok">
+          ✓ 已读入 <b>{{ pickedName }}</b> · {{ notice.length }} 字
+        </span>
+        <template v-else>
+          <b>选择行程单</b>（可选）· Word / PDF / HTML / txt
+        </template>
+      </div>
+      <p v-if="readErr" class="ai-err">{{ readErr }}</p>
+      <el-input
+        v-model="notice"
+        type="textarea"
+        :rows="5"
+        placeholder="也可以把行程单粘在这里（可选）"
+      />
+      <p v-if="err" class="ai-err">{{ err }}</p>
+    </template>
+
+    <!-- 新建 -->
+    <template v-else-if="!job">
       <div class="ai-tabs">
         <button
           v-for="t in TABS"
@@ -93,29 +131,32 @@
         </el-form>
       </template>
 
-      <el-form label-width="64px" size="small">
-        <el-form-item label="主题色">
-          <div class="accent-picker">
-            <button
-              type="button"
-              class="accent-auto"
-              :class="{ on: !accent }"
-              @click="accent = ''"
-            >自动</button>
-            <button
-              v-for="a in accents"
-              :key="a.key"
-              type="button"
-              class="accent-dot"
-              :class="{ on: accent === a.key }"
-              :style="{ background: a.color }"
-              :title="a.label"
-              @click="accent = a.key"
-            />
-          </div>
-          <div class="ai-dim">自动 = 让 AI 按行程气质挑一个</div>
-        </el-form-item>
-      </el-form>
+      <!-- 不用 el-form-item:那个左侧标签列会把颜色挤到换行,窄屏尤其难看 -->
+      <div class="accent-block">
+        <div class="accent-label">
+          主题色<span>自动 = 让 AI 按行程气质挑</span>
+        </div>
+        <div class="accent-picker">
+          <button
+            type="button"
+            class="accent-auto"
+            :class="{ on: !accent }"
+            @click="accent = ''"
+          >自动</button>
+          <button
+            v-for="a in accents"
+            :key="a.key"
+            type="button"
+            class="accent-dot"
+            :class="{ on: accent === a.key }"
+            :style="{ background: a.color }"
+            :title="a.label"
+            @click="accent = a.key"
+          >
+            <span v-if="accent === a.key" aria-hidden="true">✓</span>
+          </button>
+        </div>
+      </div>
 
       <p v-if="err" class="ai-err">{{ err }}</p>
     </template>
@@ -152,7 +193,9 @@
     <template #footer>
       <template v-if="!job">
         <el-button @click="close">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submit">开始生成</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">
+          {{ isFill ? '开始补全' : '开始生成' }}
+        </el-button>
       </template>
       <template v-else>
         <el-button
@@ -182,6 +225,8 @@ const props = defineProps({
   tripId: { type: Number, default: 0 },
   // 接上一个已经在跑的任务(从别的页面回来时)
   jobId: { type: Number, default: 0 },
+  // 补全模式下用来告诉用户会补几天
+  blankDays: { type: Number, default: 0 },
 })
 const emit = defineEmits(['close', 'created'])
 
@@ -206,6 +251,11 @@ const err = ref('')
 const job = ref(null)
 let timer = null
 
+const isFill = computed(() => !!props.tripId)
+const dialogTitle = computed(() => {
+  if (job.value) return isFill.value ? 'AI 正在补全' : 'AI 正在生成行程'
+  return isFill.value ? '✨ 补全空白的天' : '✨ AI 生成行程'
+})
 const dialogWidth = computed(() => window.innerWidth < 768 ? 'calc(100vw - 24px)' : '560px')
 const pct = computed(() => {
   const j = job.value
@@ -273,6 +323,20 @@ function onDrop(e) { readFile(e.dataTransfer?.files?.[0]) }
 async function submit() {
   err.value = ''
   const body = {}
+  if (isFill.value) {
+    if (notice.value.trim()) body.notice = notice.value
+    submitting.value = true
+    try {
+      const res = await api.post(`/api/trips/${props.tripId}/ai/fill`, body)
+      job.value = { status: 'pending', steps: [], done: 0, total: 0, id: res.data.job_id }
+      poll(res.data.job_id)
+    } catch (e) {
+      err.value = e?.response?.data?.error || '提交失败'
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
   if (accent.value) body.accent = accent.value
   if (tab.value === 'notice') {
     if (!notice.value.trim()) { err.value = '先把行程单粘进来'; return }
@@ -289,10 +353,7 @@ async function submit() {
   }
   submitting.value = true
   try {
-    const url = props.tripId
-      ? `/api/trips/${props.tripId}/ai/fill`
-      : '/api/trips/ai/generate'
-    const res = await api.post(url, body)
+    const res = await api.post('/api/trips/ai/generate', body)
     job.value = { status: 'pending', steps: [], done: 0, total: 0, id: res.data.job_id }
     poll(res.data.job_id)
   } catch (e) {
@@ -381,19 +442,28 @@ onBeforeUnmount(stopPoll)
 .ai-drop.busy { opacity: .6; cursor: default; }
 .ai-drop-ok { color: var(--color-text); }
 
-.accent-picker { display: flex; gap: 8px; align-items: center; }
+.accent-block { margin-top: 14px; }
+.accent-label {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px;
+  font-size: 12.5px; font-weight: 700; color: var(--color-text-strong);
+}
+.accent-label span { font-size: 11px; font-weight: 400; color: var(--color-text-muted); }
+.accent-picker { display: flex; gap: 6px; align-items: center; }
 .accent-auto {
-  appearance: none; border: 1px solid var(--color-border-light); background: var(--color-surface);
+  appearance: none; border: 1px dashed var(--color-text-muted); background: none;
   color: var(--color-text-muted); font: inherit; font-size: 12px;
-  padding: 2px 12px; border-radius: 999px; cursor: pointer;
+  height: 26px; padding: 0 11px; border-radius: 999px; cursor: pointer; flex-shrink: 0;
 }
 .accent-auto.on {
-  background: var(--color-primary); border-color: var(--color-primary); color: #fff; font-weight: 700;
+  border-style: solid; border-color: var(--color-text-strong);
+  color: var(--color-text-strong); font-weight: 700;
 }
 .accent-dot {
-  width: 24px; height: 24px; border-radius: 50%;
-  border: 2px solid transparent; cursor: pointer; padding: 0;
-  box-shadow: 0 2px 0 0 rgba(0,0,0,.15);
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  border: 0; cursor: pointer; padding: 0;
+  display: grid; place-items: center;
+  color: #fff; font-size: 13px; line-height: 1;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .55);
 }
-.accent-dot.on { border-color: var(--color-text-strong); transform: scale(1.12); }
+.accent-dot.on { box-shadow: 0 0 0 2px var(--color-text-strong); }
 </style>

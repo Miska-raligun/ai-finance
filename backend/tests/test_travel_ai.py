@@ -456,3 +456,72 @@ def test_bogus_accent_from_ai_falls_back(app, auth_client, monkeypatch):
     job = _wait(auth_client, job_id)
     trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
     assert trip["accent"] == "glacier"
+
+
+# ---------- 年份 ----------
+
+def test_ai_picked_dates_are_pushed_into_the_future(app, auth_client, monkeypatch):
+    """模型对"今天"没有可靠概念,常按训练时的年份排。没给日期时整段顺延。"""
+    from datetime import date, timedelta
+    last_year = date.today().replace(year=date.today().year - 1)
+    _stub_llm(monkeypatch, outline={
+        **_OUTLINE,
+        "start_date": last_year.strftime("%Y-%m-%d"),
+        "end_date": (last_year + timedelta(days=2)).strftime("%Y-%m-%d"),
+    })
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "十月去看极光"}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    start = date.fromisoformat(trip["start_date"])
+    assert start >= date.today()
+    # 只按整年挪,月份和日子要保住——"十月看极光"不能被改成别的月份
+    assert (start.month, start.day) == (last_year.month, last_year.day)
+
+
+def test_user_given_dates_are_never_shifted(app, auth_client, monkeypatch):
+    """用户自己给了日期就照用,哪怕是过去——他可能在补录走过的行程。"""
+    from datetime import date
+    last_year = date.today().replace(year=date.today().year - 1)
+    _stub_llm(monkeypatch, outline={**_OUTLINE,
+                                    "start_date": last_year.strftime("%Y-%m-%d"),
+                                    "end_date": last_year.strftime("%Y-%m-%d")})
+    job_id = auth_client.post("/api/trips/ai/generate", json={
+        "idea": "补录去年那趟",
+        "start_date": last_year.strftime("%Y-%m-%d"),
+        "end_date": last_year.strftime("%Y-%m-%d"),
+    }).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    assert trip["start_date"] == last_year.strftime("%Y-%m-%d")
+
+
+def test_notice_dates_are_never_shifted(app, auth_client, monkeypatch):
+    """行程单里的日期是白纸黑字写着的,可能是已经走完的行程,不能改。"""
+    from datetime import date
+    last_year = date.today().replace(year=date.today().year - 1)
+    _stub_llm(monkeypatch, outline={**_OUTLINE,
+                                    "start_date": last_year.strftime("%Y-%m-%d"),
+                                    "end_date": last_year.strftime("%Y-%m-%d")})
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"notice": _NOTICE}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    trip = auth_client.get(f"/api/trips/{job['trip_id']}").get_json()["trip"]
+    assert trip["start_date"] == last_year.strftime("%Y-%m-%d")
+
+
+def test_today_is_in_the_prompt(app, auth_client, monkeypatch):
+    """光靠后处理不够,提示词里也得写明今天是哪天。"""
+    from datetime import date
+    seen = []
+
+    def fake(messages, **kw):
+        seen.append(messages[-1]["content"])
+        import json as _json
+        return {"choices": [{"message": {"content": _json.dumps(_OUTLINE)}}]}
+
+    monkeypatch.setattr("services.llm._call_llm", fake)
+    job_id = auth_client.post("/api/trips/ai/generate",
+                              json={"idea": "去冰岛"}).get_json()["job_id"]
+    _wait(auth_client, job_id)
+    assert date.today().strftime("%Y-%m-%d") in seen[0]

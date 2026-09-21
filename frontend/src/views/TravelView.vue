@@ -18,16 +18,35 @@
             :value="t.id"
           />
         </el-select>
-        <el-button v-if="trip" size="small" @click="openShare">🔗 分享</el-button>
-        <el-button size="small" @click="openAi(0)">✨ AI 生成</el-button>
-        <el-button
-          v-if="trip && blankDays"
-          size="small"
-          @click="openAi(trip.id)"
-        >✨ 补全 {{ blankDays }} 天</el-button>
-        <el-button size="small" type="primary" @click="showCreate = true">+ 新建行程</el-button>
+        <div class="header-btns">
+          <el-button size="small" @click="openAi(0)">✨ AI 生成</el-button>
+          <el-button size="small" type="primary" @click="showCreate = true">+ 新建</el-button>
+          <el-dropdown v-if="trip" trigger="click" @command="onTripCmd">
+            <el-button size="small">⋯</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="share">🔗 分享 / 导出</el-dropdown-item>
+                <el-dropdown-item command="delete" divided>🗑 删除这趟行程</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </div>
     </div>
+
+    <!-- 后台还在跑的任务。放在最上面:关掉弹窗后得一眼能看见,
+         否则用户根本不知道任务还在跑、也不知道去哪儿看。 -->
+    <button
+      v-if="activeJob && !showAi"
+      type="button"
+      class="ai-strip"
+      @click="resumeAi"
+    >
+      <span class="ai-strip-dot"></span>
+      <span class="ai-strip-t">AI 正在生成…</span>
+      <span class="ai-strip-n">{{ activeJob.done }} / {{ activeJob.total || '…' }}</span>
+      <span class="ai-strip-go">查看 ›</span>
+    </button>
 
     <el-empty
       v-if="!loading && !trips.length"
@@ -51,6 +70,11 @@
           <b>{{ countdown.value }}</b>
           <span>{{ countdown.label }}</span>
         </div>
+      </div>
+
+      <div v-if="blankDays && !activeJob" class="blank-tip">
+        <span>还有 <b>{{ blankDays }}</b> 天没有内容</span>
+        <button type="button" @click="openAi(trip.id)">✨ 让 AI 补全</button>
       </div>
 
       <div class="trip-tabs">
@@ -118,24 +142,12 @@
       </el-drawer>
     </template>
 
-    <!-- 后台还在跑的任务:从别的页面回来能接上 -->
-    <button
-      v-if="activeJob && !showAi"
-      type="button"
-      class="ai-strip"
-      @click="resumeAi"
-    >
-      <span class="ai-strip-dot"></span>
-      <span class="ai-strip-t">AI 正在生成行程</span>
-      <span class="ai-strip-n">{{ activeJob.done }} / {{ activeJob.total || '…' }}</span>
-      <span class="ai-strip-go">查看 ›</span>
-    </button>
-
     <TripAiDialog
       :open="showAi"
       :accents="ACCENT_LIST"
       :trip-id="aiTripId"
       :job-id="aiJobId"
+      :blank-days="blankDays"
       @close="onAiClose"
       @created="onAiDone"
     />
@@ -233,7 +245,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import TripCalendar from '@/components/TripCalendar.vue'
 import TripMap from '@/components/TripMap.vue'
@@ -430,6 +442,34 @@ async function createTrip() {
   }
 }
 
+function onTripCmd(cmd) {
+  if (cmd === 'share') openShare()
+  else if (cmd === 'delete') removeTrip()
+}
+
+async function removeTrip() {
+  if (!trip.value) return
+  try {
+    await ElMessageBox.confirm(
+      `删除「${trip.value.title}」?行程、手记、照片和打包进度都会一起消失。`,
+      '删除行程',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '再想想',
+        confirmButtonClass: 'el-button--danger' },
+    )
+  } catch {
+    return                       // 点了取消
+  }
+  try {
+    await api.delete(`/api/trips/${trip.value.id}`)
+    ElMessage.success('已删除')
+    trip.value = null
+    currentTripId.value = null
+    await loadTrips()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '删除失败')
+  }
+}
+
 async function openShare() {
   showShare.value = true
   shareToken.value = ''
@@ -544,6 +584,21 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
   padding: 16px;
 }
 
+.header-btns { display: flex; gap: 8px; align-items: center; }
+
+.blank-tip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 14px; padding: 9px 14px; border-radius: 12px;
+  border: 1px dashed var(--trip-accent); background: var(--trip-accent-weak);
+  color: var(--trip-accent-ink); font-size: 12.5px;
+}
+.blank-tip b { font-variant-numeric: tabular-nums; }
+.blank-tip button {
+  margin-left: auto; appearance: none; cursor: pointer; font: inherit;
+  font-size: 12.5px; font-weight: 700; padding: 4px 14px; border-radius: 999px;
+  border: 1px solid var(--trip-accent); background: var(--trip-accent); color: #fff;
+}
+
 .ai-strip {
   width: 100%; appearance: none; cursor: pointer; font: inherit; text-align: left;
   display: flex; align-items: center; gap: 10px;
@@ -602,8 +657,12 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
 .drawer-inner-pad { padding: 16px 16px 24px; }
 
 @media (max-width: 768px) {
-  .page-header-actions { width: 100%; }
-  .trip-select { flex: 1; min-width: 0; }
+  /* 窄屏按钮多了会把行程选择框挤成一条缝,改成两行:选择框独占一行 */
+  .page-header { align-items: stretch; }
+  .page-header-actions { width: 100%; flex-wrap: wrap; gap: 8px; }
+  .trip-select { flex: 1 0 100%; min-width: 0; }
+  .header-btns { width: 100%; }
+  .header-btns :deep(.el-button) { flex: 1; }
   .trip-hero { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; }
   .hero-count { align-self: flex-end; text-align: right; }
 }

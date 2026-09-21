@@ -115,8 +115,14 @@ def _coord(v, limit):
     return f if -limit <= f <= limit else None
 
 
-def clean_outline(raw) -> dict:
-    """骨架清洗。日期不合法 / 天数对不上就直接报错——后面每一步都依赖它。"""
+def clean_outline(raw, *, shift_to_future: bool = False) -> dict:
+    """骨架清洗。日期不合法 / 天数对不上就直接报错——后面每一步都依赖它。
+
+    shift_to_future:用户没给日期、由模型自己拟日期时打开。模型对"今天"没有
+    可靠概念,经常按训练时的年份排(2026 年了还排 2025 年的行程)。提示词里
+    已经写明今天是哪天,这里再兜一道:整段往后挪整年直到落在今天之后。
+    只按年挪,保住模型挑的月份和星期几——"十月看极光"不能被改成别的月份。
+    """
     if not isinstance(raw, dict):
         raise AIError("模型返回的不是行程对象")
     start, end = _s(raw.get("start_date"), 10), _s(raw.get("end_date"), 10)
@@ -127,6 +133,18 @@ def clean_outline(raw) -> dict:
     if d1 < d0:
         raise AIError("结束日期早于开始日期")
     span = (d1 - d0).days + 1
+
+    if shift_to_future and d0 < date.today():
+        span_days = (d1 - d0).days
+        bump = 0
+        while d0.replace(year=d0.year + bump + 1) <= date.today() and bump < 10:
+            bump += 1
+        try:
+            d0 = d0.replace(year=d0.year + bump + 1)
+        except ValueError:                 # 2 月 29 日遇上平年
+            d0 = d0.replace(year=d0.year + bump + 1, day=28)
+        d1 = d0 + timedelta(days=span_days)
+        start, end = d0.strftime(_DATE_FMT), d1.strftime(_DATE_FMT)
     if span > MAX_DAYS:
         raise AIError(f"行程超过 {MAX_DAYS} 天,请拆成几段分别生成")
 
@@ -296,16 +314,19 @@ def clean_block(kind: str, raw) -> dict:
 def gen_outline(*, notice: str | None = None, idea: str | None = None,
                 start: str | None = None, end: str | None = None,
                 days: int | None = None, llm: dict | None = None) -> dict:
+    today = date.today().strftime(_DATE_FMT)
     if notice:
-        user = build_outline_from_notice(notice)
+        user = build_outline_from_notice(notice, today)
     elif idea:
-        user = build_outline_from_idea(idea, start, end, days)
+        user = build_outline_from_idea(idea, start, end, days, today)
     else:
         raise AIError("没有输入内容")
     from constants import LLM_TIMEOUT_LONG
     raw = _json_call(OUTLINE_SYSTEM, user, endpoint="travel.outline",
                      timeout=LLM_TIMEOUT_LONG, temperature=0.2, llm=llm)
-    return clean_outline(raw)
+    # 行程单里的日期是白纸黑字写着的(可能是已经走完的行程),不能动;
+    # 用户自己给了日期同理。只有"模型自己拟日期"这一种情况才顺延。
+    return clean_outline(raw, shift_to_future=not notice and not (start or end))
 
 
 def gen_day_detail(trip: dict, day: dict, raw_slice: str | None = None,

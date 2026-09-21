@@ -39,16 +39,18 @@ OUTLINE_SYSTEM = (
 )
 
 
-def build_outline_from_notice(text: str) -> str:
+def build_outline_from_notice(text: str, today: str) -> str:
     return (
+        f"今天是 {today}。\n"
         "下面是一份旅行社行程单的原文,把它整理成行程骨架。\n"
-        "原文里有的信息照抄,没有的留 null,不要自己补。\n\n"
+        "原文里有的信息照抄,没有的留 null,不要自己补。\n"
+        "原文里的日期如果只写了月日没写年份,按今天往后最近的那一年算。\n\n"
         f"```\n{text[:12000]}\n```"
     )
 
 
 def build_outline_from_idea(idea: str, start: str | None, end: str | None,
-                            days: int | None) -> str:
+                            days: int | None, today: str) -> str:
     hint = []
     if start:
         hint.append(f"出发日期 {start}")
@@ -58,10 +60,14 @@ def build_outline_from_idea(idea: str, start: str | None, end: str | None,
         hint.append(f"共 {days} 天")
     tail = ("已知:" + "、".join(hint) + "。") if hint else ""
     return (
+        f"**今天是 {today}**。排日期时务必以这个为准,不要用你印象里的"
+        "\"今年\"——那多半是过去的年份了。\n"
         "我想去旅行,下面是我的想法。请排一份合理的行程骨架:\n"
         f"「{idea[:2000]}」\n{tail}\n"
         "按常见的玩法安排每天的主线城市和交通方式,不要把一天排得太满。\n"
-        "如果我没给日期,就从今天之后的合适时间起算,并在 subtitle 里说明这是建议日期。"
+        f"如果我没给日期,就从 {today} 之后挑一个合适的时间起算"
+        "(比如我提到了某个季节,就取今天之后最近的那一次),"
+        "并在 subtitle 里说明这是建议日期。"
     )
 
 
