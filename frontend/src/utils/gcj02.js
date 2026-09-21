@@ -45,3 +45,23 @@ export function wgs2gcj(lat, lng) {
   dLng = (dLng * 180.0) / (A / sqrtMagic * Math.cos(radLat) * PI)
   return [lat + dLat, lng + dLng]
 }
+
+/** GCJ-02 → WGS-84。
+ *
+ *  没有解析逆变换,用迭代逼近:把当前猜测正向转一次,拿偏差反推回去。
+ *  三四轮就收敛到厘米级,够用。切换底图(高德是 GCJ-02、OSM 是 WGS-84)时
+ *  要把地图中心换算过去,否则一换图整幅会跳几百米。
+ * @returns {[number, number]} [lat, lng]
+ */
+export function gcj2wgs(lat, lng) {
+  if (outOfChina(lat, lng)) return [lat, lng]
+  let wLat = lat, wLng = lng
+  for (let i = 0; i < 5; i++) {
+    const [gLat, gLng] = wgs2gcj(wLat, wLng)
+    const dLat = gLat - lat, dLng = gLng - lng
+    if (Math.abs(dLat) < 1e-9 && Math.abs(dLng) < 1e-9) break
+    wLat -= dLat
+    wLng -= dLng
+  }
+  return [wLat, wLng]
+}

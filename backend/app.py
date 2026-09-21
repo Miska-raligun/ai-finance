@@ -59,9 +59,13 @@ register_csrf(app)
 
 
 # 统一注入安全响应头：浏览器默认即可加固大半 XSS / Clickjacking / MIME-sniff 风险。
-# 高德地图瓦片:行程地图用真实底图(街道 / 地名 / POI 自己画不出来)。
+# 地图瓦片:行程地图用真实底图(街道 / 地名 / POI 自己画不出来)。
+# 高德——国内快、地名全中文;OSM——境外街道数据全得多,高德在国外基本是空的。
 # 只放**图片**源,不放脚本源——地图库是打进 bundle 的,不引第三方 JS。
-_MAP_TILE_HOSTS = "https://*.is.autonavi.com"
+_MAP_TILE_HOSTS = (
+    "https://*.is.autonavi.com "
+    "https://tile.openstreetmap.org https://*.tile.openstreetmap.org"
+)
 
 _csp_default = (
     "default-src 'self'; "

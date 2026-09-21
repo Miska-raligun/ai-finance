@@ -153,7 +153,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
 import { mapUrl } from '@/utils/maplink'
-import { wgs2gcj } from '@/utils/gcj02'
+import { wgs2gcj, gcj2wgs } from '@/utils/gcj02'
 import { photoList, photoUrl } from '@/utils/tripPhotos'
 
 const props = defineProps({
@@ -170,13 +170,37 @@ const canEdit = computed(() => !!props.tripId && !props.shareToken)
 
 /* ---------- 底图 ---------- */
 
-const LAYERS = [
-  { key: 'road', label: '街道', url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}' },
-  { key: 'sat', label: '卫星', url: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}' },
-]
 // 卫星图没有地名,叠一层高德的注记层上去
-const LABEL_URL = 'https://webst0{s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}'
-const layer = ref('road')
+const AMAP_LABEL = 'https://webst0{s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}'
+
+/** 两套底图的坐标系不一样,切图层时点和线都要跟着换算:
+ *  高德是 GCJ-02(火星坐标),OSM 是 WGS-84。混着用,境内会整体偏几百米。
+ *
+ *  maxNativeZoom 很关键:超过瓦片实际存在的层级,Leaflet 默认会去请求
+ *  根本不存在的瓦片,画面就整片空白;设了它就改成把最后一级放大显示。
+ *  minZoom 同理——缩得太远高德那边也没有瓦片。 */
+const LAYERS = [
+  {
+    key: 'amap', label: '高德', datum: 'gcj02',
+    url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+    opts: { subdomains: '1234', minZoom: 3, maxZoom: 19, maxNativeZoom: 18, attribution: '© 高德地图' },
+  },
+  {
+    // 高德的境外数据很薄,放大基本看不到街道;国际底图用 OSM 补上
+    key: 'osm', label: '国际', datum: 'wgs84',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    opts: { minZoom: 2, maxZoom: 19, maxNativeZoom: 19, attribution: '© OpenStreetMap' },
+  },
+  {
+    key: 'sat', label: '卫星', datum: 'gcj02',
+    url: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
+    opts: { subdomains: '1234', minZoom: 3, maxZoom: 19, maxNativeZoom: 18, attribution: '© 高德地图' },
+    labels: AMAP_LABEL,
+  },
+]
+const LAYER_KEY = 'trip:maplayer'
+const layer = ref('amap')
+const layerDef = computed(() => LAYERS.find(l => l.key === layer.value) || LAYERS[0])
 
 /* ---------- 取点 ---------- */
 
@@ -210,13 +234,11 @@ const points = computed(() => {
       const lat = Number(st.lat), lng = Number(st.lng)
       if (!isFinite(lat) || !isFinite(lng)) continue
       const name = st.t || '未命名'
-      const [glat, glng] = wgs2gcj(lat, lng)
       out.push({
         id: `${d.day_no}-${out.length}`,
         si,
         t: name,
-        lat, lng,                 // 原始 WGS-84,给"在地图应用里打开"用
-        glat, glng,               // GCJ-02,画在高德底图上用
+        lat, lng,                 // 一律存 WGS-84;画到哪套坐标系由 coord() 决定
         air: !!st.air, sea: !!st.sea,
         desc: st.desc || st.note || '',
         photos: photoList(st),
@@ -231,6 +253,11 @@ const points = computed(() => {
   return out
 })
 
+/** 按当前底图的坐标系换算出要画的位置。 */
+function coord(p) {
+  return layerDef.value.datum === 'gcj02' ? wgs2gcj(p.lat, p.lng) : [p.lat, p.lng]
+}
+
 const hasAir = computed(() => points.value.some(p => p.air))
 const hasSea = computed(() => points.value.some(p => p.sea))
 
@@ -243,8 +270,9 @@ const hasSea = computed(() => points.value.some(p => p.sea))
 function fitBounds() {
   const pts = points.value
   if (!pts.length) return null
-  const lats = pts.map(p => p.glat).sort((a, b) => a - b)
-  const lngs = pts.map(p => p.glng).sort((a, b) => a - b)
+  const cs = pts.map(coord)
+  const lats = cs.map(c => c[0]).sort((a, b) => a - b)
+  const lngs = cs.map(c => c[1]).sort((a, b) => a - b)
   const at = (arr, t) => arr[Math.max(0, Math.min(arr.length - 1, Math.round((arr.length - 1) * t)))]
   const full = [[lats[0], lngs[0]], [lats[lats.length - 1], lngs[lngs.length - 1]]]
   if (pts.length < 8) return L.latLngBounds(full)
@@ -290,8 +318,8 @@ function draw() {
   const color = accentColor()
 
   for (let i = 1; i < ps.length; i++) {
-    const a = [ps[i - 1].glat, ps[i - 1].glng]
-    const b = [ps[i].glat, ps[i].glng]
+    const a = coord(ps[i - 1])
+    const b = coord(ps[i])
     if (a[0] === b[0] && a[1] === b[1]) continue
     const air = ps[i].air, sea = ps[i].sea
     L.polyline(arc(a, b, air ? 0.17 : 0.09), {
@@ -306,7 +334,7 @@ function draw() {
 
   ps.forEach((p, i) => {
     const kind = i === 0 ? 'start' : (i === ps.length - 1 ? 'end' : '')
-    const m = L.marker([p.glat, p.glng], {
+    const m = L.marker(coord(p), {
       icon: L.divIcon({
         className: 'tm-pin-wrap',
         html: `<span class="tm-pin ${kind}"></span>`,
@@ -325,18 +353,33 @@ function draw() {
 }
 
 function setLayer(key) {
-  layer.value = key
+  const prev = layerDef.value
+  const next = LAYERS.find(l => l.key === key) || LAYERS[0]
+  layer.value = next.key
+  try { localStorage.setItem(LAYER_KEY, next.key) } catch { /* 隐私模式下会抛 */ }
   if (!map) return
+
+  // 换坐标系时把当前中心也换过去,否则一切图整幅跳几百米
+  let center = null
+  if (map._loaded && prev.datum !== next.datum) {
+    const c = map.getCenter()
+    center = next.datum === 'gcj02'
+      ? wgs2gcj(c.lat, c.lng)
+      : gcj2wgs(c.lat, c.lng)
+  }
+
   if (baseLayer) map.removeLayer(baseLayer)
   if (labelLayer) { map.removeLayer(labelLayer); labelLayer = null }
-  const def = LAYERS.find(l => l.key === key) || LAYERS[0]
-  baseLayer = L.tileLayer(def.url, {
-    subdomains: '1234', maxZoom: 18, attribution: '© 高德地图',
-  }).addTo(map)
-  if (key === 'sat') {
-    labelLayer = L.tileLayer(LABEL_URL, { subdomains: '1234', maxZoom: 18 }).addTo(map)
+  baseLayer = L.tileLayer(next.url, next.opts).addTo(map)
+  if (next.labels) {
+    labelLayer = L.tileLayer(next.labels, next.opts).addTo(map)
   }
   baseLayer.bringToBack()
+
+  if (map._loaded) {
+    draw()
+    if (center) map.setView(center, map.getZoom(), { animate: false })
+  }
 }
 
 function fitAll() {
@@ -344,7 +387,21 @@ function fitAll() {
   if (b && map) map.fitBounds(b, { padding: [36, 36] })
 }
 
+/** 选默认底图:行程主要在境外就用 OSM——高德境外几乎没有街道数据,
+ *  放大只剩一片底色。用户手动切过就一直听用户的。 */
+function pickDefaultLayer() {
+  let saved = null
+  try { saved = localStorage.getItem(LAYER_KEY) } catch { /* 隐私模式 */ }
+  if (saved && LAYERS.some(l => l.key === saved)) return saved
+  const pts = points.value
+  if (!pts.length) return 'amap'
+  const inChina = pts.filter(p =>
+    p.lng > 72 && p.lng < 138 && p.lat > 0.8 && p.lat < 56).length
+  return inChina * 2 >= pts.length ? 'amap' : 'osm'
+}
+
 onMounted(() => {
+  layer.value = pickDefaultLayer()
   map = L.map(mapEl.value, {
     zoomControl: true,
     attributionControl: true,
@@ -409,7 +466,7 @@ function openStop(p) {
 
 /** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。 */
 function focusStop(p) {
-  if (map) map.flyTo([p.glat, p.glng], Math.max(map.getZoom(), 10), { duration: 0.6 })
+  if (map) map.flyTo(coord(p), Math.max(map.getZoom(), 10), { duration: 0.6 })
   openStop(p)
 }
 
@@ -419,8 +476,8 @@ const siblings = computed(() => {
   // 同一天、离得很近(约 1km 内)的点,当作"这一带"
   return points.value.filter(p =>
     p.dayNo === d.dayNo &&
-    Math.abs(p.glat - d.glat) < 0.012 &&
-    Math.abs(p.glng - d.glng) < 0.02)
+    Math.abs(p.lat - d.lat) < 0.012 &&
+    Math.abs(p.lng - d.lng) < 0.02)
 })
 
 /* ---------- 编辑:介绍与照片 ---------- */

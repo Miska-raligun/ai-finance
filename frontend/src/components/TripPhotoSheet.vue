@@ -50,27 +50,39 @@
                 >×</span>
               </button>
 
-              <label class="phs-cell phs-add" :class="{ busy: busy === si }">
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  hidden
-                  :disabled="busy !== null"
-                  @change="pick(si, $event)"
-                >
+              <button
+                type="button"
+                class="phs-cell phs-add"
+                :class="{ busy: busy === si }"
+                :disabled="busy !== null"
+                @click="askSource(si)"
+              >
                 <span v-if="busy === si" class="phs-add-t">上传中…</span>
                 <template v-else>
                   <span class="phs-add-i">＋</span>
-                  <span class="phs-add-t">拍照</span>
+                  <span class="phs-add-t">加照片</span>
                 </template>
-              </label>
+              </button>
             </div>
           </section>
 
           <p v-if="err" class="phs-err">{{ err }}</p>
         </div>
+
+        <!-- 拍照还是从相册选,交给用户决定:直接 capture 会二话不说唤起相机,
+             想传之前拍好的照片就没路径了 -->
+        <input ref="camRef" type="file" accept="image/*" capture="environment" hidden @change="onFiles">
+        <input ref="libRef" type="file" accept="image/*" multiple hidden @change="onFiles">
+
+        <transition name="phs-pick">
+          <div v-if="picking !== null" class="phs-pick" @click.self="picking = null">
+            <div class="phs-pick-box">
+              <button type="button" @click="use('cam')">📷 拍照</button>
+              <button type="button" @click="use('lib')">🖼 从相册选</button>
+              <button type="button" class="cancel" @click="picking = null">取消</button>
+            </div>
+          </div>
+        </transition>
 
         <TripPhotoViewer
           :photos="viewPhotos"
@@ -146,10 +158,22 @@ async function persist(si, photos) {
   }
 }
 
-async function pick(si, e) {
+const picking = ref(null)
+const camRef = ref(null)
+const libRef = ref(null)
+
+function askSource(si) { picking.value = si }
+function use(kind) {
+  const el = kind === 'cam' ? camRef.value : libRef.value
+  el?.click()
+}
+
+async function onFiles(e) {
+  const si = picking.value
   const files = [...(e.target.files || [])]
   e.target.value = ''
-  if (!files.length) return
+  picking.value = null
+  if (si === null || !files.length) return
   busy.value = si
   err.value = ''
   const next = [...photosOf(si)]
@@ -229,6 +253,7 @@ function drop(si, i) {
   background: rgba(0, 0, 0, .6); color: #fff; font-size: 15px;
 }
 .phs-add {
+  appearance: none; font: inherit; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   border: 1.5px dashed var(--trip-accent, #2B6A80);
   color: var(--trip-accent, #2B6A80);
@@ -238,5 +263,26 @@ function drop(si, i) {
 .phs-add-i { font-size: 21px; line-height: 1; }
 .phs-add-t { font-size: 11px; }
 .phs-empty, .phs-err { font-size: 13px; color: var(--color-text-muted); padding: 8px 2px; }
+
+/* 来源选择 */
+.phs-pick {
+  position: absolute; inset: 0; z-index: 2;
+  background: rgba(20, 26, 30, .45);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+.phs-pick-box {
+  width: min(420px, 100%); display: flex; flex-direction: column; gap: 8px;
+}
+.phs-pick-box button {
+  appearance: none; border: 0; cursor: pointer; font: inherit;
+  font-size: 15px; font-weight: 700; padding: 14px;
+  border-radius: 14px; background: var(--color-surface, #fff);
+  color: var(--color-text-strong, #2A3D45);
+}
+.phs-pick-box button.cancel { color: var(--color-text-muted); font-weight: 500; }
+.phs-pick-enter-active, .phs-pick-leave-active { transition: opacity .16s ease; }
+.phs-pick-enter-from, .phs-pick-leave-to { opacity: 0; }
 .phs-err { color: var(--color-error, #e05a5a); }
 </style>

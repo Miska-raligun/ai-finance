@@ -25,27 +25,31 @@
       </button>
 
       <!-- 拍照上传位:手机上 capture 会直接唤起相机 -->
-      <label v-if="canEdit" class="ps-add" :class="{ busy }">
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          multiple
-          hidden
-          :disabled="busy"
-          @change="onPick"
-        >
+      <button v-if="canEdit" type="button" class="ps-add" :class="{ busy }" :disabled="busy" @click="picking = true">
         <span v-if="busy" class="ps-add-t">上传中…</span>
         <template v-else>
           <span class="ps-add-i">＋</span>
-          <span class="ps-add-t">{{ photos.length ? '再拍一张' : '拍照 / 选图' }}</span>
+          <span class="ps-add-t">加照片</span>
         </template>
-      </label>
+      </button>
+      <input ref="camRef" type="file" accept="image/*" capture="environment" hidden @change="onPick">
+      <input ref="libRef" type="file" accept="image/*" multiple hidden @change="onPick">
 
-      <span v-else-if="!photos.length" class="ps-none">还没有照片</span>
+      <span v-if="!canEdit && !photos.length" class="ps-none">还没有照片</span>
     </div>
 
     <p v-if="err" class="ps-err">{{ err }}</p>
+
+    <!-- 拍照还是从相册选,交给用户决定 -->
+    <teleport to="body">
+      <div v-if="picking" class="ps-pick" @click.self="picking = false">
+        <div class="ps-pick-box">
+          <button type="button" @click="use('cam')">📷 拍照</button>
+          <button type="button" @click="use('lib')">🖼 从相册选</button>
+          <button type="button" class="cancel" @click="picking = false">取消</button>
+        </div>
+      </div>
+    </teleport>
 
     <TripPhotoViewer
       :photos="photos"
@@ -73,6 +77,13 @@ const props = defineProps({
 const emit = defineEmits(['change'])
 
 const busy = ref(false)
+const picking = ref(false)
+const camRef = ref(null)
+const libRef = ref(null)
+
+function use(kind) {
+  ;(kind === 'cam' ? camRef.value : libRef.value)?.click()
+}
 const err = ref('')
 const viewing = ref(null)
 
@@ -83,6 +94,7 @@ function url(sha) {
 async function onPick(e) {
   const files = [...(e.target.files || [])]
   e.target.value = ''
+  picking.value = false
   if (!files.length) return
   busy.value = true
   err.value = ''
@@ -123,6 +135,7 @@ function remove(i) {
 }
 
 .ps-add {
+  appearance: none; font: inherit;
   width: 76px; height: 76px; border-radius: 10px; cursor: pointer;
   border: 1.5px dashed var(--trip-accent, var(--color-primary));
   color: var(--trip-accent, var(--color-primary));
@@ -136,4 +149,22 @@ function remove(i) {
 .ps-add-t { font-size: 10.5px; line-height: 1.25; padding: 0 4px; }
 .ps-none { font-size: 12px; color: var(--color-text-muted); align-self: center; }
 .ps-err { margin: 6px 0 0; font-size: 12px; color: var(--color-error, #e05a5a); }
+</style>
+
+<style>
+/* 来源选择浮层 teleport 到 body,不能 scoped */
+.ps-pick {
+  position: fixed; inset: 0; z-index: 3500;
+  background: rgba(20, 26, 30, .45);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+.ps-pick-box { width: min(420px, 100%); display: flex; flex-direction: column; gap: 8px; }
+.ps-pick-box button {
+  appearance: none; border: 0; cursor: pointer; font: inherit;
+  font-size: 15px; font-weight: 700; padding: 14px;
+  border-radius: 14px; background: var(--color-surface, #fff);
+  color: var(--color-text-strong, #2A3D45);
+}
+.ps-pick-box button.cancel { color: var(--color-text-muted); font-weight: 500; }
 </style>
