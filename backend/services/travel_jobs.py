@@ -148,6 +148,12 @@ def _run(job_id: int, user_id: int, llm: dict | None) -> None:
         trip_id = row["trip_id"]
         notice = payload.get("notice")
 
+        if row["kind"] == "fill_spots":
+            _step_spot_descs(conn, job_id, trip_id, llm)
+            if not _is_cancelled(conn, job_id):
+                _update(conn, job_id, status="done")
+            return
+
         if trip_id is None:
             trip_id = _step_outline(conn, job_id, user_id, payload, llm)
             if trip_id is None:
@@ -218,6 +224,99 @@ def _step_outline(conn, job_id: int, user_id: int, payload: dict, llm) -> int | 
     _set_steps(conn, job_id, steps)
     _update(conn, job_id, trip_id=trip_id)
     return trip_id
+
+
+def _missing_desc(detail: dict) -> list[str]:
+    """这一天里还没有介绍的地点名(去重、保序)。"""
+    out, seen = [], set()
+    for st in (detail.get("stops") or []):
+        if not isinstance(st, dict):
+            continue
+        name = (st.get("t") or "").strip()
+        if not name or name in seen:
+            continue
+        if (st.get("desc") or "").strip():
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _step_spot_descs(conn, job_id: int, trip_id: int, llm) -> None:
+    """给已有行程批量补景点介绍。**只填空的**,写过的一律不动。"""
+    trip = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if not trip:
+        return
+    trip = dict(trip)
+
+    raw = conn.execute("SELECT steps_json FROM trip_ai_jobs WHERE id = ?", (job_id,)).fetchone()
+    steps = json.loads(raw["steps_json"] or "[]")
+    days = [dict(r) for r in conn.execute(
+        "SELECT * FROM trip_days WHERE trip_id = ? ORDER BY day_no", (trip_id,),
+    ).fetchall()]
+
+    if not steps:
+        steps = []
+        for d in days:
+            try:
+                detail = json.loads(d["detail_json"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            todo = _missing_desc(detail)
+            if todo:
+                steps.append({"key": f"spots-{d['day_no']}",
+                              "label": f"第 {d['day_no']} 天 · {len(todo)} 个地点",
+                              "status": "pending", "error": None})
+        _set_steps(conn, job_id, steps)
+        if not steps:
+            return
+
+    by_no = {d["day_no"]: d for d in days}
+    for step in steps:
+        if step["status"] == "done" or not step["key"].startswith("spots-"):
+            continue
+        if _is_cancelled(conn, job_id):
+            for s2 in steps:
+                if s2["status"] in ("pending", "running"):
+                    s2["status"] = "skipped"
+            _set_steps(conn, job_id, steps)
+            return
+
+        day = by_no.get(int(step["key"].split("-")[1]))
+        if not day:
+            step.update(status="skipped")
+            _set_steps(conn, job_id, steps)
+            continue
+
+        step.update(status="running", error=None)
+        _set_steps(conn, job_id, steps)
+        try:
+            detail = json.loads(day["detail_json"] or "{}")
+            names = _missing_desc(detail)
+            if not names:
+                step.update(status="skipped")
+                _set_steps(conn, job_id, steps)
+                continue
+            got = travel_ai.gen_spot_descs(trip, day, names, llm=llm)
+            written = 0
+            for st in (detail.get("stops") or []):
+                if not isinstance(st, dict):
+                    continue
+                name = (st.get("t") or "").strip()
+                # 再判一次空:用户可能在任务跑的当口自己写了一条
+                if name in got and not (st.get("desc") or "").strip():
+                    st["desc"] = got[name]
+                    written += 1
+            if written:
+                conn.execute(
+                    "UPDATE trip_days SET detail_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(detail, ensure_ascii=False), _now(), day["id"]),
+                )
+                conn.commit()
+            step.update(status="done" if written else "skipped")
+        except travel_ai.AIError as e:
+            step.update(status="failed", error=str(e)[:200])
+        _set_steps(conn, job_id, steps)
 
 
 def _step_extras(conn, job_id: int, user_id: int, trip_id: int,

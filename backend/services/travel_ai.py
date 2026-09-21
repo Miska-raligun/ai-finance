@@ -17,8 +17,9 @@ from datetime import date, datetime, timedelta
 
 from prompts.travel import (
     BLOCK_KINDS, DAY_SYSTEM, FACTS_EXTRACT_SYSTEM, OUTLINE_SYSTEM,
-    build_block_prompt, build_day_prompt, build_facts_extract_prompt,
-    build_outline_from_idea, build_outline_from_notice,
+    SPOT_DESCS_SYSTEM, build_block_prompt, build_day_prompt,
+    build_facts_extract_prompt, build_outline_from_idea,
+    build_outline_from_notice, build_spot_descs_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -358,6 +359,37 @@ def extract_facts(notice: str, llm: dict | None = None) -> list[dict]:
         label, body = _s(it.get("label"), 40), _s(it.get("body"), 800)
         if label and body:
             out.append({"label": label, "body": body})
+    return out
+
+
+def gen_spot_descs(trip: dict, day: dict, names: list[str],
+                   llm: dict | None = None) -> dict[str, str]:
+    """一次给一天的地点批量写介绍。
+
+    按天而不是按点调用:一趟十四天六七十个点,一个点一次调用又慢又贵,
+    而且模型看不到当天的上下文。按天来,一次十来个点,还能顺着当天的
+    主线写得连贯些。
+
+    @returns {地点名: 介绍}。模型没认出来的点不会出现在结果里。
+    """
+    from constants import LLM_TIMEOUT_LONG
+    if not names:
+        return {}
+    raw = _json_call(SPOT_DESCS_SYSTEM, build_spot_descs_prompt(trip, day, names),
+                     endpoint="travel.spot_descs", timeout=LLM_TIMEOUT_LONG,
+                     temperature=0.5, llm=llm)
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    wanted = {n: n for n in names}
+    for it in (raw.get("items") or [])[:20]:
+        if not isinstance(it, dict):
+            continue
+        name = _s(it.get("t") or it.get("name"), 60)
+        desc = _s(it.get("desc"), 400)
+        # 名字对不上就丢掉:写回去要按名字配对,配错了比没有还糟
+        if name and desc and name in wanted:
+            out[name] = desc
     return out
 
 

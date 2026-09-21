@@ -83,7 +83,12 @@
 
       <div v-if="blankDays && !activeJob" class="blank-tip">
         <span>还有 <b>{{ blankDays }}</b> 天没有内容</span>
-        <button type="button" @click="openAi(trip.id)">✨ 让 AI 补全</button>
+        <button type="button" @click="openAi(trip.id, 'fill')">✨ 让 AI 补全</button>
+      </div>
+
+      <div v-if="bareSpots && !activeJob" class="blank-tip">
+        <span>有 <b>{{ bareSpots }}</b> 个地点还没写介绍</span>
+        <button type="button" @click="openAi(trip.id, 'spots')">✨ 让 AI 写</button>
       </div>
 
       <div class="trip-tabs">
@@ -157,6 +162,8 @@
       :trip-id="aiTripId"
       :job-id="aiJobId"
       :blank-days="blankDays"
+      :bare-spots="bareSpots"
+      :mode="aiMode"
       @close="onAiClose"
       @created="onAiDone"
     />
@@ -295,12 +302,14 @@ const tab = ref('days')
 const showAi = ref(false)
 const aiTripId = ref(0)
 const aiJobId = ref(0)
+const aiMode = ref('new')
 const activeJob = ref(null)
 let jobTimer = null
 
-function openAi(tripId) {
+function openAi(tripId, mode = 'new') {
   aiTripId.value = tripId || 0
   aiJobId.value = 0
+  aiMode.value = mode
   showAi.value = true
 }
 function resumeAi() {
@@ -375,6 +384,20 @@ const accentVars = computed(() => {
 /** 还空着的天数:有这几天才值得提示「让 AI 补全」。 */
 const blankDays = computed(() =>
   days.value.filter(d => !Object.keys(d.detail || {}).length).length)
+
+/** 还没有介绍的地点数。老行程(AI 功能上线前导入的)这块基本都是空的。 */
+const bareSpots = computed(() => {
+  const seen = new Set()
+  for (const d of days.value) {
+    for (const st of (d.detail?.stops || [])) {
+      const name = (st?.t || '').trim()
+      if (name && !(st.desc || '').trim() && !seen.has(`${d.day_no}:${name}`)) {
+        seen.add(`${d.day_no}:${name}`)
+      }
+    }
+  }
+  return seen.size
+})
 
 const selectedDay = computed(() =>
   days.value.find(d => d.day_no === selectedDayNo.value) || null)

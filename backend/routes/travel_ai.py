@@ -90,6 +90,18 @@ def ai_fill_days(trip_id: int):
     return jsonify({"job_id": job_id}), 201
 
 
+@travel_ai_bp.route("/api/trips/<int:trip_id>/ai/spots", methods=["POST"])
+@login_required
+def ai_fill_spots(trip_id: int):
+    """给已有行程批量补景点介绍。按天分步,只填空的,写过的不动。"""
+    if not _own_trip(trip_id):
+        return jsonify({"error": "行程不存在"}), 404
+    data = request.get_json() or {}
+    job_id = travel_jobs.create_job(g.user_id, "fill_spots", {}, trip_id=trip_id)
+    travel_jobs.start(job_id, g.user_id, current_llm(data))
+    return jsonify({"job_id": job_id}), 201
+
+
 @travel_ai_bp.route("/api/trips/ai/jobs", methods=["GET"])
 @login_required
 def ai_jobs():

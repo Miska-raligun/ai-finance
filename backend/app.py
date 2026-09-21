@@ -159,6 +159,7 @@ apply_endpoint_limits(app, {
     "travel_ai.ai_generate": "5/minute",
     "travel_ai.ai_extract": "20/minute",
     "travel_ai.ai_fill_days": "5/minute",
+    "travel_ai.ai_fill_spots": "5/minute",
     "travel_ai.ai_block": "30/minute",
 })
 

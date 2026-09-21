@@ -11,8 +11,21 @@
     :close-on-click-modal="false"
     @update:model-value="close"
   >
+    <!-- 批量补景点介绍:没什么可填的,说清楚就开跑 -->
+    <template v-if="!job && mode === 'spots'">
+      <p class="ai-hint">
+        给这趟行程里<b>还没有介绍的 {{ bareSpots || '' }} 个地点</b>各写一条。
+        <b>已经写过的不会动</b>——包括你自己写的。
+      </p>
+      <p class="ai-hint">
+        按天分批生成,一天一次调用;中途可以停,某天失败了也只影响那一天。
+        写完之后每条都还能自己改。
+      </p>
+      <p v-if="err" class="ai-err">{{ err }}</p>
+    </template>
+
     <!-- 补全已有行程:只补空白的天,不问标题日期主题色 -->
-    <template v-if="!job && isFill">
+    <template v-else-if="!job && isFill">
       <p class="ai-hint">
         把这趟行程里<b>还没有内容的 {{ blankDays || '' }} 天</b>补上。
         已经填过的天不会动——包括你自己改过的。
@@ -50,7 +63,7 @@
     </template>
 
     <!-- 新建 -->
-    <template v-else-if="!job">
+    <template v-else-if="!job && mode === 'new'">
       <div class="ai-tabs">
         <button
           v-for="t in TABS"
@@ -186,7 +199,12 @@
 
       <p v-if="job.error" class="ai-err">{{ job.error }}</p>
       <p v-else-if="job.status === 'done'" class="ai-done">
-        生成完了。内容都在行程里,哪儿不对直接改——AI 写的只是初稿。
+        <template v-if="!job.steps.length">
+          没有需要补的了。
+        </template>
+        <template v-else>
+          写完了。内容都在行程里,哪儿不对直接改——AI 写的只是初稿。
+        </template>
       </p>
     </template>
 
@@ -194,7 +212,7 @@
       <template v-if="!job">
         <el-button @click="close">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submit">
-          {{ isFill ? '开始补全' : '开始生成' }}
+          {{ submitLabel }}
         </el-button>
       </template>
       <template v-else>
@@ -227,6 +245,9 @@ const props = defineProps({
   jobId: { type: Number, default: 0 },
   // 补全模式下用来告诉用户会补几天
   blankDays: { type: Number, default: 0 },
+  // 'new' 新建 | 'fill' 补空白天 | 'spots' 批量补景点介绍
+  mode: { type: String, default: 'new' },
+  bareSpots: { type: Number, default: 0 },
 })
 const emit = defineEmits(['close', 'created'])
 
@@ -251,11 +272,16 @@ const err = ref('')
 const job = ref(null)
 let timer = null
 
-const isFill = computed(() => !!props.tripId)
+const isFill = computed(() => props.mode === 'fill')
 const dialogTitle = computed(() => {
-  if (job.value) return isFill.value ? 'AI 正在补全' : 'AI 正在生成行程'
-  return isFill.value ? '✨ 补全空白的天' : '✨ AI 生成行程'
+  const running = !!job.value
+  if (props.mode === 'spots') return running ? 'AI 正在写介绍' : '✨ 给景点补介绍'
+  if (isFill.value) return running ? 'AI 正在补全' : '✨ 补全空白的天'
+  return running ? 'AI 正在生成行程' : '✨ AI 生成行程'
 })
+const submitLabel = computed(() => ({
+  spots: '开始写', fill: '开始补全',
+}[props.mode] || '开始生成'))
 const dialogWidth = computed(() => window.innerWidth < 768 ? 'calc(100vw - 24px)' : '560px')
 const pct = computed(() => {
   const j = job.value
@@ -323,6 +349,19 @@ function onDrop(e) { readFile(e.dataTransfer?.files?.[0]) }
 async function submit() {
   err.value = ''
   const body = {}
+  if (props.mode === 'spots') {
+    submitting.value = true
+    try {
+      const res = await api.post(`/api/trips/${props.tripId}/ai/spots`, {})
+      job.value = { status: 'pending', steps: [], done: 0, total: 0, id: res.data.job_id }
+      poll(res.data.job_id)
+    } catch (e) {
+      err.value = e?.response?.data?.error || '提交失败'
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
   if (isFill.value) {
     if (notice.value.trim()) body.notice = notice.value
     submitting.value = true

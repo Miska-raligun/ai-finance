@@ -525,3 +525,120 @@ def test_today_is_in_the_prompt(app, auth_client, monkeypatch):
                               json={"idea": "去冰岛"}).get_json()["job_id"]
     _wait(auth_client, job_id)
     assert date.today().strftime("%Y-%m-%d") in seen[0]
+
+
+# ---------- 批量补景点介绍 ----------
+
+_SPOTS_DAY = {
+    "stops": [
+        {"t": "岩石教堂", "lat": 60.17, "lng": 24.92},
+        {"t": "西贝柳斯公园", "lat": 60.18, "lng": 24.91, "desc": "我自己写的,别动"},
+        {"t": "赫尔辛基机场", "lat": 60.32, "lng": 24.96},
+    ],
+}
+
+
+def _trip_with_bare_stops(auth_client, days=2):
+    tid = auth_client.post("/api/trips", json={
+        "title": "老行程", "start_date": "2026-10-01",
+        "end_date": f"2026-10-0{days}",
+    }).get_json()["id"]
+    for n in range(1, days + 1):
+        auth_client.patch(f"/api/trips/{tid}/days/{n}",
+                          json={"route": f"第 {n} 天", "detail": _SPOTS_DAY})
+    return tid
+
+
+def _stub_spots(monkeypatch, items=None, fail_days=()):
+    calls = []
+
+    def fake(messages, llm=None, tools=None, tool_choice=None,
+             temperature=0.3, timeout=10, endpoint="unknown"):
+        calls.append(endpoint)
+        user = messages[-1]["content"]
+        n = next((d for d in (1, 2, 3) if f"第 {d} 天" in user), 0)
+        if n in fail_days:
+            return {"choices": [{"message": {"content": "写不出来"}}]}
+        payload = {"items": items if items is not None else [
+            {"t": "岩石教堂", "desc": "凿进整块花岗岩里的教堂,声学极好。"},
+            {"t": "赫尔辛基机场", "desc": "芬兰的门户,到市区半小时。"},
+            {"t": "西贝柳斯公园", "desc": "这条不该被写进去"},
+        ]}
+        return {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr("services.llm._call_llm", fake)
+    return calls
+
+
+def test_fill_spots_only_fills_empty_ones(app, auth_client, monkeypatch):
+    """核心约束:已经写过的介绍一个字都不能动。"""
+    calls = _stub_spots(monkeypatch)
+    tid = _trip_with_bare_stops(auth_client)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    assert job["status"] == "done"
+
+    stops = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]
+    by = {s["t"]: s.get("desc") for s in stops}
+    assert "花岗岩" in by["岩石教堂"]
+    assert "门户" in by["赫尔辛基机场"]
+    assert by["西贝柳斯公园"] == "我自己写的,别动"      # 模型给了也不采纳
+
+
+def test_fill_spots_is_one_call_per_day(app, auth_client, monkeypatch):
+    """按天批量,不是一个点一次——六七十个点一个个调又慢又贵。"""
+    calls = _stub_spots(monkeypatch)
+    tid = _trip_with_bare_stops(auth_client, days=2)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    assert calls.count("travel.spot_descs") == 2
+    assert [s["key"] for s in job["steps"]] == ["spots-1", "spots-2"]
+    assert all(s["status"] == "done" for s in job["steps"])
+
+
+def test_fill_spots_skips_names_it_does_not_know(app, auth_client, monkeypatch):
+    """名字对不上就丢掉:写回去要按名字配对,配错了比没有还糟。"""
+    _stub_spots(monkeypatch, items=[{"t": "根本不存在的地方", "desc": "瞎编的"}])
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    _wait(auth_client, job_id)
+    stops = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]
+    assert all(not (s.get("desc") or "").strip() or s["t"] == "西贝柳斯公园" for s in stops)
+
+
+def test_fill_spots_one_bad_day_does_not_sink_the_rest(app, auth_client, monkeypatch):
+    _stub_spots(monkeypatch, fail_days=(1,))
+    tid = _trip_with_bare_stops(auth_client, days=2)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    steps = {s["key"]: s["status"] for s in job["steps"]}
+    assert steps["spots-1"] == "failed" and steps["spots-2"] == "done"
+    assert job["status"] == "done"
+
+
+def test_fill_spots_has_no_steps_when_nothing_is_missing(app, auth_client, monkeypatch):
+    calls = _stub_spots(monkeypatch)
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    auth_client.post(f"/api/trips/{tid}/ai/spots", json={})
+    _wait(auth_client, auth_client.post(f"/api/trips/{tid}/ai/spots",
+                                       json={}).get_json()["job_id"])
+    calls.clear()
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    assert job["steps"] == [] and job["status"] == "done"
+    assert not calls                                  # 没有要补的就一次都不调
+
+
+def test_fill_spots_is_owner_only(app, auth_client, client):
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    from werkzeug.security import generate_password_hash
+    from db import get_db
+    with app.app_context():
+        db = get_db()
+        db.execute("INSERT INTO users (username, password, is_admin) VALUES (?,?,0)",
+                   ("stranger", generate_password_hash("p")))
+        db.commit()
+        uid = db.execute("SELECT id FROM users WHERE username='stranger'").fetchone()[0]
+    with client.session_transaction() as s:
+        s["user_id"] = uid
+    assert client.post(f"/api/trips/{tid}/ai/spots", json={}).status_code == 404
