@@ -1,6 +1,6 @@
 <!-- components/TripDayDetail.vue — 某天的详情:时间轴 / 景点 / 贴士 / 住宿 + 手记 -->
 <template>
-  <div v-if="day" class="dd">
+  <div v-if="day" ref="rootRef" class="dd">
     <header class="dd-head">
       <div class="dd-head-main">
         <span class="dd-dayno">Day {{ day.day_no }}</span>
@@ -12,11 +12,6 @@
         <span v-if="day.meal" class="dd-chip">含餐 {{ day.meal }}</span>
       </div>
     </header>
-
-    <!-- 当日地图:该天有带坐标的停留点才显示 -->
-    <section v-if="hasStops" class="dd-sec">
-      <TripMap :days="[day]" :trip-id="tripId" title="当日路线" />
-    </section>
 
     <!-- 当日时间轴 -->
     <section v-if="sched.length" class="dd-sec">
@@ -30,6 +25,11 @@
           </span>
         </li>
       </ol>
+    </section>
+
+    <!-- 当日地图:该天有带坐标的停留点才显示 -->
+    <section v-if="hasStops" class="dd-sec">
+      <TripMap :days="[day]" :trip-id="tripId" title="当日路线" />
     </section>
 
     <section v-if="spots.length" class="dd-sec">
@@ -66,18 +66,18 @@
       </div>
     </section>
 
-    <!-- 照片:到了现场直接拍了传,每个点一个位置 -->
+    <!-- 照片:详情里只留一行入口,拍照上传走满屏的子页面 -->
     <section v-if="stops.length" class="dd-sec">
-      <h4 class="dd-h">照片</h4>
-      <div v-for="(st, si) in stops" :key="si" class="dd-ph">
-        <div class="dd-ph-name">{{ st.t || `地点 ${si + 1}` }}</div>
-        <TripPhotoStrip
-          :photos="photosOf(st)"
-          can-edit
-          :trip-id="tripId"
-          @change="savePhotos(si, $event)"
-        />
-      </div>
+      <button type="button" class="dd-ph-entry" @click="openPhotos">
+        <span class="dd-ph-left">
+          <span class="dd-ph-t">照片</span>
+          <span class="dd-ph-sub">{{ photoCount ? `${photoCount} 张` : '到了现场拍了传这儿' }}</span>
+        </span>
+        <span v-if="coverShas.length" class="dd-ph-covers">
+          <img v-for="sha in coverShas" :key="sha" :src="coverUrl(sha)" alt="">
+        </span>
+        <span class="dd-ph-go" aria-hidden="true">›</span>
+      </button>
     </section>
 
     <!-- 手记:存库,多端同步(原静态页只存本机) -->
@@ -98,6 +98,15 @@
   </div>
 
   <el-empty v-else description="选一天看详情" :image-size="70" />
+
+  <TripPhotoSheet
+    v-if="day"
+    :open="showPhotos"
+    :trip-id="tripId"
+    :day="day"
+    :accent="accentVars"
+    @close="showPhotos = false"
+  />
 </template>
 
 <script setup>
@@ -105,9 +114,9 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import TripMap from '@/components/TripMap.vue'
-import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
+import TripPhotoSheet from '@/components/TripPhotoSheet.vue'
 import { mapUrl } from '@/utils/maplink'
-import { photoList } from '@/utils/tripPhotos'
+import { photoList, photoUrl } from '@/utils/tripPhotos'
 
 const props = defineProps({
   tripId: { type: Number, required: true },
@@ -137,25 +146,27 @@ const stops = computed(() => detail.value.stops || [])
 const hasStops = computed(() =>
   stops.value.some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
 
-function photosOf(st) { return photoList(st) }
-
-/** 照片挂在 detail_json 的停留点上,所以要连着整个 detail 一起 PATCH。
- *  直接改 props.day 里那个对象——它就是父组件 days 里的同一个,
- *  改完地图那边的封面图也同步。 */
-async function savePhotos(si, photos) {
-  const st = props.day?.detail?.stops?.[si]
-  if (!st) return
-  const before = { photos: st.photos, photo: st.photo }
-  st.photos = photos
-  delete st.photo                    // 统一到数组,别留两份真相
-  try {
-    await api.patch(`/api/trips/${props.tripId}/days/${props.day.day_no}`,
-                    { detail: props.day.detail })
-  } catch {
-    Object.assign(st, before)        // 失败回滚,不然界面显示的是没存上的状态
-    ElMessage.error('照片保存失败')
+const showPhotos = ref(false)
+const rootRef = ref(null)
+// 子页面 teleport 到 body,拿不到外层 .travel-page 上的主题色,打开前读出来带过去
+const accentVars = ref({})
+function openPhotos() {
+  const el = rootRef.value
+  if (el) {
+    const cs = getComputedStyle(el)
+    const out = {}
+    for (const k of ['--trip-accent', '--trip-accent-weak', '--trip-accent-ink']) {
+      const v = cs.getPropertyValue(k).trim()
+      if (v) out[k] = v
+    }
+    accentVars.value = out
   }
+  showPhotos.value = true
 }
+const allShas = computed(() => stops.value.flatMap(st => photoList(st)))
+const photoCount = computed(() => allShas.value.length)
+const coverShas = computed(() => allShas.value.slice(0, 3))
+function coverUrl(sha) { return photoUrl({ tripId: props.tripId }, sha) }
 const tipGroups = computed(() => [
   { key: 'todo', label: '贴士', items: detail.value.todo || [] },
   { key: 'cam', label: '拍摄建议', items: detail.value.cam || [] },
@@ -245,6 +256,23 @@ async function saveJournal() {
 }
 .dd-maplink:hover { background: var(--trip-accent, var(--color-primary)); color: #fff; }
 .dd-journal-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-.dd-ph + .dd-ph { margin-top: 12px; }
-.dd-ph-name { font-size: 12.5px; font-weight: 700; color: var(--color-text); margin-bottom: 5px; }
+/* 照片入口:一行,右边压三张缩略图当预览 */
+.dd-ph-entry {
+  width: 100%; appearance: none; cursor: pointer; font: inherit; text-align: left;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--trip-line, var(--color-border-light));
+  background: var(--color-surface);
+}
+.dd-ph-entry:hover { border-color: var(--trip-accent, var(--color-primary)); }
+.dd-ph-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dd-ph-t { font-size: 13px; font-weight: 800; color: var(--color-text-strong); }
+.dd-ph-sub { font-size: 11.5px; color: var(--color-text-muted); }
+.dd-ph-covers { display: flex; flex-shrink: 0; }
+.dd-ph-covers img {
+  width: 34px; height: 34px; border-radius: 8px; object-fit: cover;
+  border: 2px solid var(--color-surface); margin-left: -10px;
+}
+.dd-ph-covers img:first-child { margin-left: 0; }
+.dd-ph-go { flex-shrink: 0; font-size: 19px; color: var(--color-text-muted); line-height: 1; }
 </style>

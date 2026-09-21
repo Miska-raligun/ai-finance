@@ -47,31 +47,20 @@
 
     <p v-if="err" class="ps-err">{{ err }}</p>
 
-    <!-- 看大图 -->
-    <teleport to="body">
-      <div v-if="viewing !== null" class="ps-view" @click.self="viewing = null">
-        <button class="ps-view-x" aria-label="关闭" @click="viewing = null">×</button>
-        <button
-          v-if="photos.length > 1"
-          class="ps-view-nav prev"
-          aria-label="上一张"
-          @click.stop="step(-1)"
-        >‹</button>
-        <img :src="url(photos[viewing])" alt="">
-        <button
-          v-if="photos.length > 1"
-          class="ps-view-nav next"
-          aria-label="下一张"
-          @click.stop="step(1)"
-        >›</button>
-        <div v-if="photos.length > 1" class="ps-view-n">{{ viewing + 1 }} / {{ photos.length }}</div>
-      </div>
-    </teleport>
+    <TripPhotoViewer
+      :photos="photos"
+      :index="viewing"
+      :trip-id="tripId"
+      :share-token="shareToken"
+      @update:index="viewing = $event"
+      @close="viewing = null"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import TripPhotoViewer from '@/components/TripPhotoViewer.vue'
 import { photoUrl, uploadPhoto } from '@/utils/tripPhotos'
 
 const props = defineProps({
@@ -89,11 +78,6 @@ const viewing = ref(null)
 
 function url(sha) {
   return photoUrl({ tripId: props.tripId, shareToken: props.shareToken }, sha)
-}
-
-function step(d) {
-  const n = props.photos.length
-  viewing.value = (viewing.value + d + n) % n
 }
 
 async function onPick(e) {
@@ -152,30 +136,4 @@ function remove(i) {
 .ps-add-t { font-size: 10.5px; line-height: 1.25; padding: 0 4px; }
 .ps-none { font-size: 12px; color: var(--color-text-muted); align-self: center; }
 .ps-err { margin: 6px 0 0; font-size: 12px; color: var(--color-error, #e05a5a); }
-</style>
-
-<style>
-/* 大图浏览 teleport 到 body,不能 scoped */
-.ps-view {
-  position: fixed; inset: 0; z-index: 3200;
-  background: rgba(10, 14, 16, .9);
-  display: flex; align-items: center; justify-content: center;
-}
-.ps-view img { max-width: 94vw; max-height: 88vh; border-radius: 8px; display: block; }
-.ps-view-x {
-  position: absolute; right: 14px; top: 14px; width: 34px; height: 34px;
-  border: 0; border-radius: 50%; background: rgba(255, 255, 255, .85);
-  font-size: 21px; line-height: 1; cursor: pointer; color: #222;
-}
-.ps-view-nav {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 42px; height: 58px; border: 0; border-radius: 10px;
-  background: rgba(255, 255, 255, .16); color: #fff; font-size: 27px; cursor: pointer;
-}
-.ps-view-nav.prev { left: 10px; }
-.ps-view-nav.next { right: 10px; }
-.ps-view-n {
-  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-  color: rgba(255, 255, 255, .8); font-size: 12px; font-variant-numeric: tabular-nums;
-}
 </style>

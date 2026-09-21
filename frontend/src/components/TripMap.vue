@@ -494,7 +494,8 @@ async function saveDesc() {
 
 .tmap-canvas {
   width: 100%;
-  height: clamp(300px, 52vh, 520px);
+  /* 手机上别让地图吃掉整屏:打开当天先看到的应该是行程,不是一张地图 */
+  height: clamp(220px, 34vh, 520px);
   border-radius: 12px;
   border: 1px solid var(--trip-line, var(--color-border-light));
   background: var(--trip-accent-weak, #dce7ea);
@@ -539,6 +540,10 @@ async function saveDesc() {
 .tmap-li-day { font-size: 10px; opacity: .65; font-variant-numeric: tabular-nums; }
 
 .tmap-empty { padding: 14px 4px 2px; font-size: 12px; color: var(--color-text-muted); }
+
+@media (min-width: 900px) {
+  .tmap-canvas { height: clamp(320px, 52vh, 520px); }
+}
 </style>
 
 <style>
