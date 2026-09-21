@@ -275,7 +275,7 @@ import TripFacts from '@/components/TripFacts.vue'
 import TripSpending from '@/components/TripSpending.vue'
 import TripDayDetail from '@/components/TripDayDetail.vue'
 import TripAiDialog from '@/components/TripAiDialog.vue'
-import { resumeAiBlocks } from '@/utils/aiBlocks'
+import { resumeAiBlocks } from '@/utils/aiJobs'
 
 // 每趟旅行的主题色预设(与后端 ACCENTS 对齐)
 const ACCENTS = {
@@ -300,6 +300,7 @@ const showCreate = ref(false)
 const creating = ref(false)
 const showDrawer = ref(false)
 const leftMode = ref('calendar')   // calendar | map
+const TRIP_JOB_KINDS = 'import_notice,from_idea,fill_days,fill_spots,block'
 const TABS = [
   { key: 'days', label: '行程' },
   { key: 'pack', label: '打包' },
@@ -341,7 +342,9 @@ async function onAiDone(tripId) {
 async function watchJobs() {
   clearTimeout(jobTimer)
   try {
-    const res = await api.get('/api/trips/ai/jobs')
+    // 只看旅行相关的那几种——财务体检那类作业也在同一张表里,
+    // 不筛的话旅行页会把别人的任务当成自己"生成中"的那个
+    const res = await api.get('/api/ai-jobs?kinds=' + TRIP_JOB_KINDS)
     const job = (res.data || [])[0]
     const running = job && ['pending', 'running'].includes(job.status)
     const wasRunning = !!activeJob.value

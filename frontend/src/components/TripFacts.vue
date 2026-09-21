@@ -72,7 +72,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiBlocks'
+import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -87,7 +87,7 @@ const saving = ref(false)
 const draft = reactive({ label: '', body: '', is_public: false })
 
 // AI 建议:先摆出来让人挑,挑中的才入库。
-// 在途状态放模块级 store,切走再回来还能接上(见 utils/aiBlocks.js)
+// 在途状态放模块级 store,切走再回来还能接上(见 utils/aiJobs.js)
 const adding = ref(false)
 const proposed = ref([])
 const picked = ref(new Set())

@@ -181,7 +181,7 @@ import TripPhotoStrip from '@/components/TripPhotoStrip.vue'
 import { mapUrl } from '@/utils/maplink'
 import { wgs2gcj, gcj2wgs } from '@/utils/gcj02'
 import { photoList, photoUrl } from '@/utils/tripPhotos'
-import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiBlocks'
+import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 
 const props = defineProps({
   // [{ day_no, date, route, detail:{ stops:[{t,lat,lng,air,sea,desc,photo}], spots, todo, cam, warn } }]

@@ -41,9 +41,9 @@ def api_compute():
     return jsonify({"job_id": job_id}), 201
 
 
-def _run_checkup(user_id: int, payload: dict, llm: dict | None) -> dict:
-    return compute_checkup(user_id, payload["period"], llm=llm,
-                           force=bool(payload.get("force")))
+def _run_checkup(ctx) -> dict:
+    return compute_checkup(ctx.user_id, ctx.payload["period"], llm=ctx.llm,
+                           force=bool(ctx.payload.get("force")))
 
 
 @checkup_bp.route("/api/checkup/current", methods=["GET"])

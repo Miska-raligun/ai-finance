@@ -62,7 +62,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/api'
-import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiBlocks'
+import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },

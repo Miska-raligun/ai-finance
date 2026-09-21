@@ -1,8 +1,8 @@
 """行程 AI 生成的接口。
 
-两类:
-  * 整趟生成(行程单导入 / 一句话想法)—— 多步、耗时,走后台作业 + 轮询
-  * 单块生成(某个景点的介绍、某天的贴士…)—— 一次调用就够,同步返回
+这里只管**发起**:每个端点排一个作业,立刻返回 job_id。进度、结果、取消、
+重试统一走 /api/ai-jobs/*(见 routes/ai_jobs.py)——作业不分行程和非行程,
+没必要为它们各留一套轮询端点。
 
 单块生成**一律不落库**:返回的是草稿,前端填进编辑框,由用户改完再保存。
 AI 写的东西直接盖掉用户的内容是不能接受的。
@@ -13,7 +13,8 @@ from flask import Blueprint, g, jsonify, request
 
 from auth import login_required
 from db import get_db
-from services import travel_ai, travel_jobs
+from services import ai_jobs, travel_ai
+from services import travel_jobs  # noqa: F401  import 即注册 runner
 from services.llm_config import current_llm
 
 travel_ai_bp = Blueprint("travel_ai", __name__)
@@ -70,8 +71,7 @@ def ai_generate():
         "accent": (data.get("accent") or "").strip() or None,
     }
     kind = "import_notice" if notice else "from_idea"
-    job_id = travel_jobs.create_job(g.user_id, kind, payload)
-    travel_jobs.start(job_id, g.user_id, current_llm(data))
+    job_id = ai_jobs.submit(g.user_id, kind, payload, current_llm(data))
     return jsonify({"job_id": job_id}), 201
 
 
@@ -82,11 +82,10 @@ def ai_fill_days(trip_id: int):
     if not _own_trip(trip_id):
         return jsonify({"error": "行程不存在"}), 404
     data = request.get_json() or {}
-    job_id = travel_jobs.create_job(
+    job_id = ai_jobs.submit(
         g.user_id, "fill_days", {"notice": (data.get("notice") or "").strip() or None},
-        trip_id=trip_id,
+        current_llm(data), trip_id=trip_id,
     )
-    travel_jobs.start(job_id, g.user_id, current_llm(data))
     return jsonify({"job_id": job_id}), 201
 
 
@@ -97,50 +96,9 @@ def ai_fill_spots(trip_id: int):
     if not _own_trip(trip_id):
         return jsonify({"error": "行程不存在"}), 404
     data = request.get_json() or {}
-    job_id = travel_jobs.create_job(g.user_id, "fill_spots", {}, trip_id=trip_id)
-    travel_jobs.start(job_id, g.user_id, current_llm(data))
+    job_id = ai_jobs.submit(g.user_id, "fill_spots", {}, current_llm(data),
+                            trip_id=trip_id)
     return jsonify({"job_id": job_id}), 201
-
-
-@travel_ai_bp.route("/api/trips/ai/jobs", methods=["GET"])
-@login_required
-def ai_jobs():
-    """最近的任务。离开页面再回来时用它接上进度——生成在后台跑,不会因为
-    关掉这一页就停。"""
-    return jsonify(travel_jobs.list_jobs(g.user_id))
-
-
-@travel_ai_bp.route("/api/trips/ai/jobs/<int:job_id>", methods=["GET"])
-@login_required
-def ai_job_status(job_id: int):
-    job = travel_jobs.get_job(g.user_id, job_id)
-    if not job:
-        return jsonify({"error": "任务不存在"}), 404
-    return jsonify(job)
-
-
-@travel_ai_bp.route("/api/trips/ai/jobs/<int:job_id>/cancel", methods=["POST"])
-@login_required
-def ai_job_cancel(job_id: int):
-    if not travel_jobs.get_job(g.user_id, job_id):
-        return jsonify({"error": "任务不存在"}), 404
-    return jsonify({"success": travel_jobs.cancel_job(g.user_id, job_id)})
-
-
-@travel_ai_bp.route("/api/trips/ai/jobs/<int:job_id>/retry", methods=["POST"])
-@login_required
-def ai_job_retry(job_id: int):
-    """重跑没成功的步骤。已经 done 的天不会重新生成,不会盖掉你改过的内容。"""
-    job = travel_jobs.get_job(g.user_id, job_id)
-    if not job:
-        return jsonify({"error": "任务不存在"}), 404
-    if job["status"] in ("pending", "running"):
-        return jsonify({"error": "任务还在跑"}), 409
-    db = get_db()
-    db.execute("UPDATE trip_ai_jobs SET status = 'pending', error = NULL WHERE id = ?", (job_id,))
-    db.commit()
-    travel_jobs.start(job_id, g.user_id, current_llm(request.get_json(silent=True) or {}))
-    return jsonify({"job_id": job_id})
 
 
 @travel_ai_bp.route("/api/trips/<int:trip_id>/ai/block", methods=["POST"])
@@ -173,10 +131,9 @@ def ai_block(trip_id: int):
     if kind == "spot_desc" and not spot:
         return jsonify({"error": "缺少景点名称"}), 400
 
-    job_id = travel_jobs.create_job(g.user_id, "block", {
+    job_id = ai_jobs.submit(g.user_id, "block", {
         "kind": kind, "day_no": day_no, "spot": spot or None,
         "hint": (data.get("hint") or "").strip()[:500] or None,
         "label": data.get("label") or kind,
-    }, trip_id=trip_id)
-    travel_jobs.start(job_id, g.user_id, current_llm(data))
+    }, current_llm(data), trip_id=trip_id)
     return jsonify({"job_id": job_id}), 201

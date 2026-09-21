@@ -267,4 +267,5 @@ def _advise(user_id: int, payload: dict, llm_cfg: dict | None) -> dict:
         }
 
 
-ai_jobs.register("decide", _advise)
+# runner 只吃一个 ctx;_advise 的签名保持原样,这里做一层转接
+ai_jobs.register("decide", lambda ctx: _advise(ctx.user_id, ctx.payload, ctx.llm))

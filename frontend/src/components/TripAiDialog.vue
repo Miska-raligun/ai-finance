@@ -311,7 +311,7 @@ function stopPoll() {
 
 async function poll(id) {
   try {
-    const res = await api.get(`/api/trips/ai/jobs/${id}`)
+    const res = await api.get(`/api/ai-jobs/${id}`)
     job.value = res.data
     if (['pending', 'running'].includes(res.data.status)) {
       timer = setTimeout(() => poll(id), 1500)
@@ -404,13 +404,13 @@ async function submit() {
 
 async function cancel() {
   if (!job.value?.id) return
-  try { await api.post(`/api/trips/ai/jobs/${job.value.id}/cancel`) } catch { /* 忽略 */ }
+  try { await api.post(`/api/ai-jobs/${job.value.id}/cancel`) } catch { /* 忽略 */ }
 }
 
 async function retry() {
   if (!job.value?.id) return
   try {
-    await api.post(`/api/trips/ai/jobs/${job.value.id}/retry`)
+    await api.post(`/api/ai-jobs/${job.value.id}/retry`)
     poll(job.value.id)
   } catch (e) {
     err.value = e?.response?.data?.error || '重试失败'

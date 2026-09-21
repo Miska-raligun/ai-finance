@@ -141,11 +141,6 @@ with app.app_context():
     except Exception:  # noqa: BLE001
         _logger.exception("启动时清理孤儿 pending/running 报告失败（不阻断启动）")
     try:
-        from services.travel_jobs import cleanup_orphans
-        cleanup_orphans()
-    except Exception:  # noqa: BLE001
-        _logger.exception("启动时清理中断的行程 AI 任务失败（不阻断启动）")
-    try:
         from services.ai_jobs import cleanup_orphans as _cleanup_ai_jobs
         _cleanup_ai_jobs()
     except Exception:  # noqa: BLE001

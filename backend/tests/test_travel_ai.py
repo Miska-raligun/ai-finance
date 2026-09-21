@@ -129,7 +129,7 @@ def _stub_llm(monkeypatch, *, outline=None, day=None, fail_days=(), block=None,
 def _wait(client, job_id, timeout=8.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        job = client.get(f"/api/trips/ai/jobs/{job_id}").get_json()
+        job = client.get(f"/api/ai-jobs/{job_id}").get_json()
         if job["status"] in ("done", "failed", "cancelled"):
             return job
         time.sleep(0.05)
@@ -172,7 +172,7 @@ def test_one_bad_day_does_not_sink_the_job_and_retry_only_redoes_it(app, auth_cl
     # 重试:只重跑失败那天,已完成的不动
     calls.clear()
     _stub_llm(monkeypatch)                           # 这次都成功
-    auth_client.post(f"/api/trips/ai/jobs/{job_id}/retry")
+    auth_client.post(f"/api/ai-jobs/{job_id}/retry")
     job2 = _wait(auth_client, job_id)
     assert job2["status"] == "done"
     assert all(s["status"] in ("done", "skipped") for s in job2["steps"])
@@ -322,7 +322,7 @@ def test_job_is_scoped_to_its_owner(app, auth_client, client, monkeypatch):
         uid = db.execute("SELECT id FROM users WHERE username='peeper'").fetchone()[0]
     with client.session_transaction() as s:
         s["user_id"] = uid
-    assert client.get(f"/api/trips/ai/jobs/{job_id}").status_code == 404
+    assert client.get(f"/api/ai-jobs/{job_id}").status_code == 404
 
 
 # ---------- 导入时的速查与打包 ----------
@@ -398,7 +398,7 @@ def test_jobs_list_lets_you_come_back(app, auth_client, monkeypatch):
     job_id = auth_client.post("/api/trips/ai/generate",
                               json={"idea": "北欧"}).get_json()["job_id"]
     _wait(auth_client, job_id)
-    jobs = auth_client.get("/api/trips/ai/jobs").get_json()
+    jobs = auth_client.get("/api/ai-jobs").get_json()
     assert jobs[0]["id"] == job_id
     assert jobs[0]["status"] == "done"
     assert jobs[0]["trip_id"]
