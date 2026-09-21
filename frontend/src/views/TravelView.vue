@@ -269,6 +269,7 @@ import TripPacking from '@/components/TripPacking.vue'
 import TripFacts from '@/components/TripFacts.vue'
 import TripDayDetail from '@/components/TripDayDetail.vue'
 import TripAiDialog from '@/components/TripAiDialog.vue'
+import { resumeAiBlocks } from '@/utils/aiBlocks'
 
 // 每趟旅行的主题色预设(与后端 ACCENTS 对齐)
 const ACCENTS = {
@@ -544,6 +545,7 @@ async function copyShare() {
 onMounted(async () => {
   await loadTrips()
   watchJobs()
+  resumeAiBlocks()        // 刷新前还在跑的单块生成,接着盯
 })
 onBeforeUnmount(() => clearTimeout(jobTimer))
 </script>

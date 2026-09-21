@@ -146,32 +146,37 @@ def ai_job_retry(job_id: int):
 @travel_ai_bp.route("/api/trips/<int:trip_id>/ai/block", methods=["POST"])
 @login_required
 def ai_block(trip_id: int):
-    """单块生成。同步返回草稿,**不写库**——由用户在编辑框里改完自己保存。"""
-    trip = _own_trip(trip_id)
-    if not trip:
+    """单块生成。排一个作业立刻返回 job_id,结果由前端轮询取。
+
+    为什么不同步:慢的时候 LLM 要跑几分钟,HTTP 连接一直挂着会同时踩三个坑——
+    nginx 的 proxy_read_timeout、nginx 连续超时后把上游熔断(表现为莫名其妙的
+    503)、以及 waitress 默认只有 4 个工作线程被长请求占满。
+
+    结果**不写进行程**:那是给用户改的草稿,直接落库会盖掉人家自己写的。
+    """
+    if not _own_trip(trip_id):
         return jsonify({"error": "行程不存在"}), 404
     data = request.get_json() or {}
     kind = (data.get("kind") or "").strip()
     if kind not in travel_ai.BLOCK_KINDS:
         return jsonify({"error": f"不支持的生成类型:{kind}"}), 400
 
-    ctx: dict = {"trip": dict(trip), "hint": (data.get("hint") or "").strip() or None}
     day_no = data.get("day_no")
     if day_no is not None:
         row = get_db().execute(
-            "SELECT day_no, date, route, transport, meal FROM trip_days "
-            "WHERE trip_id = ? AND day_no = ?", (trip_id, day_no),
+            "SELECT 1 FROM trip_days WHERE trip_id = ? AND day_no = ?",
+            (trip_id, day_no),
         ).fetchone()
         if not row:
             return jsonify({"error": "该天不存在"}), 404
-        ctx["day"] = dict(row)
-    spot = (data.get("spot") or "").strip()
-    if spot:
-        ctx["spot"] = spot[:80]
+    spot = (data.get("spot") or "").strip()[:80]
     if kind == "spot_desc" and not spot:
         return jsonify({"error": "缺少景点名称"}), 400
 
-    try:
-        return jsonify(travel_ai.gen_block(kind, ctx, llm=current_llm(data)))
-    except travel_ai.AIError as e:
-        return jsonify({"error": str(e)}), 502
+    job_id = travel_jobs.create_job(g.user_id, "block", {
+        "kind": kind, "day_no": day_no, "spot": spot or None,
+        "hint": (data.get("hint") or "").strip()[:500] or None,
+        "label": data.get("label") or kind,
+    }, trip_id=trip_id)
+    travel_jobs.start(job_id, g.user_id, current_llm(data))
+    return jsonify({"job_id": job_id}), 201

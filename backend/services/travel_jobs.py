@@ -68,6 +68,10 @@ def get_job(user_id: int, job_id: int) -> dict | None:
         d["steps"] = json.loads(d.pop("steps_json") or "[]")
     except (TypeError, ValueError):
         d["steps"] = []
+    try:
+        d["result"] = json.loads(d.pop("result_json") or "null")
+    except (TypeError, ValueError):
+        d["result"] = None
     return d
 
 
@@ -148,6 +152,10 @@ def _run(job_id: int, user_id: int, llm: dict | None) -> None:
         trip_id = row["trip_id"]
         notice = payload.get("notice")
 
+        if row["kind"] == "block":
+            _step_block(conn, job_id, trip_id, payload, llm)
+            return
+
         if row["kind"] == "fill_spots":
             _step_spot_descs(conn, job_id, trip_id, llm)
             if not _is_cancelled(conn, job_id):
@@ -224,6 +232,46 @@ def _step_outline(conn, job_id: int, user_id: int, payload: dict, llm) -> int | 
     _set_steps(conn, job_id, steps)
     _update(conn, job_id, trip_id=trip_id)
     return trip_id
+
+
+def _step_block(conn, job_id: int, trip_id: int, payload: dict, llm) -> None:
+    """单块生成:一次调用,结果存 result_json 等前端来取。
+
+    **不落库到行程**——这是给用户改的草稿,直接写进去会盖掉人家自己写的。
+    """
+    steps = [{"key": "block", "label": payload.get("label") or "生成中",
+              "status": "running", "error": None}]
+    _set_steps(conn, job_id, steps)
+
+    trip = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if not trip:
+        _update(conn, job_id, status="failed", error="行程不存在")
+        return
+
+    ctx: dict = {"trip": dict(trip), "hint": payload.get("hint") or None}
+    day_no = payload.get("day_no")
+    if day_no is not None:
+        drow = conn.execute(
+            "SELECT day_no, date, route, transport, meal FROM trip_days "
+            "WHERE trip_id = ? AND day_no = ?", (trip_id, day_no),
+        ).fetchone()
+        if drow:
+            ctx["day"] = dict(drow)
+    if payload.get("spot"):
+        ctx["spot"] = payload["spot"]
+
+    try:
+        result = travel_ai.gen_block(payload["kind"], ctx, llm=llm)
+    except travel_ai.AIError as e:
+        steps[0].update(status="failed", error=str(e)[:200])
+        _set_steps(conn, job_id, steps)
+        _update(conn, job_id, status="failed", error=str(e)[:300])
+        return
+
+    steps[0].update(status="done")
+    _set_steps(conn, job_id, steps)
+    _update(conn, job_id, status="done",
+            result_json=json.dumps(result, ensure_ascii=False))
 
 
 def _missing_desc(detail: dict) -> list[str]:

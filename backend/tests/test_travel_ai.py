@@ -211,8 +211,15 @@ def test_generate_requires_input(app, auth_client):
 
 # ---------- 单块草稿 ----------
 
+def _block(client, tid, body):
+    """发起单块生成并等结果。接口是异步的:POST 只排队,结果轮询取。"""
+    r = client.post(f"/api/trips/{tid}/ai/block", json=body)
+    assert r.status_code == 201, r.get_json()
+    return _wait(client, r.get_json()["job_id"])
+
+
 def test_block_returns_draft_without_saving(app, auth_client, monkeypatch):
-    """AI 写的东西不能直接盖掉用户的内容——接口只返回草稿。"""
+    """AI 写的东西不能直接盖掉用户的内容——作业只把草稿放在结果里。"""
     _stub_llm(monkeypatch, block={"text": "凿进整块花岗岩里的教堂,声学极好。"})
     tid = auth_client.post("/api/trips", json={
         "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-02",
@@ -221,13 +228,48 @@ def test_block_returns_draft_without_saving(app, auth_client, monkeypatch):
         "detail": {"stops": [{"t": "岩石教堂", "lat": 60.17, "lng": 24.92, "desc": "我自己写的"}]},
     })
 
-    r = auth_client.post(f"/api/trips/{tid}/ai/block",
-                         json={"kind": "spot_desc", "day_no": 1, "spot": "岩石教堂"})
-    assert r.status_code == 200
-    assert "花岗岩" in r.get_json()["text"]
+    job = _block(auth_client, tid, {"kind": "spot_desc", "day_no": 1, "spot": "岩石教堂"})
+    assert job["status"] == "done"
+    assert "花岗岩" in job["result"]["text"]
 
     after = auth_client.get(f"/api/trips/{tid}").get_json()
     assert after["days"][0]["detail"]["stops"][0]["desc"] == "我自己写的"
+
+
+def test_block_post_returns_immediately(app, auth_client, monkeypatch):
+    """POST 不能挂着等 LLM:慢的时候连接要占几分钟,nginx 会判超时甚至熔断。"""
+    import time as _t
+
+    def slow(messages, **kw):
+        _t.sleep(1.2)
+        return {"choices": [{"message": {"content": '{"text":"慢慢写出来的"}'}}]}
+
+    monkeypatch.setattr("services.llm._call_llm", slow)
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-02",
+    }).get_json()["id"]
+
+    t0 = _t.time()
+    r = auth_client.post(f"/api/trips/{tid}/ai/block",
+                         json={"kind": "spot_desc", "spot": "某地"})
+    took = _t.time() - t0
+    assert r.status_code == 201
+    assert took < 0.8, f"POST 花了 {took:.2f}s,说明还在同步等 LLM"
+
+    job = _wait(auth_client, r.get_json()["job_id"])
+    assert job["result"]["text"] == "慢慢写出来的"
+
+
+def test_block_failure_is_reported_on_the_job(app, auth_client, monkeypatch):
+    monkeypatch.setattr("services.llm._call_llm",
+                        lambda messages, **kw: {"error": {"message": "上游挂了"}})
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-02",
+    }).get_json()["id"]
+    job = _block(auth_client, tid, {"kind": "spot_desc", "spot": "某地"})
+    assert job["status"] == "failed"
+    assert "上游挂了" in (job["error"] or "")
+    assert job["result"] is None
 
 
 def test_block_validates_kind_and_ownership(app, auth_client, client, monkeypatch):
@@ -261,8 +303,7 @@ def test_block_list_kinds_are_cleaned(app, auth_client, monkeypatch):
     tid = auth_client.post("/api/trips", json={
         "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-02",
     }).get_json()["id"]
-    items = auth_client.post(f"/api/trips/{tid}/ai/block",
-                             json={"kind": "day_tips", "day_no": 1}).get_json()["items"]
+    items = _block(auth_client, tid, {"kind": "day_tips", "day_no": 1})["result"]["items"]
     assert "" not in items and len(items) <= 5
 
 
