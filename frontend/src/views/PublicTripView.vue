@@ -39,7 +39,7 @@
 
       <!-- 天数导航:点一下跳到那天,滚动时高亮当前天 -->
       <nav v-if="days.length > 1" class="daybar" aria-label="按天跳转">
-        <div class="daybar-in">
+        <div ref="daybarRef" class="daybar-in">
           <button
             v-for="d in days"
             :key="d.day_no"
@@ -67,7 +67,6 @@
                 v-for="d in days"
                 :key="d.day_no"
                 :id="`day-${d.day_no}`"
-                ref="dayEls"
                 :data-day="d.day_no"
                 class="day"
                 :class="{ blank: isBlank(d) }"
@@ -147,7 +146,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import TripMap from '@/components/TripMap.vue'
 import TripFacts from '@/components/TripFacts.vue'
@@ -170,13 +169,12 @@ const days = ref([])
 const facts = ref([])
 const loading = ref(true)
 const error = ref(false)
-const dayEls = ref([])
+const daybarRef = ref(null)
 // 宽屏侧栏常驻展开,窄屏折叠(见模板里的 <details>)
 const WIDE_MQ = '(min-width: 961px)'
 const wide = ref(typeof window !== 'undefined' && window.matchMedia(WIDE_MQ).matches)
 let mql = null
 const activeDay = ref(0)
-let observer = null
 
 const accentVars = computed(() => {
   const a = ACCENTS[trip.value?.accent] || ACCENTS.glacier
@@ -243,17 +241,49 @@ function jump(dayNo) {
   activeDay.value = dayNo
 }
 
-/** 滚动时高亮当前天。用 IntersectionObserver 而不是 scroll 事件,省掉每帧计算。 */
-function observeDays() {
-  observer?.disconnect()
-  if (!dayEls.value?.length) return
-  observer = new IntersectionObserver((entries) => {
-    const vis = entries.filter(e => e.isIntersecting)
-      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
-    if (vis) activeDay.value = Number(vis.target.dataset.day)
-  }, { rootMargin: '-96px 0px -60% 0px' })
-  dayEls.value.forEach(el => el && observer.observe(el))
+/* 滚动时高亮当前天。
+ *
+ * 之前用 IntersectionObserver 做,结果一直停在 D1:回调只收到「状态发生变化」
+ * 的那几个元素,某一天滚出判定带而没有新的一天滚进来时,回调里一个
+ * isIntersecting 都没有,于是不更新。改成滚动时直接量位置——14 个元素,
+ * 加上 rAF 节流,开销可以忽略。
+ *
+ * 还有一处坑:这一页装在 el-main 里,滚的是那个容器不是 window,监听 window
+ * 的 scroll 根本收不到。scroll 事件不冒泡,但会走捕获阶段,所以在 document 上
+ * 用 capture 监听,谁在滚都能接到——比顺着 DOM 去猜哪个祖先在滚可靠。 */
+let rafId = 0
+
+function syncActiveDay() {
+  // 判定线取吸顶天数条的下沿:它本来就贴在滚动容器顶部,不用另外去算容器位置
+  const bar = document.querySelector('.daybar')
+  const line = (bar ? bar.getBoundingClientRect().bottom : 0) + 12
+  let cur = days.value[0]?.day_no ?? 0
+  for (const d of days.value) {
+    const el = document.getElementById(`day-${d.day_no}`)
+    if (!el) continue
+    if (el.getBoundingClientRect().top <= line) cur = d.day_no
+    else break
+  }
+  if (cur !== activeDay.value) activeDay.value = cur
 }
+
+function onScroll() {
+  if (rafId) return
+  rafId = requestAnimationFrame(() => { rafId = 0; syncActiveDay() })
+}
+
+/** 天数多的时候(这趟 14 天)高亮的那颗常常在横向滚动区之外,跟着挪过去。 */
+watch(activeDay, async (n) => {
+  await nextTick()
+  const bar = daybarRef.value
+  const i = days.value.findIndex(d => d.day_no === n)
+  const chip = i >= 0 ? bar?.children[i] : null
+  if (!bar || !chip) return
+  bar.scrollTo({
+    left: chip.offsetLeft - bar.clientWidth / 2 + chip.clientWidth / 2,
+    behavior: 'smooth',
+  })
+})
 
 onMounted(async () => {
   // 故意用原生 fetch:不经过 axios 拦截器,匿名 401/错误不会触发跳登录
@@ -267,7 +297,9 @@ onMounted(async () => {
     activeDay.value = days.value[0]?.day_no || 0
     if (trip.value.title) document.title = `${trip.value.title} · 行程`
     await nextTick()
-    observeDays()
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    window.addEventListener('resize', onScroll, { passive: true })
+    syncActiveDay()
     mql = window.matchMedia(WIDE_MQ)
     mql.addEventListener('change', onMq)
   } catch {
@@ -280,7 +312,9 @@ onMounted(async () => {
 function onMq(e) { wide.value = e.matches }
 
 onBeforeUnmount(() => {
-  observer?.disconnect()
+  document.removeEventListener('scroll', onScroll, { capture: true })
+  window.removeEventListener('resize', onScroll)
+  if (rafId) cancelAnimationFrame(rafId)
   mql?.removeEventListener('change', onMq)
 })
 </script>
@@ -409,6 +443,8 @@ onBeforeUnmount(() => {
 .day + .day { margin-top: 12px; }
 .day-rail { display: flex; justify-content: center; padding-top: 12px; }
 .day-no {
+  /* 脊线是 .dlist::before 这个定位伪元素,不给圆点也定位的话它会盖在数字上 */
+  position: relative; z-index: 1;
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
   display: grid; place-items: center;
   background: var(--trip-accent); color: #fff;
