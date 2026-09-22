@@ -703,3 +703,61 @@ def test_fill_spots_is_owner_only(app, auth_client, client):
     with client.session_transaction() as s:
         s["user_id"] = uid
     assert client.post(f"/api/trips/{tid}/ai/spots", json={}).status_code == 404
+
+
+# ---------- AI 定位 ----------
+
+def test_spot_geo_returns_coordinates(app, auth_client, monkeypatch):
+    """给一个地名,让模型回经纬度——省掉一个地理编码服务。
+
+    结果是**草稿**,和别的单块生成一样不落库:模型记错坐标是常事,
+    得让用户在地图上看一眼再决定存不存。
+    """
+    _stub_llm(monkeypatch, block={"lat": 60.1725, "lng": 24.9255,
+                                  "place": "赫尔辛基岩石教堂,芬兰", "sure": 1})
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+
+    r = auth_client.post(f"/api/trips/{tid}/ai/block",
+                         json={"kind": "spot_geo", "spot": "岩石教堂", "day_no": 1})
+    job = _wait(auth_client, r.get_json()["job_id"])
+    assert job["status"] == "done"
+    assert job["result"] == {"lat": 60.1725, "lng": 24.9255,
+                             "place": "赫尔辛基岩石教堂,芬兰", "sure": 1}
+
+    # 没落库:行程里那天还是空的
+    day = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]
+    assert day["detail"] == {}
+
+
+def test_spot_geo_admits_it_does_not_know(app, auth_client, monkeypatch):
+    """模型说不知道时就是不知道。地图上一个错点比少一个点糟得多,
+    所以 lat/lng 给 null 是正常结果,不是生成失败。"""
+    _stub_llm(monkeypatch, block={"lat": None, "lng": None,
+                                  "place": "同名的地方太多", "sure": 0})
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+    r = auth_client.post(f"/api/trips/{tid}/ai/block",
+                         json={"kind": "spot_geo", "spot": "老王烧烤"})
+    job = _wait(auth_client, r.get_json()["job_id"])
+    assert job["status"] == "done"
+    assert job["result"]["lat"] is None and job["result"]["sure"] == 0
+
+
+def test_spot_geo_drops_impossible_coordinates(app, auth_client, monkeypatch):
+    """越界的坐标当成"没定到",不要四舍五入成一个海里的点。"""
+    _stub_llm(monkeypatch, block={"lat": 95, "lng": 400, "sure": 1})
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+    r = auth_client.post(f"/api/trips/{tid}/ai/block",
+                         json={"kind": "spot_geo", "spot": "某处"})
+    job = _wait(auth_client, r.get_json()["job_id"])
+    assert job["result"]["lat"] is None and job["result"]["sure"] == 0
+
+
+def test_spot_geo_needs_a_name(app, auth_client, monkeypatch):
+    _stub_llm(monkeypatch)
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+    assert auth_client.post(f"/api/trips/{tid}/ai/block",
+                            json={"kind": "spot_geo"}).status_code == 400

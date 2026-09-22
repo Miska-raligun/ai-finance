@@ -282,6 +282,17 @@ def clean_block(kind: str, raw) -> dict:
         if not text:
             raise AIError("模型没给出内容")
         return {"text": text}
+    if kind == "spot_geo":
+        # 拿不准就是拿不准:宁可回一个"没定到",也不要在地图上留一个错点。
+        # 这里不 raise——"我不知道"是正常结果,不是生成失败。
+        lat, lng = _coord(raw.get("lat"), 90), _coord(raw.get("lng"), 180)
+        if lat is None or lng is None:
+            return {"lat": None, "lng": None, "place": _s(raw.get("place"), 120), "sure": 0}
+        return {
+            "lat": round(lat, 6), "lng": round(lng, 6),
+            "place": _s(raw.get("place"), 120),
+            "sure": 1 if raw.get("sure") in (1, True, "1", "true") else 0,
+        }
     if kind == "packing":
         items = []
         for it in (raw.get("items") or [])[:30]:
@@ -404,8 +415,10 @@ def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:
     # 十几二十条 JSON,共享端点高峰期根本跑不完,表现就是点了没反应。
     from constants import LLM_TIMEOUT_LONG
     system, user = build_block_prompt(kind, ctx)
+    # 定位要的是"记得准",不是"写得好",温度拉到 0
+    temp = 0 if kind == "spot_geo" else 0.6
     raw = _json_call(system, user, endpoint=f"travel.block.{kind}",
-                     timeout=LLM_TIMEOUT_LONG, temperature=0.6, llm=llm)
+                     timeout=LLM_TIMEOUT_LONG, temperature=temp, llm=llm)
     return clean_block(kind, raw)
 
 

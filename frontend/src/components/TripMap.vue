@@ -51,7 +51,47 @@
         </button>
       </li>
     </ul>
-    <div v-else class="tmap-empty">这段行程还没有标记地点。</div>
+    <div v-else-if="!unlocated.length" class="tmap-empty">这段行程还没有标记地点。</div>
+
+    <!-- 没有坐标的地点。定位不接地理编码服务:模型本来就知道大部分地名在哪,
+         而且结果必须过人眼——所以它给的是个可以拖的草稿点,不是直接落库。 -->
+    <div v-if="canEdit && unlocated.length" class="tmap-un">
+      <div class="tmap-un-h">还有 {{ unlocated.length }} 个地点没有位置</div>
+      <ul class="tmap-un-l">
+        <li v-for="u in unlocated" :key="u.key">
+          <span class="tmap-un-n">{{ u.t }}</span>
+          <span class="tmap-un-d">D{{ u.dayNo }}</span>
+          <button
+            type="button"
+            class="tmap-btn"
+            :disabled="geoBusy(u) || !!geoDraft"
+            @click="locate(u)"
+          >
+            <span v-if="geoBusy(u)" class="spot-spin" aria-hidden="true"></span>
+            {{ geoBusy(u) ? `${geoSecs(u)}s` : '✨ 定位' }}
+          </button>
+        </li>
+      </ul>
+      <p v-if="geoErr" class="tmap-un-e">{{ geoErr }}</p>
+    </div>
+
+    <!-- 草稿点的确认条。AI 记错坐标是常事,所以一律先看一眼再存 -->
+    <div v-if="geoDraft" class="tmap-draft">
+      <div class="tmap-draft-t">
+        <b>{{ geoDraft.t }}</b>
+        <span v-if="geoDraft.place" class="tmap-draft-p">AI 认为这是:{{ geoDraft.place }}</span>
+        <span v-if="!geoDraft.sure" class="tmap-draft-w">模型说它不太确定,务必核对</span>
+      </div>
+      <p class="tmap-draft-h">地图上那个空心点就是它。位置不对可以直接拖动,再保存。</p>
+      <div class="tmap-draft-b">
+        <span class="tmap-draft-c">{{ geoDraft.lat.toFixed(4) }}, {{ geoDraft.lng.toFixed(4) }}</span>
+        <span class="tmap-un-sp"></span>
+        <button type="button" class="tmap-btn" @click="dropDraft">不对,丢弃</button>
+        <button type="button" class="tmap-btn on" :disabled="savingGeo" @click="keepDraft">
+          {{ savingGeo ? '保存中…' : '就是这儿' }}
+        </button>
+      </div>
+    </div>
 
     <!-- 景点详情:大窗口 -->
     <teleport to="body">
@@ -279,6 +319,21 @@ const points = computed(() => {
   return out
 })
 
+/** 没有坐标的地点:它们不在地图上,但要能从这儿给它们定位。 */
+const unlocated = computed(() => {
+  const out = []
+  for (const d of props.days) {
+    const stops = d.detail?.stops || []
+    for (let si = 0; si < stops.length; si++) {
+      const st = stops[si]
+      if (!st || !st.t) continue
+      if (isFinite(Number(st.lat)) && isFinite(Number(st.lng))) continue
+      out.push({ key: `${d.day_no}-${si}`, t: st.t, dayNo: d.day_no, si })
+    }
+  }
+  return out
+})
+
 /** 按当前底图的坐标系换算出要画的位置。 */
 function coord(p) {
   return layerDef.value.datum === 'gcj02' ? wgs2gcj(p.lat, p.lng) : [p.lat, p.lng]
@@ -462,9 +517,14 @@ onMounted(() => {
   // 地图装在切换面板 / 抽屉里,显示出来时尺寸才定下来,必须重算
   ro = new ResizeObserver(() => map && map.invalidateSize())
   ro.observe(mapEl.value)
+  // 定位结果在模块级 store 里异步回来,这里轮一下。只有还有没定位的点
+  // 才有必要轮,定完就自然停了(unlocated 空 → absorbGeo 什么都不做)
+  geoTimer = setInterval(absorbGeo, 800)
 })
 
 onBeforeUnmount(() => {
+  clearInterval(geoTimer)
+  hideDraft()
   if (redrawHandle) cancelAnimationFrame(redrawHandle)
   ro?.disconnect()
   map?.remove()
@@ -530,6 +590,109 @@ watch(activeStopId, (id) => {
   }
   litId = id
 })
+
+/* ---------- AI 定位 ---------- */
+// 为什么不接地理编码服务:模型本来就知道大部分地名在哪,多一个外部依赖
+// (还要申请 key、配额、再往 CSP 里放一个域名)不划算。代价是它会记错,
+// 所以结果一律当草稿:画一个可以拖的空心点,人确认了才落库。
+
+const geoDraft = ref(null)          // { t, dayNo, si, lat, lng, place, sure }
+const savingGeo = ref(false)
+const geoErr = ref('')
+let draftMarker = null
+
+function geoKey(u) { return `spot_geo:${props.tripId}:${u.dayNo}:${u.si}` }
+function geoBusy(u) { return aiState(geoKey(u)).running }
+function geoSecs(u) { return aiElapsed(geoKey(u)) }
+
+async function locate(u) {
+  geoErr.value = ''
+  const day = props.days.find(x => x.day_no === u.dayNo)
+  await runAiBlock(geoKey(u), `/api/trips/${props.tripId}/ai/block`, {
+    kind: 'spot_geo',
+    spot: u.t,
+    day_no: u.dayNo,
+    // 同名的地方靠当天路线消歧
+    hint: day?.route ? `这一天的路线:${day.route}` : undefined,
+    label: `定位「${u.t}」`,
+  })
+}
+
+/** 轮询结果回来了就摆一个草稿点。 */
+function absorbGeo() {
+  for (const u of unlocated.value) {
+    const st = aiState(geoKey(u))
+    if (!st.result) continue
+    const r = st.result
+    clearAiBlock(geoKey(u))
+    if (r.lat == null || r.lng == null) {
+      geoErr.value = `AI 也说不准「${u.t}」在哪${r.place ? `(它猜是 ${r.place})` : ''}。`
+                   + '可以把名字写全一点再试,比如带上城市。'
+      return
+    }
+    geoDraft.value = { ...u, lat: r.lat, lng: r.lng, place: r.place || '', sure: !!r.sure }
+    showDraft()
+    return
+  }
+}
+watch(unlocated, absorbGeo)
+// 结果是异步回来的,轮一下:这几个 key 的状态都在模块级 store 里
+let geoTimer = null
+
+function showDraft() {
+  if (!map || !geoDraft.value) return
+  hideDraft()
+  const at = coord(geoDraft.value)
+  draftMarker = L.marker(at, {
+    draggable: true,
+    // 空心点:和已经定好的实心点区分开,一眼能看出这个还没存
+    icon: L.divIcon({ className: 'tmap-draft-pin', html: '<i></i>',
+                      iconSize: [18, 18], iconAnchor: [9, 9] }),
+  }).addTo(map)
+  draftMarker.on('dragend', () => {
+    const ll = draftMarker.getLatLng()
+    // 拖动拿到的是**当前底图**坐标系的值,存回去要换回 WGS-84
+    const [lat, lng] = layerDef.value.datum === 'gcj02'
+      ? gcj2wgs(ll.lat, ll.lng)
+      : [ll.lat, ll.lng]
+    geoDraft.value = { ...geoDraft.value, lat, lng }
+  })
+  map.flyTo(at, Math.max(map.getZoom(), 12), { duration: 0.6 })
+}
+
+function hideDraft() {
+  if (draftMarker) {
+    draftMarker.remove()
+    draftMarker = null
+  }
+}
+
+function dropDraft() {
+  hideDraft()
+  geoDraft.value = null
+}
+
+async function keepDraft() {
+  const d = geoDraft.value
+  if (!d) return
+  savingGeo.value = true
+  try {
+    const day = props.days.find(x => x.day_no === d.dayNo)
+    const stop = day?.detail?.stops?.[d.si]
+    if (!stop) return
+    stop.lat = Number(d.lat.toFixed(6))
+    stop.lng = Number(d.lng.toFixed(6))
+    const { default: api } = await import('@/api')
+    await api.patch(`/api/trips/${props.tripId}/days/${day.day_no}`, { detail: day.detail })
+    hideDraft()
+    geoDraft.value = null
+    emit('changed')
+  } catch (e) {
+    geoErr.value = e?.response?.data?.error || '保存失败,再试一次'
+  } finally {
+    savingGeo.value = false
+  }
+}
 
 /** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。 */
 function focusStop(p) {
@@ -692,12 +855,44 @@ async function saveDesc() {
 .tmap-li.on .tmap-li-dot { background: #fff; border-color: #fff; }
 .tmap-li-day { font-size: 10px; opacity: .65; font-variant-numeric: tabular-nums; }
 
+/* 没有坐标的地点 + 草稿点 */
+.tmap-un { margin-top: 10px; padding: 8px 10px; border-radius: 10px;
+  background: var(--color-surface-2, rgba(0,0,0,.04)); }
+.tmap-un-h { font-size: 11.5px; color: var(--color-text-muted); margin-bottom: 6px; }
+.tmap-un-l { list-style: none; margin: 0; padding: 0; display: flex;
+  flex-direction: column; gap: 5px; }
+.tmap-un-l li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.tmap-un-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmap-un-d { font-size: 11px; color: var(--color-text-muted); flex: 0 0 auto; }
+.tmap-un-e { margin: 8px 0 0; font-size: 11.5px; color: var(--color-error, #e05a5a); line-height: 1.6; }
+.tmap-un-sp { flex: 1; }
+
+.tmap-draft { margin-top: 10px; padding: 9px 11px; border-radius: 10px;
+  border: 1px dashed var(--trip-accent, var(--color-primary)); }
+.tmap-draft-t { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.tmap-draft-p { font-size: 11.5px; color: var(--color-text-muted); }
+.tmap-draft-w { font-size: 11.5px; color: var(--color-warning, #c9843a); }
+.tmap-draft-h { margin: 5px 0 8px; font-size: 11.5px; color: var(--color-text-muted); line-height: 1.6; }
+.tmap-draft-b { display: flex; align-items: center; gap: 8px; }
+.tmap-draft-c { font-size: 11.5px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .tmap-empty { padding: 14px 4px 2px; font-size: 12px; color: var(--color-text-muted); }
 
 @media (min-width: 900px) {
   .tmap-canvas { height: clamp(320px, 52vh, 520px); }
 }
 </style>
+
+<style>
+/* 草稿点。非 scoped:Leaflet 的 divIcon 是它自己 new 出来的元素,
+   带不上 scoped 的 data 属性 */
+.tmap-draft-pin i {
+  display: block; width: 14px; height: 14px; margin: 2px; border-radius: 50%;
+  background: rgba(255,255,255,.9); border: 3px solid #b4562f;
+  box-shadow: 0 1px 4px rgba(0,0,0,.35); cursor: grab;
+}
+.tmap-draft-pin i:active { cursor: grabbing; }
+</style>
+
 
 <style>
 /* Leaflet 的类名在组件外,加上 teleport 到 body 的弹窗,这一段不能 scoped */

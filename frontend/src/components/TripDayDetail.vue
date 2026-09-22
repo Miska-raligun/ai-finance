@@ -57,7 +57,7 @@
       label="地点"
       :rows="stops"
       :fields="STOP_FIELDS"
-      hint="📍 的地点会画在地图上。新加的地点还没有坐标,在地图上点开它可以补。"
+      hint="📍 的地点会画在地图上。没有坐标的,可以在下面的地图那一栏让 AI 定位。"
       @save="saveRows('stops', $event)"
     >
       <ul v-if="stops.length" class="dd-list">

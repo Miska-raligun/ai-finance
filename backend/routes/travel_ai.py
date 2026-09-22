@@ -128,8 +128,8 @@ def ai_block(trip_id: int):
         if not row:
             return jsonify({"error": "该天不存在"}), 404
     spot = (data.get("spot") or "").strip()[:80]
-    if kind == "spot_desc" and not spot:
-        return jsonify({"error": "缺少景点名称"}), 400
+    if kind in ("spot_desc", "spot_geo") and not spot:
+        return jsonify({"error": "缺少地点名称"}), 400
 
     job_id = ai_jobs.submit(g.user_id, "block", {
         "kind": kind, "day_no": day_no, "spot": spot or None,
