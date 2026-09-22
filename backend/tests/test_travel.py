@@ -572,3 +572,86 @@ def test_merge_is_idempotent():
     twice = merge_spots_into_stops(dict(once))
     assert [s["t"] for s in twice["stops"]] == ["B", "A"]
     assert once == twice
+
+
+# ---------- 同一个地方的重复 ----------
+
+def test_near_identical_names_are_one_place():
+    """名字差一两个字的是同一个地方。
+
+    模型在一次回复里写两份地点清单时,名字常会飘:「颂歌图书馆」带着坐标
+    进了地图,「颂歌中央图书馆」没坐标,于是列表里永远挂着一个"未定位"。
+    """
+    from services.trip_detail import same_place as sp
+    # 中间插字
+    assert sp({"t": "颂歌图书馆"}, {"t": "颂歌中央图书馆"})
+    # 两头加字(常见的"补个城市名")
+    assert sp({"t": "岩石教堂"}, {"t": "赫尔辛基岩石教堂"})
+    assert sp({"t": "赫尔辛基机场"}, {"t": "赫尔辛基万塔机场"})
+    # 只是标点 / 全半角 / 大小写不同
+    assert sp({"t": "St. Peter's Basilica"}, {"t": "st peters basilica"})
+
+
+def test_different_places_stay_different():
+    """宁可漏判也不要误判:漏判留下一个重复,用户看得见也删得掉;
+    误判是把两个地方悄悄并成一个,连同照片和介绍一起没了。"""
+    from services.trip_detail import same_place as sp
+    # 中间插的字正是区别所在——两座不同的教堂
+    assert not sp({"t": "赫尔辛基大教堂"}, {"t": "赫尔辛基乌斯别斯基大教堂"})
+    assert not sp({"t": "东京站"}, {"t": "东京塔"})
+    assert not sp({"t": "西贝柳斯公园"}, {"t": "西贝柳斯纪念碑"})
+    assert not sp({"t": "塔林老城"}, {"t": "赫尔辛基老城"})
+    assert not sp({"t": "1 号航站楼"}, {"t": "2 号航站楼"})
+    # 名字被长名整个淹没,但短得没有说服力
+    assert not sp({"t": "Park"}, {"t": "Palace Park Road"})
+    # 同名但隔着 20 公里:名字再像也是两个地方
+    assert not sp({"t": "老城", "lat": 60.0, "lng": 24.0},
+                  {"t": "老城", "lat": 60.2, "lng": 24.0})
+
+
+def test_dedupe_keeps_the_located_one_and_the_better_name():
+    from services.trip_detail import dedupe_stops
+    got = dedupe_stops([
+        {"t": "颂歌图书馆", "lat": 60.1735, "lng": 24.938,
+         "desc": "赫尔辛基的新地标。", "photos": ["sha1"]},
+        {"t": "颂歌中央图书馆", "dur": "40min"},
+    ])
+    assert len(got) == 1
+    it = got[0]
+    assert it["t"] == "颂歌中央图书馆"      # 更具体的名字(两个都是 AI 写的)
+    assert it["lat"] == 60.1735 and it["photos"] == ["sha1"]
+    assert it["desc"] == "赫尔辛基的新地标。"
+    assert it["dur"] == "40min"            # 另一条上的字段搬过来了
+
+
+def test_dedupe_does_not_overwrite_what_the_keeper_already_has():
+    from services.trip_detail import dedupe_stops
+    got = dedupe_stops([
+        {"t": "岩石教堂", "dur": "15min", "desc": "原来的介绍"},
+        {"t": "赫尔辛基岩石教堂", "dur": "30min", "desc": "后来的介绍", "lat": 60.17, "lng": 24.92},
+    ])
+    assert len(got) == 1
+    assert got[0]["dur"] == "15min" and got[0]["desc"] == "原来的介绍"
+    assert got[0]["lat"] == 60.17          # 原来没有的才补
+    assert got[0]["t"] == "赫尔辛基岩石教堂"
+
+
+def test_dedupe_is_idempotent_and_keeps_order():
+    from services.trip_detail import dedupe_stops
+    raw = [{"t": "机场", "lat": 60.3, "lng": 24.9}, {"t": "颂歌图书馆", "lat": 60.17, "lng": 24.93},
+           {"t": "颂歌中央图书馆"}, {"t": "老城"}]
+    once = dedupe_stops(raw)
+    assert [s["t"] for s in once] == ["机场", "颂歌中央图书馆", "老城"]
+    assert dedupe_stops(once) == once
+
+
+def test_generation_does_not_split_one_place_in_two(app, auth_client):
+    """AI 一次回复里两份清单名字飘了,也只应该出一个地点。"""
+    from services import travel_ai
+    d = travel_ai.clean_day_detail({
+        "spots": [["颂歌中央图书馆", "40min"]],
+        "stops": [{"t": "颂歌图书馆", "lat": 60.1735, "lng": 24.938, "desc": "新地标。"}],
+    })
+    assert len(d["stops"]) == 1
+    assert d["stops"][0]["t"] == "颂歌中央图书馆"
+    assert d["stops"][0]["lat"] == 60.1735 and d["stops"][0]["dur"] == "40min"

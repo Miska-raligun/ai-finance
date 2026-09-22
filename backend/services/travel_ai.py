@@ -252,7 +252,10 @@ def clean_day_detail(raw) -> dict:
     if stops:
         out["stops"] = stops
 
-    # 模型(以及历史数据)还会吐 spots,原样并进来,别丢
+    # 模型(以及历史数据)还会吐 spots,原样并进来,别丢。
+    # merge 里会按"是不是同一个地方"去重——模型在一次回复里写两份地点清单时,
+    # 名字常飘一两个字(「颂歌图书馆」/「颂歌中央图书馆」),不去重就会变成
+    # 一个在地图上、一个永远"未定位"。
     out["spots"] = raw.get("spots")
     merge_spots_into_stops(out)
 
