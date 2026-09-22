@@ -22,6 +22,8 @@ from prompts.travel import (
     build_outline_from_notice, build_spot_descs_prompt,
 )
 
+from services.trip_detail import merge_spots_into_stops
+
 logger = logging.getLogger(__name__)
 
 _DATE_FMT = "%Y-%m-%d"
@@ -212,35 +214,33 @@ def clean_day_detail(raw) -> dict:
     if sched:
         out["sched"] = sched
 
-    spots = []
-    for row in (raw.get("spots") or [])[:10]:
-        if isinstance(row, dict):
-            row = [row.get("name"), row.get("dur")]
-        if isinstance(row, str):
-            row = [row, None]
-        if not isinstance(row, list) or not row:
-            continue
-        name = _s(row[0], 60)
-        if name:
-            dur = _s(row[1], 40) if len(row) > 1 else None
-            spots.append([name, dur or ""])
-    if spots:
-        out["spots"] = spots
-
+    # 地点只有一份:stops。没有坐标的也留着——它在地图上不画,但在地点
+    # 列表里看得见、能挂照片,之后补上坐标就会出现在地图上。
+    # 坐标**不合法**则是另一回事:整个坐标丢掉(点保留),因为地图上一个
+    # 错点比少一个点糟得多。
     stops, seen = [], set()
-    for st in (raw.get("stops") or [])[:12]:
+    for st in (raw.get("stops") or [])[:14]:
+        if isinstance(st, str):
+            st = {"t": st}
         if not isinstance(st, dict):
             continue
         name = _s(st.get("t") or st.get("name"), 60)
-        lat, lng = _coord(st.get("lat"), 90), _coord(st.get("lng"), 180)
-        # 坐标不合法就整点丢掉:地图上一个错点比少一个点糟得多
-        if not name or lat is None or lng is None:
+        if not name:
             continue
-        key = (name, round(lat, 4), round(lng, 4))
+        lat, lng = _coord(st.get("lat"), 90), _coord(st.get("lng"), 180)
+        if lat is None or lng is None:
+            lat = lng = None
+        key = (name, None if lat is None else round(lat, 4),
+               None if lng is None else round(lng, 4))
         if key in seen:
             continue
         seen.add(key)
-        item = {"t": name, "lat": round(lat, 6), "lng": round(lng, 6)}
+        item = {"t": name}
+        if lat is not None:
+            item["lat"], item["lng"] = round(lat, 6), round(lng, 6)
+        dur = _s(st.get("dur"), 40)
+        if dur:
+            item["dur"] = dur
         if st.get("air"):
             item["air"] = 1
         if st.get("sea"):
@@ -251,6 +251,10 @@ def clean_day_detail(raw) -> dict:
         stops.append(item)
     if stops:
         out["stops"] = stops
+
+    # 模型(以及历史数据)还会吐 spots,原样并进来,别丢
+    out["spots"] = raw.get("spots")
+    merge_spots_into_stops(out)
 
     for k in ("todo", "cam", "buy", "warn"):
         items = _list_of_str(raw.get(k), max_items=5, limit=180)

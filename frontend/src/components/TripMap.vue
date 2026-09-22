@@ -184,7 +184,7 @@ import { photoList, photoUrl } from '@/utils/tripPhotos'
 import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 
 const props = defineProps({
-  // [{ day_no, date, route, detail:{ stops:[{t,lat,lng,air,sea,desc,photo}], spots, todo, cam, warn } }]
+  // [{ day_no, date, route, detail:{ stops:[{t,dur,lat,lng,air,sea,desc,photo}], todo, cam, warn } }]
   days: { type: Array, default: () => [] },
   title: { type: String, default: '全程路线' },
   // 给了 tripId 才能改介绍 / 传照片;公开分享页只给 shareToken,永远只读
@@ -244,17 +244,15 @@ let markerById = new Map()
 let litId = null
 let ro = null
 
-/** 收集所有带坐标的点,按天顺序;顺带把当天 spots 的时长、以及提到这个地名的
- *  贴士配对上去——静态行程页里介绍是散在 spots / todo / cam 里的,
- *  不配对的话点开只会看到一句"还没有介绍"。 */
+/** 收集所有**带坐标**的地点,按天顺序;顺带把提到这个地名的贴士配对上去——
+ *  静态行程页里介绍是散在 todo / cam 里的,不配对的话点开只会看到一句
+ *  "还没有介绍"。
+ *
+ *  没坐标的地点不在这儿(地图画不了),但它在当天详情的地点列表里。 */
 const points = computed(() => {
   const out = []
   for (const d of props.days) {
     const det = d.detail || {}
-    const durOf = {}
-    for (const s of (det.spots || [])) {
-      if (Array.isArray(s) && s[0]) durOf[s[0]] = s[1] || ''
-    }
     const tipPool = [...(det.todo || []), ...(det.cam || []), ...(det.warn || [])]
     const stops = det.stops || []
     for (let si = 0; si < stops.length; si++) {
@@ -270,7 +268,7 @@ const points = computed(() => {
         air: !!st.air, sea: !!st.sea,
         desc: st.desc || st.note || '',
         photos: photoList(st),
-        dur: durOf[name] || '',
+        dur: st.dur || '',
         tips: tipPool.filter(x => typeof x === 'string' && x.includes(name)),
         dayNo: d.day_no,
         date: d.date || '',

@@ -25,7 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from jsliteral import load_literal  # noqa: E402
+from services.trip_detail import merge_spots_into_stops
 
+# spots 是老结构(景点名 + 时长),读进来后并进 stops——地点只有一份
 _DAY_KEYS = ("sched", "spots", "todo", "cam", "buy", "warn", "stay", "stops")
 
 
@@ -76,7 +78,7 @@ def parse_html(path: Path) -> dict:
 
     days = []
     for d in days_raw:
-        detail = {k: d[k] for k in _DAY_KEYS if d.get(k)}
+        detail = merge_spots_into_stops({k: d[k] for k in _DAY_KEYS if d.get(k)})
         days.append({
             "day_no": int(d["n"]),
             "date": d.get("iso"),

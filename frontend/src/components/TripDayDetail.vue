@@ -51,15 +51,20 @@
       <TripMap :days="[day]" :trip-id="tripId" title="当日路线" />
     </section>
 
+    <!-- 地点只有一份:地图上的点和这个列表是同一批数据。
+         没有坐标的地点也在这儿,只是地图上不画。 -->
     <TripRowsEditor
-      label="景点"
-      :rows="spots"
-      :fields="SPOT_FIELDS"
-      @save="saveRows('spots', $event)"
+      label="地点"
+      :rows="stops"
+      :fields="STOP_FIELDS"
+      hint="📍 的地点会画在地图上。新加的地点还没有坐标,在地图上点开它可以补。"
+      @save="saveRows('stops', $event)"
     >
-      <ul v-if="spots.length" class="dd-list">
-        <li v-for="(s, i) in spots" :key="i">
-          <b>{{ s[0] }}</b><span v-if="s[1]" class="dd-dim"> · {{ s[1] }}</span>
+      <ul v-if="stops.length" class="dd-list">
+        <li v-for="(st, i) in stops" :key="i">
+          <b>{{ st.t }}</b>
+          <span v-if="st.dur" class="dd-dim"> · {{ st.dur }}</span>
+          <span v-if="st.lat != null" class="dd-pin" title="在地图上">📍</span>
         </li>
       </ul>
     </TripRowsEditor>
@@ -196,14 +201,15 @@ const SCHED_FIELDS = [
   { i: 1, label: '事项', placeholder: '做什么' },
   { i: 2, label: '备注', placeholder: '备注,可留空' },
 ]
-const SPOT_FIELDS = [
-  { i: 0, label: '名称', placeholder: '景点名' },
-  { i: 1, label: '时长', placeholder: '停留多久,如 15min' },
+// 地点是对象(坐标、介绍、照片都挂在上面),所以用 k 而不是 i——
+// 编辑器会把没编辑的字段原样带回去
+const STOP_FIELDS = [
+  { k: 'dur', label: '停留时长', narrow: true, placeholder: '15min' },
+  { k: 't', label: '名称', placeholder: '地点名' },
 ]
 
 const detail = computed(() => props.day?.detail || {})
 const sched = computed(() => detail.value.sched || [])
-const spots = computed(() => detail.value.spots || [])
 const stay = computed(() => detail.value.stay || null)
 // 有经纬度就精确落点,只填了酒店名也能按名字搜——所以这个链接几乎总是可用的
 const stayMap = computed(() => {
@@ -335,6 +341,7 @@ async function saveJournal() {
 
 <style scoped>
 .dd-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dd-pin { font-size: 11px; margin-left: 4px; }
 .dd-none { margin: 0; font-size: 12px; color: var(--color-text-muted); }
 .dd-spacer { flex: 1; }
 .dd-b {

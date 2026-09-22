@@ -23,8 +23,8 @@
         <div class="re-line">
           <input
             v-for="f in narrow"
-            :key="f.i"
-            v-model="row[f.i]"
+            :key="fid(f)"
+            v-model="row.cells[fid(f)]"
             class="re-in re-in-narrow"
             :placeholder="f.placeholder || f.label"
             :aria-label="f.label"
@@ -33,10 +33,12 @@
             v-if="flagField"
             type="button"
             class="re-flag"
-            :class="{ on: row[flagField.i] }"
+            :class="{ on: row.cells[fid(flagField)] }"
             :title="flagField.label"
-            @click="row[flagField.i] = row[flagField.i] ? 0 : 1"
+            @click="row.cells[fid(flagField)] = row.cells[fid(flagField)] ? 0 : 1"
           >★</button>
+          <!-- 有坐标的行标出来:改名字不会丢掉这个点在地图上的位置 -->
+          <span v-if="pinned(row)" class="re-pin" title="这个地点在地图上">📍</span>
           <span class="re-spacer"></span>
           <button type="button" class="re-icon" title="上移" :disabled="i === 0" @click="move(i, -1)">↑</button>
           <button type="button" class="re-icon" title="下移" :disabled="i === draft.length - 1" @click="move(i, 1)">↓</button>
@@ -44,8 +46,8 @@
         </div>
         <input
           v-for="f in wide"
-          :key="f.i"
-          v-model="row[f.i]"
+          :key="fid(f)"
+          v-model="row.cells[fid(f)]"
           class="re-in"
           :placeholder="f.placeholder || f.label"
           :aria-label="f.label"
@@ -53,6 +55,7 @@
       </div>
 
       <button type="button" class="re-b re-add" @click="add">＋ 加一行</button>
+      <p v-if="hint" class="re-hint">{{ hint }}</p>
 
       <div class="re-foot">
         <span class="re-spacer"></span>
@@ -70,45 +73,55 @@ import { ref, computed } from 'vue'
 
 const props = defineProps({
   label: { type: String, required: true },
-  // 每行是个数组;fields 说明第几格是什么
-  // [{ i: 0, label: '时间', narrow: true, placeholder: '09:00' }, …]
   rows: { type: Array, default: () => [] },
+  // 每个字段要么给 i(行是数组,i 是下标),要么给 k(行是对象,k 是键名):
+  //   [{ i: 0, label: '时间', narrow: true }, { i: 3, label: '重点', flag: true }]
+  //   [{ k: 't', label: '名称' }, { k: 'dur', label: '时长', narrow: true }]
   fields: { type: Array, required: true },
+  hint: { type: String, default: '' },
 })
 const emit = defineEmits(['save'])
 
 const editing = ref(false)
 const saving = ref(false)
+// 每行是 { src, cells }:src 是原来那条(对象模式下要把没编辑的字段原样带回去
+// ——坐标、介绍、照片都挂在上面,丢了就是灾难),cells 是这次改的几格
 const draft = ref([])
+
+const objectMode = computed(() => props.fields.some(f => f.k !== undefined))
+function fid(f) { return f.k !== undefined ? f.k : f.i }
 
 const narrow = computed(() => props.fields.filter(f => f.narrow && !f.flag))
 const wide = computed(() => props.fields.filter(f => !f.narrow && !f.flag))
 const flagField = computed(() => props.fields.find(f => f.flag) || null)
 
-// fields 的**顺序**是界面上的排法(时间、★、事项、备注),f.i 才是它在
-// 数据行里的下标。两者不一样:★ 显示在第二个,存的却是第 4 格。所以造行时
-// 必须按下标铺,不能按 fields 的顺序铺——按顺序铺会把 ★ 的 0/1 塞进"事项"。
-const width = computed(() => Math.max(...props.fields.map(f => f.i)) + 1)
-
-function cell(k) {
-  return props.fields.find(f => f.i === k) || null
+/** 这一行原来有没有坐标。只做提示用,不参与保存。 */
+function pinned(row) {
+  const s = row.src
+  return !!(s && !Array.isArray(s) && isFinite(Number(s.lat)) && isFinite(Number(s.lng)))
 }
 
-function blank() {
-  return Array.from({ length: width.value }, (_, k) => (cell(k)?.flag ? 0 : ''))
+function read(src, f) {
+  const v = src == null ? undefined : src[fid(f)]
+  return f.flag ? (v ? 1 : 0) : (v ?? '')
+}
+
+function makeRow(src) {
+  const cells = {}
+  for (const f of props.fields) cells[fid(f)] = read(src, f)
+  // src 只在对象模式下有用(要把没编辑的字段带回去);数组模式下不需要
+  return { src: objectMode.value ? src : null, cells }
 }
 
 function start() {
-  // 深拷贝:取消时要能原样丢掉,不能就地改了父组件手里那份
-  draft.value = props.rows.map(r => Array.from({ length: width.value }, (_, k) => (
-    cell(k)?.flag ? (r[k] ? 1 : 0) : (r[k] ?? '')
-  )))
-  if (!draft.value.length) draft.value.push(blank())
+  // 不就地改父组件手里那份:取消时要能原样丢掉
+  draft.value = props.rows.map(makeRow)
+  if (!draft.value.length) draft.value.push(makeRow(null))
   editing.value = true
 }
 
 function add() {
-  draft.value.push(blank())
+  draft.value.push(makeRow(null))
 }
 
 function move(i, d) {
@@ -118,16 +131,52 @@ function move(i, d) {
   draft.value.splice(j, 0, row)
 }
 
+/** fields 的**顺序**是界面上的排法(时间、★、事项、备注),f.i 才是它在
+ *  数据行里的下标。两者不一样:★ 显示在第二个,存的却是第 4 格。所以铺
+ *  数组时必须按下标铺,不能按 fields 的顺序铺。 */
+function toArray(cells) {
+  const width = Math.max(...props.fields.map(f => f.i)) + 1
+  return Array.from({ length: width }, (_, i) => {
+    const f = props.fields.find(x => x.i === i)
+    if (!f) return ''
+    return f.flag ? (cells[i] ? 1 : 0) : cells[i]
+  })
+}
+
+/** 对象模式:原来那条原样带回去,只覆盖编辑过的几个键。
+ *  空字符串等于"没有这个字段",删掉而不是存个空串。 */
+function toObject(row) {
+  const out = { ...(row.src || {}) }
+  for (const f of props.fields) {
+    const v = row.cells[fid(f)]
+    if (f.flag) {
+      if (v) out[fid(f)] = 1
+      else delete out[fid(f)]
+    } else if (String(v ?? '').length) {
+      out[fid(f)] = v
+    } else {
+      delete out[fid(f)]
+    }
+  }
+  return out
+}
+
 async function save() {
   saving.value = true
   try {
-    // 整行都空的丢掉——加了一行又没填是常态,没必要存进去
-    const keep = flagField.value
-      ? props.fields.filter(f => !f.flag).map(f => f.i)
-      : props.fields.map(f => f.i)
+    const text = props.fields.filter(f => !f.flag)
     const out = draft.value
-      .map(r => r.map(v => (typeof v === 'string' ? v.trim() : v)))
-      .filter(r => keep.some(i => String(r[i] || '').length))
+      .map(r => {
+        const cells = {}
+        for (const k in r.cells) {
+          const v = r.cells[k]
+          cells[k] = typeof v === 'string' ? v.trim() : v
+        }
+        return { src: r.src, cells }
+      })
+      // 文字格全空的丢掉——加了一行又没填是常态,没必要存进去
+      .filter(r => text.some(f => String(r.cells[fid(f)] || '').length))
+      .map(r => (objectMode.value ? toObject(r) : toArray(r.cells)))
     await Promise.resolve(emit('save', out))
     editing.value = false
   } finally {
@@ -184,5 +233,7 @@ async function save() {
   border-color: var(--trip-accent, var(--color-primary)); color: #fff; font-weight: 700;
 }
 .re-add { width: 100%; padding: 6px; border-style: dashed; }
+.re-hint { margin: 8px 0 0; font-size: 11.5px; color: var(--color-text-muted); line-height: 1.6; }
+.re-pin { font-size: 12px; flex: 0 0 auto; }
 .re-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 </style>

@@ -233,19 +233,21 @@ def build_html(user_id: int, trip: dict, *, scope: str = "full",
             )
             body.append(f'<ol class="sched">{rows}</ol>')
 
-        for key, label in (("spots", "景点"), ("todo", "贴士"), ("cam", "拍摄建议"),
+        # 地点就是 stops 那一份(没坐标的也在里面,只是地图上不画)
+        places = [st for st in (x.get("stops") or []) if isinstance(st, dict) and st.get("t")]
+        if places:
+            lis = "".join(
+                f'<li>{_e(st["t"])}'
+                + (f'<span class="dim"> · {_e(st["dur"])}</span>' if st.get("dur") else "")
+                + "</li>" for st in places)
+            body.append(f'<div class="sub"><h4>地点</h4><ul>{lis}</ul></div>')
+
+        for key, label in (("todo", "贴士"), ("cam", "拍摄建议"),
                            ("buy", "买什么"), ("warn", "注意")):
             items = x.get(key) or []
             if not items:
                 continue
-            if key == "spots":
-                lis = "".join(
-                    f'<li>{_e(i[0] if isinstance(i, list) else i)}'
-                    + (f'<span class="dim"> · {_e(i[1])}</span>'
-                       if isinstance(i, list) and len(i) > 1 and i[1] else "")
-                    + "</li>" for i in items)
-            else:
-                lis = "".join(f"<li>{_e(i)}</li>" for i in items)
+            lis = "".join(f"<li>{_e(i)}</li>" for i in items)
             body.append(f'<div class="sub"><h4>{label}</h4><ul>{lis}</ul></div>')
 
         stay = x.get("stay") or {}

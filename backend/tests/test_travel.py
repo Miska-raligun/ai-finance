@@ -513,3 +513,62 @@ def test_trip_meta_is_editable_after_ai_wrote_it(app, auth_client):
     t = auth_client.get(f"/api/trips/{tid}").get_json()["trip"]
     assert t["title"] == "改过的名字" and t["cover_note"] == "改过的卷首语"
     assert t["code"] == "T-9" and t["accent"] == "sakura"
+
+
+def test_spots_migrate_into_stops(app, auth_client):
+    """老数据里「景点」和「地图停留点」是两份,迁移后合成一份。
+
+    这里直接写一条老结构进库再跑迁移——迁移本身是一次性的,
+    但它的合并规则(不丢坐标、不丢照片、不重复)值得守住。
+    """
+    import json
+    from db import get_db
+    from services.trip_detail import merge_spots_into_stops
+
+    tid = _mk_trip(auth_client).get_json()["id"]
+    old = {
+        "spots": [["岩石教堂", "15min"], ["西贝柳斯公园", "20min"], ["没坐标的地方", ""]],
+        "stops": [
+            {"t": "赫尔辛基机场", "lat": 60.317, "lng": 24.963, "air": 1},
+            {"t": "岩石教堂", "lat": 60.173, "lng": 24.925,
+             "desc": "凿进花岗岩里。", "photos": ["abc123"]},
+        ],
+        "todo": ["带插头"],
+    }
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE trip_days SET detail_json = ? WHERE trip_id = ? AND day_no = 1",
+                   (json.dumps(old, ensure_ascii=False), tid))
+        db.commit()
+        rows = db.execute(
+            "SELECT id, detail_json FROM trip_days WHERE detail_json LIKE '%\"spots\"%'"
+        ).fetchall()
+        assert len(rows) == 1
+        for r in rows:
+            d = merge_spots_into_stops(json.loads(r["detail_json"]))
+            db.execute("UPDATE trip_days SET detail_json = ? WHERE id = ?",
+                       (json.dumps(d, ensure_ascii=False), r["id"]))
+        db.commit()
+
+    got = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]
+    assert "spots" not in got
+    assert [s["t"] for s in got["stops"]] == [
+        "赫尔辛基机场", "岩石教堂", "西贝柳斯公园", "没坐标的地方"]
+    church = got["stops"][1]
+    assert church["dur"] == "15min"                 # 时长补上了
+    assert church["photos"] == ["abc123"]           # 照片没丢
+    assert church["desc"] == "凿进花岗岩里。"         # 介绍没丢
+    assert church["lat"] == 60.173                  # 坐标没丢
+    assert got["stops"][0]["air"] == 1              # 只在 stops 里的原样留着
+    assert "lat" not in got["stops"][3]             # 只在 spots 里的没有坐标
+    assert got["todo"] == ["带插头"]                 # 别的键不受影响
+
+
+def test_merge_is_idempotent():
+    """迁移跑两遍不该出重复的点。"""
+    from services.trip_detail import merge_spots_into_stops
+    d = {"spots": [["A", "10min"]], "stops": [{"t": "B", "lat": 1, "lng": 2}]}
+    once = merge_spots_into_stops(dict(d))
+    twice = merge_spots_into_stops(dict(once))
+    assert [s["t"] for s in twice["stops"]] == ["B", "A"]
+    assert once == twice

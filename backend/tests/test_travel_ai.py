@@ -36,8 +36,12 @@ def test_outline_rejects_bad_dates_and_overlong_trips():
             travel_ai.clean_outline({"title": "t", **bad})
 
 
-def test_day_detail_drops_bad_coordinates():
-    """地图上一个错点比少一个点糟得多,坐标不合法就整点丢掉。"""
+def test_day_detail_drops_bad_coordinates_but_keeps_the_place():
+    """坐标不合法就把坐标丢掉——地图上一个错点比少一个点糟得多。
+
+    地点本身留着:它在地点列表里看得见、能挂照片,之后补上坐标就会出现在
+    地图上。以前是整条丢,结果行程单里明明有的地方就这么没了。
+    """
     d = travel_ai.clean_day_detail({"stops": [
         {"t": "纬度越界", "lat": 95, "lng": 10},
         {"t": "经度越界", "lat": 10, "lng": 200},
@@ -45,7 +49,23 @@ def test_day_detail_drops_bad_coordinates():
         {"t": "正常", "lat": 60.17, "lng": 24.92},
         {"t": "正常", "lat": 60.17, "lng": 24.92},      # 重复
     ]})
-    assert [s["t"] for s in d["stops"]] == ["正常"]
+    assert [s["t"] for s in d["stops"]] == ["纬度越界", "经度越界", "没坐标", "正常"]
+    assert [s["t"] for s in d["stops"] if "lat" in s] == ["正常"]
+
+
+def test_spots_and_stops_become_one_list():
+    """地点只有一份。同名的把时长补上去,坐标/介绍不动;
+    只在 spots 里出现的接在后面(没坐标,地图上不画)。"""
+    d = travel_ai.clean_day_detail({
+        "spots": [["岩石教堂", "15min"], ["只在景点里的地方", "30min"]],
+        "stops": [{"t": "岩石教堂", "lat": 60.17, "lng": 24.92, "desc": "凿进花岗岩里。"}],
+    })
+    assert "spots" not in d
+    assert [s["t"] for s in d["stops"]] == ["岩石教堂", "只在景点里的地方"]
+    church = d["stops"][0]
+    assert church["dur"] == "15min" and church["desc"] == "凿进花岗岩里。"
+    assert church["lat"] == 60.17
+    assert "lat" not in d["stops"][1]
 
 
 def test_day_detail_caps_and_normalizes():
@@ -87,8 +107,8 @@ _OUTLINE = {
 }
 _DAY = {
     "sched": [["09:00", "出发", "", 1]],
-    "spots": [["岩石教堂", "15min"]],
-    "stops": [{"t": "岩石教堂", "lat": 60.173, "lng": 24.925, "desc": "凿进整块花岗岩里的教堂。"}],
+    "stops": [{"t": "岩石教堂", "dur": "15min", "lat": 60.173, "lng": 24.925,
+               "desc": "凿进整块花岗岩里的教堂。"}],
     "todo": ["赶上管风琴试音值得多站一会儿"],
     "stay": {"h": "某酒店", "a": "某路 1 号"},
 }

@@ -211,7 +211,9 @@ function stayMap(d) {
 function tipGroups(d) {
   const x = d.detail || {}
   return [
-    { key: 'spots', label: '景点', items: (x.spots || []).map(s => Array.isArray(s) ? (s[1] ? `${s[0]}（${s[1]}）` : s[0]) : String(s)) },
+    // 地点就是 stops 那一份(没坐标的也在里面,只是地图上不画)
+    { key: 'stops', label: '地点', items: (x.stops || [])
+      .filter(s => s && s.t).map(s => (s.dur ? `${s.t}（${s.dur}）` : s.t)) },
     { key: 'todo', label: '贴士', items: x.todo || [] },
     { key: 'cam', label: '拍摄建议', items: x.cam || [] },
     { key: 'buy', label: '买什么', items: x.buy || [] },
