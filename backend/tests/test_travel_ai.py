@@ -829,3 +829,65 @@ def test_spot_geo_needs_a_name(app, auth_client, monkeypatch):
         "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
     assert auth_client.post(f"/api/trips/{tid}/ai/block",
                             json={"kind": "spot_geo"}).status_code == 400
+
+
+def _stub_geos(monkeypatch, items):
+    def fake(messages, llm=None, tools=None, tool_choice=None,
+             temperature=0.3, timeout=10, endpoint="unknown"):
+        return {"choices": [{"message": {"content": json.dumps(
+            {"items": items}, ensure_ascii=False)}}]}
+    monkeypatch.setattr("services.llm._call_llm", fake)
+
+
+def test_batch_geo_locates_several_at_once(app, auth_client, monkeypatch):
+    """一次给一天的一批地点定位——一个点一次调用又慢又贵,
+    而且模型看不到当天的路线,同名的地方就没法消歧。"""
+    _stub_geos(monkeypatch, [
+        {"i": 1, "t": "赫尔辛基岩石教堂", "lat": 60.1725, "lng": 24.9255,
+         "place": "岩石教堂,赫尔辛基", "sure": 1},
+        {"i": 2, "t": "颂歌", "lat": 60.1735, "lng": 24.938,
+         "place": "颂歌中央图书馆,赫尔辛基", "sure": 0},
+    ])
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+
+    r = auth_client.post(f"/api/trips/{tid}/ai/block", json={
+        "kind": "spot_geos", "day_no": 1,
+        "spots": ["岩石教堂", "颂歌中央图书馆"]})
+    job = _wait(auth_client, r.get_json()["job_id"])
+    assert job["status"] == "done"
+
+    items = job["result"]["items"]
+    # 回的是**我们的**名字,不是模型改写过的那个
+    assert [x["t"] for x in items] == ["岩石教堂", "颂歌中央图书馆"]
+    assert items[0]["lat"] == 60.1725 and items[0]["sure"] == 1
+    assert items[1]["sure"] == 0          # 模型说不确定
+
+    # 草稿不落库:坐标要人在地图上看一眼才算数
+    assert auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"] == {}
+
+
+def test_batch_geo_reports_the_ones_it_does_not_know(app, auth_client, monkeypatch):
+    """不知道的也要回一条,前端才好告诉用户哪几个没定到。"""
+    _stub_geos(monkeypatch, [
+        {"i": 1, "t": "岩石教堂", "lat": 60.1725, "lng": 24.9255, "sure": 1},
+        {"i": 2, "t": "老王烧烤", "lat": None, "lng": None, "place": "同名太多", "sure": 0},
+        {"i": 3, "t": "某处", "lat": 95, "lng": 400, "sure": 1},      # 越界
+    ])
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+    r = auth_client.post(f"/api/trips/{tid}/ai/block", json={
+        "kind": "spot_geos", "spots": ["岩石教堂", "老王烧烤", "某处"]})
+    job = _wait(auth_client, r.get_json()["job_id"])
+    got = {x["t"]: x for x in job["result"]["items"]}
+    assert got["岩石教堂"]["lat"] == 60.1725
+    assert got["老王烧烤"]["lat"] is None
+    assert got["某处"]["lat"] is None      # 越界的坐标当成"没定到"
+
+
+def test_batch_geo_needs_a_list(app, auth_client, monkeypatch):
+    _stub_geos(monkeypatch, [])
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+    assert auth_client.post(f"/api/trips/{tid}/ai/block",
+                            json={"kind": "spot_geos"}).status_code == 400

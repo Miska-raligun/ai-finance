@@ -46,8 +46,11 @@
       </ol>
     </TripRowsEditor>
 
-    <!-- 当日地图:该天有带坐标的停留点才显示 -->
-    <section v-if="hasStops" class="dd-sec">
+    <!-- 当日地图。只要这天有地点就显示——哪怕一个坐标都没有:
+         底下那份列表是打开介绍和照片的入口,也是给它们定位的入口。
+         以前这里要求"至少有一个带坐标的点",于是全都没坐标的那天,
+         连介绍都没法看了。 -->
+    <section v-if="stops.length" class="dd-sec">
       <TripMap :days="[day]" :trip-id="tripId" title="当日路线" />
     </section>
 
@@ -218,8 +221,6 @@ const stayMap = computed(() => {
 })
 const hasStay = computed(() => !!(stay.value && (stay.value.h || stay.value.a)))
 const stops = computed(() => detail.value.stops || [])
-const hasStops = computed(() =>
-  stops.value.some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
 
 const showPhotos = ref(false)
 const rootRef = ref(null)

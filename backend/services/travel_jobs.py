@@ -84,6 +84,8 @@ def run_block(ctx):
             blk["day"] = dict(drow)
     if ctx.payload.get("spot"):
         blk["spot"] = ctx.payload["spot"]
+    if ctx.payload.get("spots"):
+        blk["spots"] = ctx.payload["spots"]
 
     try:
         result = travel_ai.gen_block(ctx.payload["kind"], blk, llm=ctx.llm)

@@ -130,9 +130,14 @@ def ai_block(trip_id: int):
     spot = (data.get("spot") or "").strip()[:80]
     if kind in ("spot_desc", "spot_geo") and not spot:
         return jsonify({"error": "缺少地点名称"}), 400
+    # 批量定位:一次给一天的一批地点,比一个点一次调用省得多
+    spots = [str(x).strip()[:80] for x in (data.get("spots") or [])][:14]
+    spots = [x for x in spots if x]
+    if kind == "spot_geos" and not spots:
+        return jsonify({"error": "缺少地点列表"}), 400
 
     job_id = ai_jobs.submit(g.user_id, "block", {
-        "kind": kind, "day_no": day_no, "spot": spot or None,
+        "kind": kind, "day_no": day_no, "spot": spot or None, "spots": spots or None,
         "hint": (data.get("hint") or "").strip()[:500] or None,
         "label": data.get("label") or kind,
     }, current_llm(data), trip_id=trip_id)

@@ -132,6 +132,22 @@ def build_facts_extract_prompt(notice: str) -> str:
 
 # ---------- 2.6 批量补景点介绍 ----------
 
+SPOT_GEOS_SYSTEM = (
+    "你给旅行行程里的地点标经纬度。\n"
+    + _JSON_RULE + "\n"
+    '输出结构:{"items":[{"i":1,"t":"地点名(照抄我给的)",'
+    '"lat":60.1725,"lng":24.9255,"place":"你确认到的地方全名","sure":1}]}\n'
+    "规则:\n"
+    "- i 是我给的那个编号,**必须带上**:名字你可能会写成别的样子,编号不会错\n"
+    "- 坐标用 WGS-84,小数点后 4 位以上\n"
+    "- place 写你认为这是哪儿的全名(含城市 / 国家),让用户能核对是不是同一个地方\n"
+    "- 名气不大的餐馆、连锁店的某一家分店、同名的地方,拿不准就 sure 写 0;\n"
+    "  实在不知道就 lat/lng 都给 null,**不要猜一个大概的城市中心糊弄过去**\n"
+    "- 我给了当天的路线,同名的地方据此消歧(比如选路线上的那个城市)\n"
+    "- 每个地点都要回一条,包括你不知道的那些(给 null)"
+)
+
+
 SPOT_DESCS_SYSTEM = (
     "你给旅行行程里的地点写简介。\n"
     + _JSON_RULE + "\n"
@@ -143,6 +159,16 @@ SPOT_DESCS_SYSTEM = (
     "- 机场、码头、服务区这种纯交通节点,一句话说清它在行程里的作用就够\n"
     "- 不认识的地点就**不要**放进 items,宁可少给几条也不要编"
 )
+
+
+def build_spot_geos_prompt(trip: dict, day: dict, names: list[str]) -> str:
+    return (
+        f"行程:{trip.get('title') or ''} {trip.get('subtitle') or ''}\n"
+        f"第 {day.get('day_no')} 天 · {day.get('date') or ''} · "
+        f"{day.get('route') or ''}\n\n"
+        "给下面这些地点各标一个经纬度。每条回复里带上前面的编号 i:\n"
+        + "\n".join(f"{i}. {n}" for i, n in enumerate(names[:14], 1))
+    )
 
 
 def build_spot_descs_prompt(trip: dict, day: dict, names: list[str]) -> str:
@@ -193,6 +219,9 @@ _BLOCK_SPECS = {
         "  实在不知道就 lat/lng 都给 null,**不要猜一个大概的城市中心糊弄过去**\n"
         "- 有当天路线和行程信息时据此消歧(比如同名的城市选路线上的那个)",
     ),
+    # 批量定位不走 _BLOCK_SPECS 的提示词(它有自己的 SPOT_GEOS_SYSTEM),
+    # 放在这里只是为了让它成为一个合法的 block kind
+    "spot_geos": ("(见 SPOT_GEOS_SYSTEM)", "批量给地点标经纬度。"),
     "packing": (
         '{"items":[{"grp":"分组","label":"物品","hint":"一句说明或 null"}]}',
         "按这趟行程的目的地、季节和活动,列一份打包清单,12~24 条,按分组归类。",

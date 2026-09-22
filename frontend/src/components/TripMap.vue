@@ -35,28 +35,42 @@
       <span><i class="dotl end"></i>终点</span>
     </div>
 
-    <!-- 停留点列表:低缩放下点会叠在一起,列表保证每个点都可达,
-         也给键盘 / 读屏用户一条路径。 -->
-    <ul v-if="points.length" class="tmap-list">
-      <li v-for="p in points" :key="p.id">
+    <!-- 地点列表。低缩放下点会叠在一起,列表保证每个点都可达,也给键盘 /
+         读屏用户一条路径。**没有坐标的地点也在这儿**:它画不到地图上,
+         但介绍、照片、贴士一样要能看。 -->
+    <ul v-if="places.length" class="tmap-list">
+      <li v-for="p in places" :key="p.id">
         <button
           type="button"
           class="tmap-li"
-          :class="{ on: activeStopId === p.id }"
+          :class="{ on: activeStopId === p.id, off: !p.located }"
+          :title="p.located ? '' : '还没有位置,点开可以看介绍和照片'"
           @click="focusStop(p)"
         >
-          <span class="tmap-li-dot" :class="{ air: p.air, sea: p.sea }"></span>
+          <span class="tmap-li-dot" :class="{ air: p.air, sea: p.sea, hollow: !p.located }"></span>
           {{ p.t }}
           <span class="tmap-li-day">D{{ p.dayNo }}</span>
         </button>
       </li>
     </ul>
-    <div v-else-if="!unlocated.length" class="tmap-empty">这段行程还没有标记地点。</div>
+    <div v-else class="tmap-empty">这段行程还没有标记地点。</div>
 
     <!-- 没有坐标的地点。定位不接地理编码服务:模型本来就知道大部分地名在哪,
          而且结果必须过人眼——所以它给的是个可以拖的草稿点,不是直接落库。 -->
     <div v-if="canEdit && unlocated.length" class="tmap-un">
-      <div class="tmap-un-h">还有 {{ unlocated.length }} 个地点没有位置</div>
+      <div class="tmap-un-h">
+        <span>还有 {{ unlocated.length }} 个地点没有位置</span>
+        <button
+          v-if="unlocated.length > 1"
+          type="button"
+          class="tmap-btn"
+          :disabled="batchBusy || !!geoDrafts.length"
+          @click="locateAll"
+        >
+          <span v-if="batchBusy" class="spot-spin" aria-hidden="true"></span>
+          {{ batchBusy ? `全部定位中… ${batchSecs}s` : '✨ 全部定位' }}
+        </button>
+      </div>
       <ul class="tmap-un-l">
         <li v-for="u in unlocated" :key="u.key">
           <span class="tmap-un-n">{{ u.t }}</span>
@@ -64,7 +78,7 @@
           <button
             type="button"
             class="tmap-btn"
-            :disabled="geoBusy(u) || !!geoDraft"
+            :disabled="geoBusy(u) || batchBusy || !!geoDrafts.length"
             @click="locate(u)"
           >
             <span v-if="geoBusy(u)" class="spot-spin" aria-hidden="true"></span>
@@ -76,19 +90,28 @@
     </div>
 
     <!-- 草稿点的确认条。AI 记错坐标是常事,所以一律先看一眼再存 -->
-    <div v-if="geoDraft" class="tmap-draft">
+    <div v-if="geoDrafts.length" class="tmap-draft">
       <div class="tmap-draft-t">
-        <b>{{ geoDraft.t }}</b>
-        <span v-if="geoDraft.place" class="tmap-draft-p">AI 认为这是:{{ geoDraft.place }}</span>
-        <span v-if="!geoDraft.sure" class="tmap-draft-w">模型说它不太确定,务必核对</span>
+        <b>AI 定了 {{ geoDrafts.length }} 个位置</b>
+        <span v-if="unsureCount" class="tmap-draft-w">
+          其中 {{ unsureCount }} 个它不太确定,务必核对
+        </span>
       </div>
-      <p class="tmap-draft-h">地图上那个空心点就是它。位置不对可以直接拖动,再保存。</p>
+      <p class="tmap-draft-h">地图上的空心点就是它们。位置不对可以直接拖动,再保存。</p>
+      <ul class="tmap-draft-l">
+        <li v-for="g in geoDrafts" :key="g.key" :class="{ unsure: !g.sure }">
+          <button type="button" class="tmap-draft-n" @click="focusDraft(g)">{{ g.t }}</button>
+          <span v-if="g.place" class="tmap-draft-p">{{ g.place }}</span>
+          <span class="tmap-un-sp"></span>
+          <span class="tmap-draft-c">{{ g.lat.toFixed(4) }}, {{ g.lng.toFixed(4) }}</span>
+          <button type="button" class="tmap-icon" title="这个不对,去掉" @click="dropOne(g)">✕</button>
+        </li>
+      </ul>
       <div class="tmap-draft-b">
-        <span class="tmap-draft-c">{{ geoDraft.lat.toFixed(4) }}, {{ geoDraft.lng.toFixed(4) }}</span>
         <span class="tmap-un-sp"></span>
-        <button type="button" class="tmap-btn" @click="dropDraft">不对,丢弃</button>
-        <button type="button" class="tmap-btn on" :disabled="savingGeo" @click="keepDraft">
-          {{ savingGeo ? '保存中…' : '就是这儿' }}
+        <button type="button" class="tmap-btn" @click="dropDrafts">全部丢弃</button>
+        <button type="button" class="tmap-btn on" :disabled="savingGeo" @click="keepDrafts">
+          {{ savingGeo ? '保存中…' : `保存这 ${geoDrafts.length} 个` }}
         </button>
       </div>
     </div>
@@ -206,6 +229,20 @@
               target="_blank"
               rel="noopener noreferrer"
             >📍 在地图应用里打开</a>
+            <!-- 没有坐标不影响看介绍和照片,只是地图上没有它 -->
+            <div v-else class="spot-noloc">
+              <span>这个地点还没有位置,所以不在地图上。</span>
+              <button
+                v-if="canEdit"
+                type="button"
+                class="spot-b"
+                :disabled="geoBusy(detail) || geoDrafts.length"
+                @click="locate(detail)"
+              >
+                <span v-if="geoBusy(detail)" class="spot-spin" aria-hidden="true"></span>
+                {{ geoBusy(detail) ? `定位中… ${geoSecs(detail)}s` : '✨ 让 AI 定位' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -284,12 +321,13 @@ let markerById = new Map()
 let litId = null
 let ro = null
 
-/** 收集所有**带坐标**的地点,按天顺序;顺带把提到这个地名的贴士配对上去——
+/** 这段行程的**所有**地点,按天顺序;顺带把提到这个地名的贴士配对上去——
  *  静态行程页里介绍是散在 todo / cam 里的,不配对的话点开只会看到一句
  *  "还没有介绍"。
  *
- *  没坐标的地点不在这儿(地图画不了),但它在当天详情的地点列表里。 */
-const points = computed(() => {
+ *  没有坐标的也在这儿。它画不到地图上,但介绍、照片、贴士一样要能看——
+ *  把"能不能打开"和"有没有坐标"绑在一起是不对的。 */
+const places = computed(() => {
   const out = []
   for (const d of props.days) {
     const det = d.detail || {}
@@ -297,14 +335,18 @@ const points = computed(() => {
     const stops = det.stops || []
     for (let si = 0; si < stops.length; si++) {
       const st = stops[si]
+      if (!st || !st.t) continue
       const lat = Number(st.lat), lng = Number(st.lng)
-      if (!isFinite(lat) || !isFinite(lng)) continue
-      const name = st.t || '未命名'
+      const located = isFinite(lat) && isFinite(lng)
+      const name = st.t
       out.push({
-        id: `${d.day_no}-${out.length}`,
+        // 用 si 而不是序号:插进没坐标的点之后,序号会串
+        id: `${d.day_no}-${si}`,
         si,
         t: name,
-        lat, lng,                 // 一律存 WGS-84;画到哪套坐标系由 coord() 决定
+        located,
+        lat: located ? lat : null,   // 一律存 WGS-84;画到哪套坐标系由 coord() 决定
+        lng: located ? lng : null,
         air: !!st.air, sea: !!st.sea,
         desc: st.desc || st.note || '',
         photos: photoList(st),
@@ -319,20 +361,13 @@ const points = computed(() => {
   return out
 })
 
-/** 没有坐标的地点:它们不在地图上,但要能从这儿给它们定位。 */
-const unlocated = computed(() => {
-  const out = []
-  for (const d of props.days) {
-    const stops = d.detail?.stops || []
-    for (let si = 0; si < stops.length; si++) {
-      const st = stops[si]
-      if (!st || !st.t) continue
-      if (isFinite(Number(st.lat)) && isFinite(Number(st.lng))) continue
-      out.push({ key: `${d.day_no}-${si}`, t: st.t, dayNo: d.day_no, si })
-    }
-  }
-  return out
-})
+/** 能画在地图上的那些。 */
+const points = computed(() => places.value.filter(p => p.located))
+
+/** 还没有坐标的那些:它们画不到地图上,要能从这儿给它们定位。 */
+const unlocated = computed(() =>
+  places.value.filter(p => !p.located)
+    .map(p => ({ key: p.id, t: p.t, dayNo: p.dayNo, si: p.si })))
 
 /** 按当前底图的坐标系换算出要画的位置。 */
 function coord(p) {
@@ -524,7 +559,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearInterval(geoTimer)
-  hideDraft()
+  dropDrafts()
   if (redrawHandle) cancelAnimationFrame(redrawHandle)
   ro?.disconnect()
   map?.remove()
@@ -567,7 +602,8 @@ function describe(p) {
   return {
     ...p,
     cover: photoUrl(ctx, p.photos[0]),
-    mapUrl: mapUrl({ lat: p.lat, lng: p.lng, name: p.t }),
+    // 没坐标就不给外链:那只会跳到地图应用的默认位置,比没有还糟
+    mapUrl: p.located ? mapUrl({ lat: p.lat, lng: p.lng, name: p.t }) : '',
   }
 }
 
@@ -596,15 +632,18 @@ watch(activeStopId, (id) => {
 // (还要申请 key、配额、再往 CSP 里放一个域名)不划算。代价是它会记错,
 // 所以结果一律当草稿:画一个可以拖的空心点,人确认了才落库。
 
-const geoDraft = ref(null)          // { t, dayNo, si, lat, lng, place, sure }
+const geoDrafts = ref([])        // [{ key, t, dayNo, si, lat, lng, place, sure }]
 const savingGeo = ref(false)
 const geoErr = ref('')
-let draftMarker = null
+const draftMarkers = new Map()   // key -> L.marker
+
+const unsureCount = computed(() => geoDrafts.value.filter(g => !g.sure).length)
 
 function geoKey(u) { return `spot_geo:${props.tripId}:${u.dayNo}:${u.si}` }
-function geoBusy(u) { return aiState(geoKey(u)).running }
-function geoSecs(u) { return aiElapsed(geoKey(u)) }
+function geoBusy(u) { return u ? aiState(geoKey(u)).running : false }
+function geoSecs(u) { return u ? aiElapsed(geoKey(u)) : 0 }
 
+/** 单个定位。 */
 async function locate(u) {
   geoErr.value = ''
   const day = props.days.find(x => x.day_no === u.dayNo)
@@ -618,74 +657,156 @@ async function locate(u) {
   })
 }
 
-/** 轮询结果回来了就摆一个草稿点。 */
+// 批量定位:**按天**一次调用。一个点一次调用又慢又贵,而且模型看不到当天的
+// 路线,同名的地方正是靠它消歧的。
+const batchKeys = ref([])
+const batchBusy = computed(() =>
+  batchKeys.value.some(k => aiState(k).running))
+const batchSecs = computed(() => Math.max(0, ...batchKeys.value.map(k => aiElapsed(k))))
+
+function batchKey(dayNo) { return `spot_geos:${props.tripId}:${dayNo}` }
+
+async function locateAll() {
+  geoErr.value = ''
+  const byDay = new Map()
+  for (const u of unlocated.value) {
+    if (!byDay.has(u.dayNo)) byDay.set(u.dayNo, [])
+    byDay.get(u.dayNo).push(u)
+  }
+  batchKeys.value = [...byDay.keys()].map(batchKey)
+  for (const [dayNo, list] of byDay) {
+    const day = props.days.find(x => x.day_no === dayNo)
+    await runAiBlock(batchKey(dayNo), `/api/trips/${props.tripId}/ai/block`, {
+      kind: 'spot_geos',
+      day_no: dayNo,
+      spots: list.map(x => x.t).slice(0, 14),
+      hint: day?.route ? `这一天的路线:${day.route}` : undefined,
+      label: `定位第 ${dayNo} 天的 ${list.length} 个地点`,
+    })
+  }
+}
+
+/** 把回来的结果变成草稿点。单个和批量都走这儿。 */
 function absorbGeo() {
+  const missed = []
+  let added = false
+
+  const add = (u, r) => {
+    if (r.lat == null || r.lng == null) {
+      missed.push(u.t + (r.place ? `(它猜是 ${r.place})` : ''))
+      return
+    }
+    if (geoDrafts.value.some(g => g.key === u.key)) return
+    geoDrafts.value.push({
+      ...u, lat: r.lat, lng: r.lng, place: r.place || '', sure: !!r.sure,
+    })
+    added = true
+  }
+
+  // 单个
   for (const u of unlocated.value) {
     const st = aiState(geoKey(u))
     if (!st.result) continue
     const r = st.result
     clearAiBlock(geoKey(u))
-    if (r.lat == null || r.lng == null) {
-      geoErr.value = `AI 也说不准「${u.t}」在哪${r.place ? `(它猜是 ${r.place})` : ''}。`
-                   + '可以把名字写全一点再试,比如带上城市。'
-      return
-    }
-    geoDraft.value = { ...u, lat: r.lat, lng: r.lng, place: r.place || '', sure: !!r.sure }
-    showDraft()
-    return
+    add(u, r)
   }
+  // 批量:按名字认回是哪个点(后端回的就是我们发过去的名字)
+  for (const k of batchKeys.value) {
+    const st = aiState(k)
+    if (!st.result) continue
+    const items = st.result.items || []
+    clearAiBlock(k)
+    const dayNo = Number(k.split(':').pop())
+    for (const it of items) {
+      const u = unlocated.value.find(x => x.dayNo === dayNo && x.t === it.t)
+      if (u) add(u, it)
+    }
+  }
+
+  if (missed.length) {
+    geoErr.value = `这几个 AI 也说不准:${missed.slice(0, 4).join('、')}。`
+                 + '可以把名字写全一点(带上城市)再试。'
+  }
+  if (added) showDrafts()
 }
 watch(unlocated, absorbGeo)
 // 结果是异步回来的,轮一下:这几个 key 的状态都在模块级 store 里
 let geoTimer = null
 
-function showDraft() {
-  if (!map || !geoDraft.value) return
-  hideDraft()
-  const at = coord(geoDraft.value)
-  draftMarker = L.marker(at, {
-    draggable: true,
-    // 空心点:和已经定好的实心点区分开,一眼能看出这个还没存
-    icon: L.divIcon({ className: 'tmap-draft-pin', html: '<i></i>',
-                      iconSize: [18, 18], iconAnchor: [9, 9] }),
-  }).addTo(map)
-  draftMarker.on('dragend', () => {
-    const ll = draftMarker.getLatLng()
-    // 拖动拿到的是**当前底图**坐标系的值,存回去要换回 WGS-84
-    const [lat, lng] = layerDef.value.datum === 'gcj02'
-      ? gcj2wgs(ll.lat, ll.lng)
-      : [ll.lat, ll.lng]
-    geoDraft.value = { ...geoDraft.value, lat, lng }
-  })
-  map.flyTo(at, Math.max(map.getZoom(), 12), { duration: 0.6 })
+function showDrafts() {
+  if (!map) return
+  for (const g of geoDrafts.value) {
+    if (draftMarkers.has(g.key)) continue
+    const m = L.marker(coord(g), {
+      draggable: true,
+      // 空心点:和已经定好的实心点区分开,一眼能看出这个还没存
+      icon: L.divIcon({ className: 'tmap-draft-pin', html: '<i></i>',
+                        iconSize: [18, 18], iconAnchor: [9, 9] }),
+    }).addTo(map)
+    m.on('dragend', () => {
+      const ll = m.getLatLng()
+      // 拖动拿到的是**当前底图**坐标系的值,存回去要换回 WGS-84
+      const [lat, lng] = layerDef.value.datum === 'gcj02'
+        ? gcj2wgs(ll.lat, ll.lng)
+        : [ll.lat, ll.lng]
+      const hit = geoDrafts.value.find(x => x.key === g.key)
+      if (hit) { hit.lat = lat; hit.lng = lng }
+    })
+    draftMarkers.set(g.key, m)
+  }
+  fitDrafts()
 }
 
-function hideDraft() {
-  if (draftMarker) {
-    draftMarker.remove()
-    draftMarker = null
+function fitDrafts() {
+  const gs = geoDrafts.value
+  if (!map || !gs.length) return
+  if (gs.length === 1) {
+    map.flyTo(coord(gs[0]), Math.max(map.getZoom(), 12), { duration: 0.6 })
+  } else {
+    map.flyToBounds(L.latLngBounds(gs.map(coord)).pad(0.25), { duration: 0.6 })
   }
 }
 
-function dropDraft() {
-  hideDraft()
-  geoDraft.value = null
+function focusDraft(g) {
+  if (map) map.flyTo(coord(g), Math.max(map.getZoom(), 13), { duration: 0.6 })
 }
 
-async function keepDraft() {
-  const d = geoDraft.value
-  if (!d) return
+function dropMarker(key) {
+  const m = draftMarkers.get(key)
+  if (m) { m.remove(); draftMarkers.delete(key) }
+}
+
+function dropOne(g) {
+  dropMarker(g.key)
+  geoDrafts.value = geoDrafts.value.filter(x => x.key !== g.key)
+}
+
+function dropDrafts() {
+  for (const k of [...draftMarkers.keys()]) dropMarker(k)
+  geoDrafts.value = []
+  batchKeys.value = []
+}
+
+async function keepDrafts() {
+  if (!geoDrafts.value.length) return
   savingGeo.value = true
   try {
-    const day = props.days.find(x => x.day_no === d.dayNo)
-    const stop = day?.detail?.stops?.[d.si]
-    if (!stop) return
-    stop.lat = Number(d.lat.toFixed(6))
-    stop.lng = Number(d.lng.toFixed(6))
+    // 按天归拢:同一天的几个点一次 PATCH,别为每个点发一趟
+    const byDay = new Map()
+    for (const g of geoDrafts.value) {
+      const day = props.days.find(x => x.day_no === g.dayNo)
+      const stop = day?.detail?.stops?.[g.si]
+      if (!stop) continue
+      stop.lat = Number(g.lat.toFixed(6))
+      stop.lng = Number(g.lng.toFixed(6))
+      byDay.set(day.day_no, day)
+    }
     const { default: api } = await import('@/api')
-    await api.patch(`/api/trips/${props.tripId}/days/${day.day_no}`, { detail: day.detail })
-    hideDraft()
-    geoDraft.value = null
+    for (const day of byDay.values()) {
+      await api.patch(`/api/trips/${props.tripId}/days/${day.day_no}`, { detail: day.detail })
+    }
+    dropDrafts()
     emit('changed')
   } catch (e) {
     geoErr.value = e?.response?.data?.error || '保存失败,再试一次'
@@ -694,15 +815,16 @@ async function keepDraft() {
   }
 }
 
-/** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。 */
+/** 列表点进来的:先把地图飞过去,再弹窗,不然不知道这个点在哪。
+ *  没有坐标的就只弹窗——照样能看介绍和照片。 */
 function focusStop(p) {
-  if (map) map.flyTo(coord(p), Math.max(map.getZoom(), 10), { duration: 0.6 })
+  if (map && p.located) map.flyTo(coord(p), Math.max(map.getZoom(), 10), { duration: 0.6 })
   openStop(p)
 }
 
 const siblings = computed(() => {
   const d = detail.value
-  if (!d) return []
+  if (!d || !d.located) return []      // 没坐标就谈不上"这一带"
   // 同一天、离得很近(约 1km 内)的点,当作"这一带"
   return points.value.filter(p =>
     p.dayNo === d.dayNo &&
@@ -875,6 +997,44 @@ async function saveDesc() {
 .tmap-draft-h { margin: 5px 0 8px; font-size: 11.5px; color: var(--color-text-muted); line-height: 1.6; }
 .tmap-draft-b { display: flex; align-items: center; gap: 8px; }
 .tmap-draft-c { font-size: 11.5px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.tmap-draft-l { list-style: none; margin: 0 0 10px; padding: 0; max-height: 200px; overflow-y: auto; }
+.tmap-draft-l li {
+  display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12.5px;
+}
+.tmap-draft-l li.unsure .tmap-draft-n { color: var(--color-warning, #c9843a); }
+.tmap-draft-n {
+  appearance: none; border: 0; background: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--trip-accent, var(--color-primary));
+  text-decoration: underline; text-underline-offset: 2px; flex: 0 0 auto;
+}
+.tmap-icon {
+  appearance: none; border: 0; background: none; cursor: pointer; padding: 0 2px;
+  color: var(--color-error, #e05a5a); font-size: 12px; line-height: 1; flex: 0 0 auto;
+}
+.tmap-un-h { display: flex; align-items: center; gap: 10px; }
+.tmap-un-h span { flex: 1; }
+/* 窄屏:名字单独一行,地名和坐标挤在第二行,不然三样东西互相折行很难读 */
+@media (max-width: 560px) {
+  .tmap-draft-l li { flex-wrap: wrap; row-gap: 1px; }
+  .tmap-draft-n { flex: 1 0 100%; text-align: left; }
+  .tmap-draft-p { flex: 1 1 8em; min-width: 0; }
+}
+
+/* 没坐标的地点:列表里用空心点区分,但照样能点开 */
+.tmap-li.off { opacity: .8; }
+.tmap-li-dot.hollow {
+  background: transparent !important;
+  border: 2px solid var(--color-text-muted); box-sizing: border-box;
+}
+
+.spot-noloc {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 14px; padding: 8px 10px; border-radius: 10px;
+  background: var(--color-surface-2, rgba(0,0,0,.04));
+  font-size: 12px; color: var(--color-text-muted);
+}
+.spot-noloc span { flex: 1; min-width: 12em; }
 .tmap-empty { padding: 14px 4px 2px; font-size: 12px; color: var(--color-text-muted); }
 
 @media (min-width: 900px) {

@@ -17,9 +17,9 @@ from datetime import date, datetime, timedelta
 
 from prompts.travel import (
     BLOCK_KINDS, DAY_SYSTEM, FACTS_EXTRACT_SYSTEM, OUTLINE_SYSTEM,
-    SPOT_DESCS_SYSTEM, build_block_prompt, build_day_prompt,
+    SPOT_DESCS_SYSTEM, SPOT_GEOS_SYSTEM, build_block_prompt, build_day_prompt,
     build_facts_extract_prompt, build_outline_from_idea,
-    build_outline_from_notice, build_spot_descs_prompt,
+    build_outline_from_notice, build_spot_descs_prompt, build_spot_geos_prompt,
 )
 
 from services.trip_detail import merge_spots_into_stops, same_place
@@ -380,6 +380,80 @@ def extract_facts(notice: str, llm: dict | None = None) -> list[dict]:
     return out
 
 
+def pair_by_name(items, names: list[str]) -> dict[str, dict]:
+    """把模型回的一批条目配回**我们给出去的那些名字**。
+
+    配对得宽一点。只认名字完全相等的话,模型爱把「岩石教堂」写成
+    「赫尔辛基岩石教堂」,整批结果就被悄悄丢光,任务还报"完成"。
+
+    一对一:一条结果只能认领一个名字,免得串到别人身上。
+    @returns {我们的名字: 那条结果}
+    """
+    out: dict[str, dict] = {}
+    taken: set[str] = set()
+
+    def pick(it: dict) -> str | None:
+        # 1) 编号最可靠:名字会被改写,编号不会
+        i = it.get("i")
+        if isinstance(i, (int, float)) or (isinstance(i, str) and i.strip().isdigit()):
+            k = int(i) - 1
+            if 0 <= k < len(names) and names[k] not in taken:
+                return names[k]
+        name = _s(it.get("t") or it.get("name"), 60)
+        if not name:
+            return None
+        # 2) 名字完全一样
+        if name in names and name not in taken:
+            return name
+        # 3) 同一个地方的不同写法
+        for n in names:
+            if n not in taken and same_place({"t": n}, {"t": name}):
+                return n
+        return None
+
+    for it in (items or [])[:24]:
+        if not isinstance(it, dict):
+            continue
+        hit = pick(it)
+        if hit:
+            taken.add(hit)
+            out[hit] = it
+    return out
+
+
+def gen_spot_geos(trip: dict, day: dict, names: list[str],
+                  llm: dict | None = None) -> list[dict]:
+    """一次给一批地点定位。
+
+    和写介绍一样按天批量:一个点一次调用又慢又贵,而且模型看不到当天的
+    上下文——同名的地方正是靠"这一天在哪条线上"消歧的。
+
+    @returns [{t(我们的名字), lat, lng, place, sure}],拿不准的 lat/lng 是 None。
+    """
+    from constants import LLM_TIMEOUT_LONG
+    if not names:
+        return []
+    raw = _json_call(SPOT_GEOS_SYSTEM, build_spot_geos_prompt(trip, day, names),
+                     endpoint="travel.spot_geos", timeout=LLM_TIMEOUT_LONG,
+                     temperature=0, llm=llm)
+    out = []
+    if not isinstance(raw, dict):
+        return out
+    for name, it in pair_by_name(raw.get("items"), names).items():
+        lat, lng = _coord(it.get("lat"), 90), _coord(it.get("lng"), 180)
+        if lat is None or lng is None:
+            # "不知道"是正常结果,照样回一条,前端好告诉用户哪几个没定到
+            out.append({"t": name, "lat": None, "lng": None,
+                        "place": _s(it.get("place"), 120), "sure": 0})
+            continue
+        out.append({
+            "t": name, "lat": round(lat, 6), "lng": round(lng, 6),
+            "place": _s(it.get("place"), 120),
+            "sure": 1 if it.get("sure") in (1, True, "1", "true") else 0,
+        })
+    return out
+
+
 def gen_spot_descs(trip: dict, day: dict, names: list[str],
                    llm: dict | None = None) -> dict[str, str]:
     """一次给一天的地点批量写介绍。
@@ -401,40 +475,10 @@ def gen_spot_descs(trip: dict, day: dict, names: list[str],
     if not isinstance(raw, dict):
         return out
 
-    # 配对得宽一点。以前只认名字完全相等,而模型很爱把「岩石教堂」写成
-    # 「赫尔辛基岩石教堂」——于是整批结果被悄悄丢光,任务还报"完成",
-    # 用户点几次都还是提示"没写介绍"。
-    taken: set[str] = set()
-
-    def _pick(it: dict) -> str | None:
-        # 1) 编号最可靠:名字会被改写,编号不会
-        i = it.get("i")
-        if isinstance(i, (int, float)) or (isinstance(i, str) and i.strip().isdigit()):
-            k = int(i) - 1
-            if 0 <= k < len(names) and names[k] not in taken:
-                return names[k]
-        name = _s(it.get("t") or it.get("name"), 60)
-        if not name:
-            return None
-        # 2) 名字完全一样
-        if name in names and name not in taken:
-            return name
-        # 3) 同一个地方的不同写法
-        for n in names:
-            if n not in taken and same_place({"t": n}, {"t": name}):
-                return n
-        return None
-
-    for it in (raw.get("items") or [])[:20]:
-        if not isinstance(it, dict):
-            continue
+    for name, it in pair_by_name(raw.get("items"), names).items():
         desc = _s(it.get("desc"), 400)
-        if not desc:
-            continue
-        hit = _pick(it)
-        if hit:
-            taken.add(hit)
-            out[hit] = desc
+        if desc:
+            out[name] = desc
     return out
 
 
@@ -444,6 +488,11 @@ def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:
     # 和其它生成一样用 LLM_TIMEOUT_LONG。原来写死 60 秒:打包清单和速查要吐
     # 十几二十条 JSON,共享端点高峰期根本跑不完,表现就是点了没反应。
     from constants import LLM_TIMEOUT_LONG
+    # 批量定位有自己的一套提示词和配对逻辑,不走通用的那条路
+    if kind == "spot_geos":
+        names = [n for n in (ctx.get("spots") or []) if isinstance(n, str) and n.strip()]
+        return {"items": gen_spot_geos(ctx.get("trip") or {}, ctx.get("day") or {},
+                                       names, llm=llm)}
     system, user = build_block_prompt(kind, ctx)
     # 定位要的是"记得准",不是"写得好",温度拉到 0
     temp = 0 if kind == "spot_geo" else 0.6
