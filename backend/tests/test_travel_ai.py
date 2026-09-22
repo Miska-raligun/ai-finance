@@ -891,3 +891,103 @@ def test_batch_geo_needs_a_list(app, auth_client, monkeypatch):
         "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
     assert auth_client.post(f"/api/trips/{tid}/ai/block",
                             json={"kind": "spot_geos"}).status_code == 400
+
+
+# ---------- 一天的地点超过一批 ----------
+
+def _counting_stub(monkeypatch, endpoint_name, make_item, fail_batches=()):
+    """记下每批都问了哪些名字。fail_batches 里的批次返回坏 JSON。"""
+    batches = []
+
+    def fake(messages, llm=None, tools=None, tool_choice=None,
+             temperature=0.3, timeout=10, endpoint="unknown"):
+        if endpoint != endpoint_name:
+            return {"choices": [{"message": {"content": '{"items":[]}'}}]}
+        names = []
+        for line in messages[-1]["content"].split("\n"):
+            line = line.strip()
+            if line[:1].isdigit() and ". " in line:
+                i, n = line.split(". ", 1)
+                names.append((int(i), n))
+        batches.append([n for _, n in names])
+        if len(batches) in fail_batches:
+            return {"choices": [{"message": {"content": "写不出来"}}]}
+        return {"choices": [{"message": {"content": json.dumps(
+            {"items": [make_item(i, n) for i, n in names]}, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr("services.llm._call_llm", fake)
+    return batches
+
+
+def test_descs_split_into_batches_and_nothing_is_dropped(app, auth_client, monkeypatch):
+    """一天 25 个地点。以前提示词里写死 names[:12],后面的悄悄丢掉——
+    用户只会看到"生成完了,但还有十几个没写介绍"。"""
+    names = [f"地点{i}" for i in range(1, 26)]
+    batches = _counting_stub(monkeypatch, "travel.spot_descs",
+                             lambda i, n: {"i": i, "t": n, "desc": f"{n}的介绍。"})
+    got = travel_ai.gen_spot_descs({"title": "t"}, {"day_no": 1}, names)
+
+    assert len(batches) == 3                       # 10 + 10 + 5
+    assert [len(b) for b in batches] == [10, 10, 5]
+    assert sum(batches, []) == names                # 一个不漏,顺序也没乱
+    assert set(got) == set(names)
+
+
+def test_geos_split_into_batches(app, auth_client, monkeypatch):
+    names = [f"地点{i}" for i in range(1, 23)]
+    batches = _counting_stub(monkeypatch, "travel.spot_geos",
+                             lambda i, n: {"i": i, "t": n, "lat": 60 + i * .01,
+                                           "lng": 24 + i * .01, "sure": 1})
+    got = travel_ai.gen_spot_geos({"title": "t"}, {"day_no": 1}, names)
+    assert [len(b) for b in batches] == [10, 10, 2]
+    assert [x["t"] for x in got] == names
+
+
+def test_one_bad_batch_does_not_lose_the_others(app, auth_client, monkeypatch):
+    """一天四十个地点分四批,第二批超时不该让另外三十个也白跑。"""
+    names = [f"地点{i}" for i in range(1, 31)]
+    _counting_stub(monkeypatch, "travel.spot_descs",
+                   lambda i, n: {"i": i, "t": n, "desc": f"{n}的介绍。"},
+                   fail_batches=(2,))
+    got = travel_ai.gen_spot_descs({"title": "t"}, {"day_no": 1}, names)
+    assert len(got) == 20                          # 第 1、3 批留下了
+    assert "地点1" in got and "地点30" in got
+    assert "地点11" not in got                      # 第 2 批那十个没写成
+
+
+def test_all_batches_failing_is_a_failure(app, auth_client, monkeypatch):
+    """全都挂了多半是配置或网络的问题,得让用户看见,不能静悄悄返回空。"""
+    names = [f"地点{i}" for i in range(1, 16)]
+    _counting_stub(monkeypatch, "travel.spot_descs",
+                   lambda i, n: {}, fail_batches=(1, 2))
+    with pytest.raises(travel_ai.AIError):
+        travel_ai.gen_spot_descs({"title": "t"}, {"day_no": 1}, names)
+
+
+def test_batching_reports_progress(app, auth_client, monkeypatch):
+    """一天几十个地点要跑好几批,不报进度就是静默转一分钟。"""
+    names = [f"地点{i}" for i in range(1, 26)]
+    _counting_stub(monkeypatch, "travel.spot_descs",
+                   lambda i, n: {"i": i, "t": n, "desc": "x"})
+    seen = []
+    travel_ai.gen_spot_descs({"title": "t"}, {"day_no": 1}, names,
+                             on_progress=lambda d, t: seen.append((d, t)))
+    assert seen == [(10, 25), (20, 25), (25, 25)]
+
+
+def test_a_whole_day_over_the_batch_size_gets_filled(app, auth_client, monkeypatch):
+    """走完整条链路:一天 15 个空地点,跑一次就该全写上。"""
+    stops = [{"t": f"地点{i}"} for i in range(1, 16)]
+    _counting_stub(monkeypatch, "travel.spot_descs",
+                   lambda i, n: {"i": i, "t": n, "desc": f"{n}的介绍。"})
+    tid = auth_client.post("/api/trips", json={
+        "title": "t", "start_date": "2026-10-01", "end_date": "2026-10-01"}).get_json()["id"]
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={"detail": {"stops": stops}})
+
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    assert job["steps"][0]["status"] == "done"
+    assert not (job["steps"][0]["error"] or "")     # 没有"这几个没写成"
+
+    got = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]
+    assert all((s.get("desc") or "").strip() for s in got)

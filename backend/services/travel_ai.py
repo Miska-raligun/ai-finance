@@ -380,6 +380,36 @@ def extract_facts(notice: str, llm: dict | None = None) -> list[dict]:
     return out
 
 
+# 一次问多少个地点。上限不是模型的 token 限制,而是"问得越多回得越糊":
+# 十来个的时候每条都还认真,几十个一起问就开始漏、开始编。
+_CHUNK = 10
+
+
+def _chunks(names: list[str]) -> list[list[str]]:
+    return [names[i:i + _CHUNK] for i in range(0, len(names), _CHUNK)]
+
+
+def _batched(names: list[str], call, on_progress=None) -> list:
+    """按 _CHUNK 分批调用 call(这一批) -> [结果],把结果接起来。
+
+    一批挂了不拖垮其余:一天四十个地点分四批,第二批超时不该让另外三十个
+    也白跑。全都挂了才算失败——那多半是配置或网络的问题,得让用户看见。
+    """
+    groups = _chunks(names)
+    out, failed = [], []
+    for i, g in enumerate(groups):
+        try:
+            out.extend(call(g))
+        except AIError as e:
+            logger.warning("批量第 %s/%s 批失败:%s", i + 1, len(groups), e)
+            failed.append(e)
+        if on_progress:
+            on_progress(min((i + 1) * _CHUNK, len(names)), len(names))
+    if failed and not out:
+        raise failed[0]
+    return out
+
+
 def pair_by_name(items, names: list[str]) -> dict[str, dict]:
     """把模型回的一批条目配回**我们给出去的那些名字**。
 
@@ -411,7 +441,7 @@ def pair_by_name(items, names: list[str]) -> dict[str, dict]:
                 return n
         return None
 
-    for it in (items or [])[:24]:
+    for it in (items or [])[:max(24, len(names) * 2)]:
         if not isinstance(it, dict):
             continue
         hit = pick(it)
@@ -422,7 +452,7 @@ def pair_by_name(items, names: list[str]) -> dict[str, dict]:
 
 
 def gen_spot_geos(trip: dict, day: dict, names: list[str],
-                  llm: dict | None = None) -> list[dict]:
+                  llm: dict | None = None, on_progress=None) -> list[dict]:
     """一次给一批地点定位。
 
     和写介绍一样按天批量:一个点一次调用又慢又贵,而且模型看不到当天的
@@ -433,34 +463,41 @@ def gen_spot_geos(trip: dict, day: dict, names: list[str],
     from constants import LLM_TIMEOUT_LONG
     if not names:
         return []
-    raw = _json_call(SPOT_GEOS_SYSTEM, build_spot_geos_prompt(trip, day, names),
-                     endpoint="travel.spot_geos", timeout=LLM_TIMEOUT_LONG,
-                     temperature=0, llm=llm)
-    out = []
-    if not isinstance(raw, dict):
-        return out
-    for name, it in pair_by_name(raw.get("items"), names).items():
-        lat, lng = _coord(it.get("lat"), 90), _coord(it.get("lng"), 180)
-        if lat is None or lng is None:
-            # "不知道"是正常结果,照样回一条,前端好告诉用户哪几个没定到
-            out.append({"t": name, "lat": None, "lng": None,
-                        "place": _s(it.get("place"), 120), "sure": 0})
-            continue
-        out.append({
-            "t": name, "lat": round(lat, 6), "lng": round(lng, 6),
-            "place": _s(it.get("place"), 120),
-            "sure": 1 if it.get("sure") in (1, True, "1", "true") else 0,
-        })
-    return out
+
+    def one(group: list[str]) -> list[dict]:
+        raw = _json_call(SPOT_GEOS_SYSTEM, build_spot_geos_prompt(trip, day, group),
+                         endpoint="travel.spot_geos", timeout=LLM_TIMEOUT_LONG,
+                         temperature=0, llm=llm)
+        got = []
+        if not isinstance(raw, dict):
+            return got
+        for name, it in pair_by_name(raw.get("items"), group).items():
+            lat, lng = _coord(it.get("lat"), 90), _coord(it.get("lng"), 180)
+            if lat is None or lng is None:
+                # "不知道"是正常结果,照样回一条,前端好告诉用户哪几个没定到
+                got.append({"t": name, "lat": None, "lng": None,
+                            "place": _s(it.get("place"), 120), "sure": 0})
+                continue
+            got.append({
+                "t": name, "lat": round(lat, 6), "lng": round(lng, 6),
+                "place": _s(it.get("place"), 120),
+                "sure": 1 if it.get("sure") in (1, True, "1", "true") else 0,
+            })
+        return got
+
+    return _batched(names, one, on_progress)
 
 
 def gen_spot_descs(trip: dict, day: dict, names: list[str],
-                   llm: dict | None = None) -> dict[str, str]:
+                   llm: dict | None = None, on_progress=None) -> dict[str, str]:
     """一次给一天的地点批量写介绍。
 
     按天而不是按点调用:一趟十四天六七十个点,一个点一次调用又慢又贵,
     而且模型看不到当天的上下文。按天来,一次十来个点,还能顺着当天的
     主线写得连贯些。
+
+    一天超过 _CHUNK 个就自动分批:以前是直接截断到前 12 个,后面的
+    悄悄丢掉——用户只会看到"生成完了,但还有几个没写介绍"。
 
     @returns {地点名: 介绍},键是**我们给出去的那个名字**。
     模型没认出来的点不会出现在结果里。
@@ -468,18 +505,18 @@ def gen_spot_descs(trip: dict, day: dict, names: list[str],
     from constants import LLM_TIMEOUT_LONG
     if not names:
         return {}
-    raw = _json_call(SPOT_DESCS_SYSTEM, build_spot_descs_prompt(trip, day, names),
-                     endpoint="travel.spot_descs", timeout=LLM_TIMEOUT_LONG,
-                     temperature=0.5, llm=llm)
-    out: dict[str, str] = {}
-    if not isinstance(raw, dict):
-        return out
 
-    for name, it in pair_by_name(raw.get("items"), names).items():
-        desc = _s(it.get("desc"), 400)
-        if desc:
-            out[name] = desc
-    return out
+    def one(group: list[str]) -> list[tuple[str, str]]:
+        raw = _json_call(SPOT_DESCS_SYSTEM, build_spot_descs_prompt(trip, day, group),
+                         endpoint="travel.spot_descs", timeout=LLM_TIMEOUT_LONG,
+                         temperature=0.5, llm=llm)
+        if not isinstance(raw, dict):
+            return []
+        return [(name, _s(it.get("desc"), 400))
+                for name, it in pair_by_name(raw.get("items"), group).items()
+                if _s(it.get("desc"), 400)]
+
+    return dict(_batched(names, one, on_progress))
 
 
 def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:
@@ -492,7 +529,7 @@ def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:
     if kind == "spot_geos":
         names = [n for n in (ctx.get("spots") or []) if isinstance(n, str) and n.strip()]
         return {"items": gen_spot_geos(ctx.get("trip") or {}, ctx.get("day") or {},
-                                       names, llm=llm)}
+                                       names, llm=llm, on_progress=ctx.get("on_progress"))}
     system, user = build_block_prompt(kind, ctx)
     # 定位要的是"记得准",不是"写得好",温度拉到 0
     temp = 0 if kind == "spot_geo" else 0.6

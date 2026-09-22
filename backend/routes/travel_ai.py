@@ -20,6 +20,7 @@ from services.llm_config import current_llm
 travel_ai_bp = Blueprint("travel_ai", __name__)
 
 _MAX_NOTICE = 20000
+_MAX_SPOTS = 80
 
 
 def _own_trip(trip_id: int):
@@ -130,8 +131,9 @@ def ai_block(trip_id: int):
     spot = (data.get("spot") or "").strip()[:80]
     if kind in ("spot_desc", "spot_geo") and not spot:
         return jsonify({"error": "缺少地点名称"}), 400
-    # 批量定位:一次给一天的一批地点,比一个点一次调用省得多
-    spots = [str(x).strip()[:80] for x in (data.get("spots") or [])][:14]
+    # 批量定位:一次给一天的一批地点,比一个点一次调用省得多。
+    # 这里的上限只是防滥用——真正的分批在 travel_ai 里,一天几十个也照样跑完
+    spots = [str(x).strip()[:80] for x in (data.get("spots") or [])][:_MAX_SPOTS]
     spots = [x for x in spots if x]
     if kind == "spot_geos" and not spots:
         return jsonify({"error": "缺少地点列表"}), 400

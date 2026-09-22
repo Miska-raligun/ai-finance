@@ -86,6 +86,16 @@ def run_block(ctx):
         blk["spot"] = ctx.payload["spot"]
     if ctx.payload.get("spots"):
         blk["spots"] = ctx.payload["spots"]
+        n = len(ctx.payload["spots"])
+
+        def tick(done, total):
+            if total <= 10:
+                return
+            steps[0]["label"] = f"定位中 {done}/{total}"
+            ctx.set_steps(steps)
+
+        if n > 10:
+            blk["on_progress"] = tick
 
     try:
         result = travel_ai.gen_block(ctx.payload["kind"], blk, llm=ctx.llm)
@@ -277,7 +287,15 @@ def _step_spot_descs(ctx, trip_id: int) -> None:
                 step.update(status="skipped")
                 ctx.set_steps(steps)
                 continue
-            got = travel_ai.gen_spot_descs(trip, day, names, llm=ctx.llm)
+            def tick(done, total, _s=step, _all=steps):
+                # 一天几十个地点要分好几批,不报进度的话就是静默转一分钟
+                if total > len(names) or total <= 10:
+                    return
+                _s["label"] = f"第 {day['day_no']} 天 · {done}/{total} 个地点"
+                ctx.set_steps(_all)
+
+            got = travel_ai.gen_spot_descs(trip, day, names, llm=ctx.llm,
+                                           on_progress=tick)
             missed = [n for n in names if n not in got]
             written = 0
             for st in (detail.get("stops") or []):

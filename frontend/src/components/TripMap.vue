@@ -516,8 +516,13 @@ function setLayer(key) {
 }
 
 function fitAll() {
+  if (!map) return
   const b = fitBounds()
-  if (b && map) map.fitBounds(b, { padding: [36, 36] })
+  if (b) map.fitBounds(b, { padding: [36, 36] })
+  // 一个带坐标的点都没有时 fitBounds 给不出范围,地图就一直没有视野。
+  // Leaflet 这时候做任何事都抛「Set map center and zoom first」——
+  // 而"一个都还没定位"正是要用批量定位的那种情况。
+  else if (!map._loaded) map.setView([30, 20], 2)
 }
 
 /** 选默认底图:行程主要在境外就用 OSM——高德境外几乎没有街道数据,
@@ -679,7 +684,8 @@ async function locateAll() {
     await runAiBlock(batchKey(dayNo), `/api/trips/${props.tripId}/ai/block`, {
       kind: 'spot_geos',
       day_no: dayNo,
-      spots: list.map(x => x.t).slice(0, 14),
+      // 不在这儿截断:一天几十个地点由后端自动分批
+      spots: list.map(x => x.t),
       hint: day?.route ? `这一天的路线:${day.route}` : undefined,
       label: `定位第 ${dayNo} 天的 ${list.length} 个地点`,
     })

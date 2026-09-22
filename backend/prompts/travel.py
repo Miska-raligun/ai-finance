@@ -167,7 +167,7 @@ def build_spot_geos_prompt(trip: dict, day: dict, names: list[str]) -> str:
         f"第 {day.get('day_no')} 天 · {day.get('date') or ''} · "
         f"{day.get('route') or ''}\n\n"
         "给下面这些地点各标一个经纬度。每条回复里带上前面的编号 i:\n"
-        + "\n".join(f"{i}. {n}" for i, n in enumerate(names[:14], 1))
+        + "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
     )
 
 
@@ -177,7 +177,7 @@ def build_spot_descs_prompt(trip: dict, day: dict, names: list[str]) -> str:
         f"第 {day.get('day_no')} 天 · {day.get('date') or ''} · "
         f"{day.get('route') or ''}\n\n"
         "给下面这些地点各写一条介绍。每条回复里带上前面的编号 i:\n"
-        + "\n".join(f"{i}. {n}" for i, n in enumerate(names[:12], 1))
+        + "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
     )
 
 
