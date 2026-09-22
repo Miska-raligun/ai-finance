@@ -22,7 +22,7 @@ from prompts.travel import (
     build_outline_from_notice, build_spot_descs_prompt,
 )
 
-from services.trip_detail import merge_spots_into_stops
+from services.trip_detail import merge_spots_into_stops, same_place
 
 logger = logging.getLogger(__name__)
 
@@ -388,7 +388,8 @@ def gen_spot_descs(trip: dict, day: dict, names: list[str],
     而且模型看不到当天的上下文。按天来,一次十来个点,还能顺着当天的
     主线写得连贯些。
 
-    @returns {地点名: 介绍}。模型没认出来的点不会出现在结果里。
+    @returns {地点名: 介绍},键是**我们给出去的那个名字**。
+    模型没认出来的点不会出现在结果里。
     """
     from constants import LLM_TIMEOUT_LONG
     if not names:
@@ -399,15 +400,41 @@ def gen_spot_descs(trip: dict, day: dict, names: list[str],
     out: dict[str, str] = {}
     if not isinstance(raw, dict):
         return out
-    wanted = {n: n for n in names}
+
+    # 配对得宽一点。以前只认名字完全相等,而模型很爱把「岩石教堂」写成
+    # 「赫尔辛基岩石教堂」——于是整批结果被悄悄丢光,任务还报"完成",
+    # 用户点几次都还是提示"没写介绍"。
+    taken: set[str] = set()
+
+    def _pick(it: dict) -> str | None:
+        # 1) 编号最可靠:名字会被改写,编号不会
+        i = it.get("i")
+        if isinstance(i, (int, float)) or (isinstance(i, str) and i.strip().isdigit()):
+            k = int(i) - 1
+            if 0 <= k < len(names) and names[k] not in taken:
+                return names[k]
+        name = _s(it.get("t") or it.get("name"), 60)
+        if not name:
+            return None
+        # 2) 名字完全一样
+        if name in names and name not in taken:
+            return name
+        # 3) 同一个地方的不同写法
+        for n in names:
+            if n not in taken and same_place({"t": n}, {"t": name}):
+                return n
+        return None
+
     for it in (raw.get("items") or [])[:20]:
         if not isinstance(it, dict):
             continue
-        name = _s(it.get("t") or it.get("name"), 60)
         desc = _s(it.get("desc"), 400)
-        # 名字对不上就丢掉:写回去要按名字配对,配错了比没有还糟
-        if name and desc and name in wanted:
-            out[name] = desc
+        if not desc:
+            continue
+        hit = _pick(it)
+        if hit:
+            taken.add(hit)
+            out[hit] = desc
     return out
 
 

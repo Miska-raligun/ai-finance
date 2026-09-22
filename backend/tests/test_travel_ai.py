@@ -658,13 +658,81 @@ def test_fill_spots_is_one_call_per_day(app, auth_client, monkeypatch):
 
 
 def test_fill_spots_skips_names_it_does_not_know(app, auth_client, monkeypatch):
-    """名字对不上就丢掉:写回去要按名字配对,配错了比没有还糟。"""
+    """完全对不上的就丢掉:写回去要配对,配错了比没有还糟。
+
+    但**必须报失败**——以前这里记 skipped,于是任务报"完成",刷新后还是
+    提示没写介绍,用户点几次都一样,却看不到任何错。
+    """
     _stub_spots(monkeypatch, items=[{"t": "根本不存在的地方", "desc": "瞎编的"}])
     tid = _trip_with_bare_stops(auth_client, days=1)
     job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
-    _wait(auth_client, job_id)
+    job = _wait(auth_client, job_id)
     stops = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]
     assert all(not (s.get("desc") or "").strip() or s["t"] == "西贝柳斯公园" for s in stops)
+
+    step = job["steps"][0]
+    assert step["status"] == "failed"
+    assert "岩石教堂" in (step["error"] or "")        # 说清楚是哪几个没写成
+
+
+def test_fill_spots_tolerates_a_drifted_name(app, auth_client, monkeypatch):
+    """模型很爱给名字加个城市前缀。以前只认完全相等,于是整批结果被悄悄丢光。"""
+    _stub_spots(monkeypatch, items=[
+        {"t": "赫尔辛基岩石教堂", "desc": "凿进整块花岗岩里的教堂。"},
+        {"t": "赫尔辛基万塔机场", "desc": "芬兰的门户。"},
+    ])
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    assert job["steps"][0]["status"] == "done"
+
+    by = {s["t"]: s.get("desc") for s in
+          auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]}
+    # 写回去的是**我们的**名字,不是模型改过的那个
+    assert "花岗岩" in by["岩石教堂"]
+    assert "门户" in by["赫尔辛基机场"]
+
+
+def test_fill_spots_pairs_by_index_when_the_name_is_unrecognizable(app, auth_client, monkeypatch):
+    """编号是兜底:名字被改写成认不出来的样子,编号也还对得上。"""
+    _stub_spots(monkeypatch, items=[
+        {"i": 1, "t": "Temppeliaukio Church", "desc": "凿进整块花岗岩里的教堂。"},
+    ])
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    _wait(auth_client, job_id)
+    by = {s["t"]: s.get("desc") for s in
+          auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]}
+    assert "花岗岩" in by["岩石教堂"]
+
+
+def test_fill_spots_never_pairs_two_descriptions_to_one_place(app, auth_client, monkeypatch):
+    """配对要一对一:两条都认领同一个点的话,后一条不能把前一条顶掉,
+    更不能让别的点拿到不属于它的介绍。"""
+    _stub_spots(monkeypatch, items=[
+        {"t": "岩石教堂", "desc": "第一条,正确的。"},
+        {"t": "赫尔辛基岩石教堂", "desc": "第二条,同一个地方的另一种写法。"},
+    ])
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    _wait(auth_client, job_id)
+    by = {s["t"]: s.get("desc") for s in
+          auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]["stops"]}
+    assert by["岩石教堂"] == "第一条,正确的。"
+    assert not (by.get("赫尔辛基机场") or "")        # 机场没被乱塞
+
+
+def test_fill_spots_says_which_ones_it_missed(app, auth_client, monkeypatch):
+    """写成了一部分也要说清楚剩下哪些没写成,不能笼统报个"完成"。"""
+    _stub_spots(monkeypatch, items=[
+        {"t": "岩石教堂", "desc": "凿进整块花岗岩里的教堂。"},
+    ])
+    tid = _trip_with_bare_stops(auth_client, days=1)
+    job_id = auth_client.post(f"/api/trips/{tid}/ai/spots", json={}).get_json()["job_id"]
+    job = _wait(auth_client, job_id)
+    step = job["steps"][0]
+    assert step["status"] == "done"
+    assert "赫尔辛基机场" in (step["error"] or "")
 
 
 def test_fill_spots_one_bad_day_does_not_sink_the_rest(app, auth_client, monkeypatch):

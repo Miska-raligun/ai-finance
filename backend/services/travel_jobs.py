@@ -276,6 +276,7 @@ def _step_spot_descs(ctx, trip_id: int) -> None:
                 ctx.set_steps(steps)
                 continue
             got = travel_ai.gen_spot_descs(trip, day, names, llm=ctx.llm)
+            missed = [n for n in names if n not in got]
             written = 0
             for st in (detail.get("stops") or []):
                 if not isinstance(st, dict):
@@ -291,7 +292,14 @@ def _step_spot_descs(ctx, trip_id: int) -> None:
                     (json.dumps(detail, ensure_ascii=False), _now(), day["id"]),
                 )
                 db.commit()
-            step.update(status="done" if written else "skipped")
+                step.update(status="done", error=(
+                    f"这几个没写成:{'、'.join(missed[:4])}" if missed else None))
+            else:
+                # 有要写的却一条都没写成,这是失败,不是"没什么可做"。
+                # 以前这里也记 skipped,于是任务报"完成",刷新后还是提示
+                # 没写介绍,用户点几次都一样,却看不到任何错。
+                step.update(status="failed",
+                            error=f"这几个地点模型没认出来:{'、'.join(names[:4])}")
         except travel_ai.AIError as e:
             step.update(status="failed", error=str(e)[:200])
         ctx.set_steps(steps)

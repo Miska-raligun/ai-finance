@@ -135,8 +135,9 @@ def build_facts_extract_prompt(notice: str) -> str:
 SPOT_DESCS_SYSTEM = (
     "你给旅行行程里的地点写简介。\n"
     + _JSON_RULE + "\n"
-    '输出结构:{"items":[{"t":"地点名(与我给的完全一致)","desc":"介绍"}]}\n'
+    '输出结构:{"items":[{"i":1,"t":"地点名(照抄我给的)","desc":"介绍"}]}\n'
     "规则:\n"
+    "- i 是我给的那个编号,**必须带上**:名字你可能会写成别的样子,编号不会错\n"
     "- 每条 50~120 字:这是什么、为什么值得来、看什么最好。口语一点,不要宣传腔\n"
     "- 不要写门票价格、营业时间、电话——这些会过期,也不是你能确定的\n"
     "- 机场、码头、服务区这种纯交通节点,一句话说清它在行程里的作用就够\n"
@@ -149,8 +150,8 @@ def build_spot_descs_prompt(trip: dict, day: dict, names: list[str]) -> str:
         f"行程:{trip.get('title') or ''} {trip.get('subtitle') or ''}\n"
         f"第 {day.get('day_no')} 天 · {day.get('date') or ''} · "
         f"{day.get('route') or ''}\n\n"
-        "给下面这些地点各写一条介绍(地点名原样返回,别改字):\n"
-        + "\n".join(f"- {n}" for n in names[:12])
+        "给下面这些地点各写一条介绍。每条回复里带上前面的编号 i:\n"
+        + "\n".join(f"{i}. {n}" for i, n in enumerate(names[:12], 1))
     )
 
 

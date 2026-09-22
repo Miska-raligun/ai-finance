@@ -101,8 +101,19 @@
         <button type="button" @click="openAi(trip.id, 'fill')">✨ 让 AI 补全</button>
       </div>
 
-      <div v-if="bareSpots && !activeJob" class="blank-tip">
-        <span>有 <b>{{ bareSpots }}</b> 个地点还没写介绍</span>
+      <!-- 要说清楚是**哪几个**:只报个数字,用户根本不知道该去哪天找 -->
+      <div v-if="bareList.length && !activeJob" class="blank-tip">
+        <span>
+          有 <b>{{ bareList.length }}</b> 个地点还没写介绍:
+          <button
+            v-for="b in bareList.slice(0, 6)"
+            :key="b.key"
+            type="button"
+            class="blank-link"
+            @click="gotoSpot(b)"
+          >{{ b.t }}<i>D{{ b.dayNo }}</i></button>
+          <template v-if="bareList.length > 6">等</template>
+        </span>
         <button type="button" @click="openAi(trip.id, 'spots')">✨ 让 AI 写</button>
       </div>
 
@@ -483,18 +494,30 @@ const blankDays = computed(() =>
   days.value.filter(d => !Object.keys(d.detail || {}).length).length)
 
 /** 还没有介绍的地点数。老行程(AI 功能上线前导入的)这块基本都是空的。 */
-const bareSpots = computed(() => {
+/** 还没写介绍的地点。列出来而不是只报个数——只说"有 3 个"的话,
+ *  用户得一天天翻过去找是哪三个。 */
+const bareList = computed(() => {
+  const out = []
   const seen = new Set()
   for (const d of days.value) {
     for (const st of (d.detail?.stops || [])) {
       const name = (st?.t || '').trim()
-      if (name && !(st.desc || '').trim() && !seen.has(`${d.day_no}:${name}`)) {
-        seen.add(`${d.day_no}:${name}`)
+      const key = `${d.day_no}:${name}`
+      if (name && !(st.desc || '').trim() && !seen.has(key)) {
+        seen.add(key)
+        out.push({ key, t: name, dayNo: d.day_no })
       }
     }
   }
-  return seen.size
+  return out
 })
+const bareSpots = computed(() => bareList.value.length)
+
+/** 点名字就跳到那一天,顺手把视图切回「行程」。 */
+function gotoSpot(b) {
+  tab.value = 'days'
+  onSelectDay(b.dayNo)
+}
 
 const selectedDay = computed(() =>
   days.value.find(d => d.day_no === selectedDayNo.value) || null)
@@ -839,8 +862,23 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
 }
 .edit-hint { float: left; font-size: 11.5px; color: var(--color-text-muted); line-height: 32px; }
 .blank-tip b { font-variant-numeric: tabular-nums; }
-.blank-tip button {
-  margin-left: auto; appearance: none; cursor: pointer; font: inherit;
+/* 地点名是行内链接,不是按钮——下面那条实心药丸的规则要把它排除掉,
+   否则一串名字会变成一串黑疙瘩 */
+.blank-tip .blank-link {
+  appearance: none; border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
+  font: inherit; font-size: inherit; font-weight: 400;
+  color: var(--trip-accent-ink); border-radius: 0;
+  text-decoration: underline; text-underline-offset: 2px;
+  text-decoration-color: var(--trip-accent);
+}
+/* 两个带下划线的名字挨在一起容易读成一个,加个分隔点 */
+.blank-tip .blank-link + .blank-link::before {
+  content: '、'; text-decoration: none; margin: 0 1px; opacity: .7;
+}
+.blank-link i { font-style: normal; font-size: 10.5px; opacity: .6; margin-left: 2px; }
+.blank-tip > span { flex: 1 1 auto; min-width: 0; line-height: 1.9; }
+.blank-tip > button {
+  margin-left: auto; flex: 0 0 auto; appearance: none; cursor: pointer; font: inherit;
   font-size: 12.5px; font-weight: 700; padding: 4px 14px; border-radius: 999px;
   border: 1px solid var(--trip-accent); background: var(--trip-accent); color: #fff;
 }
