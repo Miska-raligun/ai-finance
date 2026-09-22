@@ -22,11 +22,11 @@
     </section>
 
     <div v-if="!readonly" class="fx-ai">
-      <button type="button" class="fx-ai-b" :disabled="ai.state.running" @click="propose">
-        <span v-if="ai.state.running" class="fx-spin" aria-hidden="true"></span>
-        {{ ai.state.running ? `生成中… ${ai.elapsed.value}s` : '✨ 让 AI 补几条(时差 / 货币 / 插头…)' }}
+      <button type="button" class="fx-ai-b" :disabled="ai.running" @click="propose">
+        <span v-if="ai.running" class="fx-spin" aria-hidden="true"></span>
+        {{ ai.running ? `生成中… ${aiSecs}s` : '✨ 让 AI 补几条(时差 / 货币 / 插头…)' }}
       </button>
-      <span v-if="ai.state.running" class="fx-ai-err">要十几秒,切到别的页面也不会断</span>
+      <span v-if="ai.running" class="fx-ai-err">要十几秒,切到别的页面也不会断</span>
       <span v-if="aiErr" class="fx-ai-err">{{ aiErr }}</span>
     </div>
 
@@ -72,7 +72,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
+import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -92,25 +92,28 @@ const adding = ref(false)
 const proposed = ref([])
 const picked = ref(new Set())
 const localErr = ref('')
-const aiKey = `facts:${props.tripId}`
-const ai = useAiBlock(aiKey)
-const aiErr = computed(() => ai.state.error || localErr.value)
+const aiKey = computed(() => `facts:${props.tripId}`)
+// 按 key 现取,不在挂载时定死:换行程 / 换天时组件是复用的,
+// 把 key 记死会让它一直盯着上一趟的任务,结果就落到别人身上了
+const ai = computed(() => aiState(aiKey.value))
+const aiSecs = computed(() => aiElapsed(aiKey.value))
+const aiErr = computed(() => ai.value.error || localErr.value)
 
 function absorb() {
-  const data = ai.state.result
+  const data = ai.value.result
   if (!data) return
   const have = new Set(props.facts.map(f => f.label))
   proposed.value = (data.items || []).filter(x => !have.has(x.label))
   picked.value = new Set(proposed.value.map((_, i) => i))
   localErr.value = proposed.value.length ? '' : 'AI 想到的都已经在速查里了'
-  clearAiBlock(aiKey)
+  clearAiBlock(aiKey.value)
 }
-watch(() => ai.state.result, absorb)
+watch(() => ai.value.result, absorb)
 onMounted(absorb)
 
 async function propose() {
   localErr.value = ''
-  await runAiBlock(aiKey, `/api/trips/${props.tripId}/ai/block`, { kind: 'facts' })
+  await runAiBlock(aiKey.value, `/api/trips/${props.tripId}/ai/block`, { kind: 'facts' })
 }
 
 function togglePick(i) {

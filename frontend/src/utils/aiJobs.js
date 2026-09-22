@@ -71,17 +71,14 @@ function slot(key) {
   return jobs[key]
 }
 
-/** 组件里这样用:const job = useAiBlock('packing:12') */
-export function useAiBlock(key) {
-  const j = slot(key)
-  return {
-    state: j,
-    elapsed: computed(() => (j.running ? Math.max(0, Math.round((now.t - j.startedAt) / 1000)) : 0)),
-  }
-}
-
-/** key 会变的场景(比如地图弹窗切景点)直接用这两个,
- *  不要在 computed 里反复 useAiBlock —— 那样每次求值都会新建一个 computed。 */
+/** 组件里这样用:
+ *
+ *    const ai = computed(() => aiState(aiKey.value))
+ *    const aiSecs = computed(() => aiElapsed(aiKey.value))
+ *
+ *  **每次都按当前 key 取**,不要在挂载时把 slot 存下来。行程页的这些组件是
+ *  复用的(换行程、换天只换 props,不重新挂载),把 key 记死会让组件一直盯着
+ *  上一趟的任务,结果就落到别人身上了。 */
 export function aiState(key) {
   return slot(key)
 }

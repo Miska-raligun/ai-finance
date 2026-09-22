@@ -9,7 +9,6 @@
           v-model="currentTripId"
           size="small"
           class="trip-select"
-          @change="loadTrip"
         >
           <el-option
             v-for="t in trips"
@@ -45,7 +44,10 @@
     </div>
 
     <!-- 后台还在跑的任务。放在最上面:关掉弹窗后得一眼能看见,
-         否则用户根本不知道任务还在跑、也不知道去哪儿看。 -->
+         否则用户根本不知道任务还在跑、也不知道去哪儿看。
+
+         必须说清楚是**哪一趟**的:任务和当前看的行程不是一回事,
+         不写出来就成了"我在看行程 A,它却显示行程 B 的进度"。 -->
     <button
       v-if="activeJob && !showAi"
       type="button"
@@ -53,20 +55,32 @@
       @click="resumeAi"
     >
       <span class="ai-strip-dot"></span>
-      <span class="ai-strip-t">AI 正在生成…</span>
+      <span class="ai-strip-t">
+        AI 正在生成<template v-if="activeJobTripName">:{{ activeJobTripName }}</template>…
+      </span>
       <span class="ai-strip-n">{{ activeJob.done }} / {{ activeJob.total || '…' }}</span>
       <span class="ai-strip-go">查看 ›</span>
     </button>
 
+    <el-skeleton v-if="loading" :rows="6" animated class="trip-boot" />
+
     <el-empty
-      v-if="!loading && !trips.length"
+      v-else-if="!trips.length"
       description="还没有行程。可以粘贴旅行社的行程单让 AI 整理，或者自己新建。"
     >
       <el-button type="primary" @click="openAi(0)">✨ AI 生成行程</el-button>
       <el-button @click="showCreate = true">手动新建</el-button>
     </el-empty>
 
+    <!-- 换行程期间把内容区盖住。纯视觉的加载态不够:底下还是上一趟的日历和
+         详情,点下去就改到别的行程上了。inert 连键盘和点击一起挡掉。 -->
     <template v-else-if="trip">
+      <!-- 提示放在被压暗的那层**外面**,否则它自己也被压到看不清 -->
+      <div v-if="loadingTrip" class="trip-swap-tip">
+        <span class="trip-swap-dot"></span>正在打开…
+      </div>
+
+      <div :class="{ 'trip-swapping': loadingTrip }" :inert="loadingTrip || undefined">
       <!-- hero:行程标题 + 倒计时 -->
       <div class="trip-hero animal-pop" :style="{ '--i': 0 }">
         <div class="hero-main">
@@ -160,6 +174,7 @@
           <TripDayDetail :trip-id="trip.id" :day="selectedDay" @saved="onJournalSaved" />
         </div>
       </el-drawer>
+      </div>
     </template>
 
     <TripAiDialog
@@ -309,7 +324,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import TripCalendar from '@/components/TripCalendar.vue'
@@ -339,7 +354,8 @@ const packing = ref([])
 const facts = ref([])
 const currentTripId = ref(null)
 const selectedDayNo = ref(0)
-const loading = ref(true)
+const loading = ref(true)        // 首次进页面:列表还没拉到
+const loadingTrip = ref(false)   // 正在换行程:内容区还不能信
 const showCreate = ref(false)
 const creating = ref(false)
 const showEdit = ref(false)
@@ -379,13 +395,17 @@ function onAiClose() {
 }
 async function onAiDone(tripId) {
   await loadTrips()
-  currentTripId.value = tripId
-  await loadTrip()
+  if (currentTripId.value === tripId) await loadTrip()   // 已经选中就手动刷一下
+  else currentTripId.value = tripId                      // 否则交给 watcher
   ElMessage.success('行程已生成，内容都可以直接改')
 }
 
-/** 生成跑在后端,关页面也不会停。回到这一页时接上最近那个没跑完的,
- *  跑完了就自动把行程刷出来——省得用户守在弹窗前面等。 */
+/** 新建一趟的任务。它们跑完**才**有 trip_id,所以完事了跳过去是对的
+ *  ——用户就是为了这趟新行程点的生成。别的类型属于某一趟已有的行程,
+ *  跑完只该刷新那一趟,不该把人从正在看的地方拽走。 */
+const CREATING_KINDS = ['import_notice', 'from_idea']
+
+/** 生成跑在后端,关页面也不会停。回到这一页时接上最近那个没跑完的。 */
 async function watchJobs() {
   clearTimeout(jobTimer)
   try {
@@ -394,18 +414,37 @@ async function watchJobs() {
     const res = await api.get('/api/ai-jobs?kinds=' + TRIP_JOB_KINDS)
     const job = (res.data || [])[0]
     const running = job && ['pending', 'running'].includes(job.status)
-    const wasRunning = !!activeJob.value
+    const was = activeJob.value
     activeJob.value = running ? job : null
     if (running) {
       jobTimer = setTimeout(watchJobs, 3000)
-    } else if (wasRunning && job?.trip_id) {
-      await loadTrips()
-      currentTripId.value = job.trip_id
-      await loadTrip()
+      return
+    }
+    if (!was || job?.status !== 'done') return
+
+    await loadTrips()
+    if (CREATING_KINDS.includes(job.kind) && job.trip_id) {
+      // 新建出来的那趟:跳过去(已经选中就手动刷一下,watcher 不会重复触发)
+      if (currentTripId.value === job.trip_id) await loadTrip()
+      else currentTripId.value = job.trip_id
       ElMessage.success('AI 生成完了，内容都可以直接改')
+    } else if (job.trip_id && job.trip_id === currentTripId.value) {
+      await loadTrip()
+      ElMessage.success('AI 写完了，内容都可以直接改')
+    } else if (job.trip_id) {
+      // 别的行程的任务跑完了:说一声就行,不要把人拽走
+      const t = trips.value.find(x => x.id === job.trip_id)
+      ElMessage.success(`「${t?.title || '另一趟行程'}」的 AI 内容写完了`)
     }
   } catch { /* 静默:这只是个锦上添花的提示 */ }
 }
+
+const activeJobTripName = computed(() => {
+  const j = activeJob.value
+  if (!j?.trip_id) return ''                       // 还在建,没有行程可指
+  if (j.trip_id === currentTripId.value) return ''  // 就是眼前这趟,不用重复
+  return trips.value.find(t => t.id === j.trip_id)?.title || '另一趟行程'
+})
 
 const exportPhotos = ref(true)
 function exportUrl(scope) {
@@ -482,34 +521,66 @@ function onJournalSaved({ day_no, journal }) {
   if (d) d.journal = journal
 }
 
+/** 拉行程列表。**不动用户当前的选择**——除非他选的那趟已经不在了。
+ *
+ *  以前这里无条件把 currentTripId 重设成"进行中的那趟",于是任何一次
+ *  后台刷新(任务跑完、新建完)都会把人从正在看的行程上拽走。 */
 async function loadTrips() {
-  loading.value = true
-  try {
-    const res = await api.get('/api/trips')
-    trips.value = res.data || []
-    if (trips.value.length) {
-      // 默认选「进行中」的那趟,否则最近一趟
-      const ongoing = trips.value.find(t => t.status === 'ongoing')
-      currentTripId.value = (ongoing || trips.value[0]).id
-      await loadTrip()
-    }
-  } finally {
-    loading.value = false
+  const res = await api.get('/api/trips')
+  trips.value = res.data || []
+  if (!trips.value.some(t => t.id === currentTripId.value)) {
+    // 默认选「进行中」的那趟,否则最近一趟
+    const ongoing = trips.value.find(t => t.status === 'ongoing')
+    currentTripId.value = (ongoing || trips.value[0])?.id ?? null
   }
 }
 
-async function loadTrip() {
-  if (!currentTripId.value) return
-  const res = await api.get(`/api/trips/${currentTripId.value}`)
-  trip.value = res.data.trip
-  days.value = res.data.days || []
-  packing.value = res.data.packing || []
-  facts.value = res.data.facts || []
-  // 默认落在今天(若在行程内),否则第一天
-  const todayIso = new Date().toISOString().slice(0, 10)
-  const today = days.value.find(d => d.date === todayIso)
-  selectedDayNo.value = today ? today.day_no : (days.value[0]?.day_no || 0)
+/** 换行程的唯一入口:改 currentTripId,下面那个 watcher 负责加载。
+ *
+ *  loadSeq 是请求序号:连点几下选择器时,响应回来的顺序不一定是发出去的
+ *  顺序,不对号就会出现"选了 A、显示的是 B"。晚发的赢,早到的作废。 */
+let loadSeq = 0
+
+async function loadTrip(id = currentTripId.value) {
+  const seq = ++loadSeq
+  if (!id) {
+    trip.value = null
+    days.value = []
+    packing.value = []
+    facts.value = []
+    loadingTrip.value = false
+    return
+  }
+  loadingTrip.value = true
+  try {
+    const res = await api.get(`/api/trips/${id}`)
+    if (seq !== loadSeq) return          // 有更新的请求在路上,这份结果作废
+    // 一起换:别让子组件看到"新行程的标题 + 上一趟的日历"
+    trip.value = res.data.trip
+    days.value = res.data.days || []
+    packing.value = res.data.packing || []
+    facts.value = res.data.facts || []
+    // 默认落在今天(若在行程内),否则第一天
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const today = days.value.find(d => d.date === todayIso)
+    selectedDayNo.value = today ? today.day_no : (days.value[0]?.day_no || 0)
+  } catch (e) {
+    if (seq === loadSeq) {
+      trip.value = null
+      days.value = []
+    }
+    throw e
+  } finally {
+    if (seq === loadSeq) loadingTrip.value = false
+  }
 }
+
+// 选择器、新建、AI 生成完……所有换行程的路径都只改这个 id,加载只有这一处。
+// 以前每条路径各自 loadTrips + loadTrip,顺序稍有不同就会互相盖。
+watch(currentTripId, (id) => {
+  showDrawer.value = false
+  loadTrip(id).catch(() => { /* 拦截器已提示 */ })
+})
 
 async function createTrip() {
   if (!form.title.trim()) { ElMessage.warning('请填写行程名称'); return }
@@ -524,8 +595,7 @@ async function createTrip() {
     showCreate.value = false
     Object.assign(form, { title: '', subtitle: '', code: '', range: [], accent: 'glacier' })
     await loadTrips()
-    currentTripId.value = res.data.id
-    await loadTrip()
+    currentTripId.value = res.data.id      // watcher 去加载
   } catch (e) {
     ElMessage.error(e?.response?.data?.error || '创建失败')
   } finally {
@@ -587,7 +657,7 @@ async function removeTrip() {
     await api.delete(`/api/trips/${trip.value.id}`)
     ElMessage.success('已删除')
     trip.value = null
-    currentTripId.value = null
+    currentTripId.value = null      // 置空 → loadTrips 会挑一趟新的出来
     await loadTrips()
   } catch (e) {
     ElMessage.error(e?.response?.data?.error || '删除失败')
@@ -638,7 +708,14 @@ async function copyShare() {
 }
 
 onMounted(async () => {
-  await loadTrips()
+  try {
+    await loadTrips()
+    // currentTripId 从 null 变成某个 id 会触发 watcher;
+    // 等它一下,免得"列表出来了、内容还是空的"闪一下
+    if (currentTripId.value) await loadTrip()
+  } finally {
+    loading.value = false
+  }
   watchJobs()
   resumeAiBlocks()        // 刷新前还在跑的单块生成,接着盯
 })
@@ -646,6 +723,22 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
 </script>
 
 <style scoped>
+.trip-boot { margin-top: 16px; }
+/* 换行程时压暗 + 挡住交互。位置留住不塌,否则页面会跳一下 */
+.trip-swapping { opacity: .35; pointer-events: none; transition: opacity .12s ease; }
+.trip-swap-tip {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; margin-bottom: -4px;
+  font-size: 12px; color: var(--color-text-muted);
+}
+.trip-swap-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--trip-accent, var(--color-primary));
+  animation: trip-swap-pulse 1s ease-in-out infinite;
+}
+@keyframes trip-swap-pulse { 50% { opacity: .25; } }
+
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .page-title { font-size: 20px; font-weight: 700; color: var(--color-text); }
 .page-header-actions { display: flex; align-items: center; gap: 8px; }

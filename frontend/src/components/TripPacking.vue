@@ -8,11 +8,11 @@
     </div>
 
     <div class="pk-ai">
-      <button type="button" class="pk-ai-b" :disabled="ai.state.running" @click="propose">
-        <span v-if="ai.state.running" class="pk-spin" aria-hidden="true"></span>
-        {{ ai.state.running ? `生成中… ${ai.elapsed.value}s` : '✨ 让 AI 按这趟行程列一份' }}
+      <button type="button" class="pk-ai-b" :disabled="ai.running" @click="propose">
+        <span v-if="ai.running" class="pk-spin" aria-hidden="true"></span>
+        {{ ai.running ? `生成中… ${aiSecs}s` : '✨ 让 AI 按这趟行程列一份' }}
       </button>
-      <span v-if="ai.state.running" class="pk-ai-err">
+      <span v-if="ai.running" class="pk-ai-err">
         要十几秒,切到别的页面也不会断
       </span>
       <span v-if="aiErr" class="pk-ai-err">{{ aiErr }}</span>
@@ -76,7 +76,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
+import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -96,14 +96,17 @@ const adding = ref(false)
 const proposed = ref([])
 const picked = ref(new Set())
 const aiKey = computed(() => `packing:${props.tripId}`)
-const ai = useAiBlock(aiKey.value)
-const aiErr = computed(() => ai.state.error || localErr.value)
+// 按 key 现取,不在挂载时定死:换行程 / 换天时组件是复用的,
+// 把 key 记死会让它一直盯着上一趟的任务,结果就落到别人身上了
+const ai = computed(() => aiState(aiKey.value))
+const aiSecs = computed(() => aiElapsed(aiKey.value))
+const aiErr = computed(() => ai.value.error || localErr.value)
 const localErr = ref('')
 
 /** 把 store 里的结果搬到本地的待挑列表。挂载时也调一次——
  *  可能是在别的 Tab 发起的,回来正好取结果。 */
 function absorb() {
-  const data = ai.state.result
+  const data = ai.value.result
   if (!data) return
   const have = new Set(items.value.map(i => i.label))
   proposed.value = (data.items || []).filter(x => !have.has(x.label))
@@ -111,7 +114,7 @@ function absorb() {
   localErr.value = proposed.value.length ? '' : 'AI 想到的都已经在清单里了'
   clearAiBlock(aiKey.value)
 }
-watch(() => ai.state.result, absorb)
+watch(() => ai.value.result, absorb)
 onMounted(absorb)
 
 async function propose() {

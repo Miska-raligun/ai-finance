@@ -16,11 +16,11 @@
           v-if="!editing && aiKind"
           type="button"
           class="le-b le-ai"
-          :disabled="ai.state.running"
+          :disabled="ai.running"
           @click="generate(true)"
         >
-          <span v-if="ai.state.running" class="le-spin" aria-hidden="true"></span>
-          {{ ai.state.running ? `${ai.elapsed.value}s` : '✨ AI 起草' }}
+          <span v-if="ai.running" class="le-spin" aria-hidden="true"></span>
+          {{ ai.running ? `${aiSecs}s` : '✨ AI 起草' }}
         </button>
       </div>
     </div>
@@ -42,11 +42,11 @@
           v-if="aiKind"
           type="button"
           class="le-b le-ai"
-          :disabled="ai.state.running"
+          :disabled="ai.running"
           @click="generate(false)"
         >
-          <span v-if="ai.state.running" class="le-spin" aria-hidden="true"></span>
-          {{ ai.state.running ? `生成中… ${ai.elapsed.value}s` : '✨ 让 AI 补几条' }}
+          <span v-if="ai.running" class="le-spin" aria-hidden="true"></span>
+          {{ ai.running ? `生成中… ${aiSecs}s` : '✨ 让 AI 补几条' }}
         </button>
         <span class="le-spacer"></span>
         <button type="button" class="le-b" @click="editing = false">取消</button>
@@ -62,7 +62,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/api'
-import { useAiBlock, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
+import { aiState, aiElapsed, runAiBlock, clearAiBlock } from '@/utils/aiJobs'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -81,8 +81,11 @@ const saving = ref(false)
 const localErr = ref('')
 // 在途状态放模块级 store:切走再回来、弹窗关了再开都还在
 const aiKey = computed(() => `${props.aiKind}:${props.tripId}:${props.dayNo}`)
-const ai = useAiBlock(aiKey.value)
-const err = computed(() => ai.state.error || localErr.value)
+// 按 key 现取,不在挂载时定死:换行程 / 换天时组件是复用的,
+// 把 key 记死会让它一直盯着上一趟的任务,结果就落到别人身上了
+const ai = computed(() => aiState(aiKey.value))
+const aiSecs = computed(() => aiElapsed(aiKey.value))
+const err = computed(() => ai.value.error || localErr.value)
 
 function start() {
   draft.value = props.items.join('\n')
@@ -92,7 +95,7 @@ function start() {
 
 /** store 里有结果就并进草稿(去重),并打开编辑框等人改。 */
 function absorb() {
-  const data = ai.state.result
+  const data = ai.value.result
   if (!data) return
   const lines = (editing.value ? draft.value : props.items.join('\n'))
     .split('\n').map(x => x.trim()).filter(Boolean)
@@ -101,7 +104,7 @@ function absorb() {
   editing.value = true
   clearAiBlock(aiKey.value)
 }
-watch(() => ai.state.result, absorb)
+watch(() => ai.value.result, absorb)
 onMounted(absorb)
 
 async function save() {
