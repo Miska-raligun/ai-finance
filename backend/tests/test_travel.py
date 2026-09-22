@@ -447,3 +447,69 @@ def test_export_is_owner_only(app, auth_client, client):
     with client.session_transaction() as s:
         s["user_id"] = uid
     assert client.get(f"/api/trips/{tid}/export.html").status_code == 404
+
+
+def test_editing_one_block_does_not_touch_the_others(app, auth_client):
+    """前端的「行程安排 / 景点 / 住宿」是分块编辑的,但后端 detail 是整体替换。
+
+    所以每次保存都得把整个 detail 带上。这里守住的是:改了时间轴不会把
+    地图上的停留点(以及挂在上面的照片)顺手冲掉。
+    """
+    tid = _mk_trip(auth_client).get_json()["id"]
+    full = {
+        "sched": [["09:00", "集合", "", 1]],
+        "spots": [["岩石教堂", "15min"]],
+        "stay": {"h": "Heymo 1", "a": "Espoo"},
+        "stops": [{"t": "岩石教堂", "lat": 60.17, "lng": 24.92, "photo": ["abc"]}],
+    }
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={"detail": full})
+
+    # 只改时间轴那一块,其余原样带回
+    nxt = dict(full, sched=[["08:30", "提前集合", "改过了", 0]])
+    assert auth_client.patch(f"/api/trips/{tid}/days/1",
+                             json={"detail": nxt}).status_code == 200
+
+    got = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]
+    assert got["sched"] == [["08:30", "提前集合", "改过了", 0]]
+    assert got["stops"][0]["t"] == "岩石教堂"       # 地图点还在
+    assert got["spots"] and got["stay"]["h"] == "Heymo 1"
+
+
+def test_clearing_a_block_removes_the_key(app, auth_client):
+    """删光一块的内容 = 那个 key 不再出现,而不是留个空数组。
+
+    前端靠 `v-if="stay"` 这类判断决定要不要画那一节,留个空壳会画出空标题。
+    """
+    tid = _mk_trip(auth_client).get_json()["id"]
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "detail": {"sched": [["09:00", "集合", "", 0]], "todo": ["带插头"]}})
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={"detail": {"todo": ["带插头"]}})
+
+    got = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["detail"]
+    assert "sched" not in got and got["todo"] == ["带插头"]
+
+
+def test_day_header_fields_are_editable(app, auth_client):
+    """路线 / 交通 / 含餐:AI 从行程单里抄来的,常和实际对不上,得能改。"""
+    tid = _mk_trip(auth_client).get_json()["id"]
+    r = auth_client.patch(f"/api/trips/{tid}/days/1", json={
+        "route": "上海 → 赫尔辛基", "transport": "HO1607", "meal": "晚"})
+    assert r.status_code == 200
+    day = auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]
+    assert (day["route"], day["transport"], day["meal"]) == ("上海 → 赫尔辛基", "HO1607", "晚")
+
+    # 清空:空串落库成 NULL,不是留一个空字符串
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={"transport": "  "})
+    assert auth_client.get(f"/api/trips/{tid}").get_json()["days"][0]["transport"] is None
+
+
+def test_trip_meta_is_editable_after_ai_wrote_it(app, auth_client):
+    """标题 / 副标题 / 编号 / 卷首语 / 主题色都是 AI 可能写的,都得能改。"""
+    tid = _mk_trip(auth_client).get_json()["id"]
+    r = auth_client.patch(f"/api/trips/{tid}", json={
+        "title": "改过的名字", "subtitle": "改过的副标题", "code": "T-9",
+        "cover_note": "改过的卷首语", "accent": "sakura"})
+    assert r.status_code == 200
+    t = auth_client.get(f"/api/trips/{tid}").get_json()["trip"]
+    assert t["title"] == "改过的名字" and t["cover_note"] == "改过的卷首语"
+    assert t["code"] == "T-9" and t["accent"] == "sakura"

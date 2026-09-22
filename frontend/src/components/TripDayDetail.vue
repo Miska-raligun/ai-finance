@@ -6,17 +6,36 @@
         <span class="dd-dayno">Day {{ day.day_no }}</span>
         <span class="dd-date">{{ prettyDate(day.date) }}</span>
       </div>
-      <div v-if="day.route" class="dd-route">{{ day.route }}</div>
-      <div class="dd-meta">
-        <span v-if="day.transport" class="dd-chip">{{ day.transport }}</span>
-        <span v-if="day.meal" class="dd-chip">含餐 {{ day.meal }}</span>
+      <template v-if="!editHead">
+        <div v-if="day.route" class="dd-route">{{ day.route }}</div>
+        <div class="dd-meta">
+          <span v-if="day.transport" class="dd-chip">{{ day.transport }}</span>
+          <span v-if="day.meal" class="dd-chip">含餐 {{ day.meal }}</span>
+          <button type="button" class="dd-b" @click="startHead">✎ 改这天</button>
+        </div>
+      </template>
+      <div v-else class="dd-head-edit">
+        <input v-model="headDraft.route" class="dd-in" placeholder="路线,如 上海 → 赫尔辛基">
+        <div class="dd-head-edit-row">
+          <input v-model="headDraft.transport" class="dd-in" placeholder="交通,如 HO1607 / 大巴">
+          <input v-model="headDraft.meal" class="dd-in" placeholder="含餐,如 早 / 晚">
+        </div>
+        <div class="dd-edit-foot">
+          <span class="dd-spacer"></span>
+          <button type="button" class="dd-b" @click="editHead = false">取消</button>
+          <button type="button" class="dd-b primary" @click="saveHead">保存</button>
+        </div>
       </div>
     </header>
 
-    <!-- 当日时间轴 -->
-    <section v-if="sched.length" class="dd-sec">
-      <h4 class="dd-h">行程安排</h4>
-      <ol class="tl">
+    <!-- 当日时间轴。AI 写的时间到了现场常要改,所以这里是可编辑的 -->
+    <TripRowsEditor
+      label="行程安排"
+      :rows="sched"
+      :fields="SCHED_FIELDS"
+      @save="saveRows('sched', $event)"
+    >
+      <ol v-if="sched.length" class="tl">
         <li v-for="(s, i) in sched" :key="i" :class="{ hi: s[3] }">
           <span class="tl-time">{{ s[0] }}</span>
           <span class="tl-body">
@@ -25,21 +44,25 @@
           </span>
         </li>
       </ol>
-    </section>
+    </TripRowsEditor>
 
     <!-- 当日地图:该天有带坐标的停留点才显示 -->
     <section v-if="hasStops" class="dd-sec">
       <TripMap :days="[day]" :trip-id="tripId" title="当日路线" />
     </section>
 
-    <section v-if="spots.length" class="dd-sec">
-      <h4 class="dd-h">景点</h4>
-      <ul class="dd-list">
+    <TripRowsEditor
+      label="景点"
+      :rows="spots"
+      :fields="SPOT_FIELDS"
+      @save="saveRows('spots', $event)"
+    >
+      <ul v-if="spots.length" class="dd-list">
         <li v-for="(s, i) in spots" :key="i">
           <b>{{ s[0] }}</b><span v-if="s[1]" class="dd-dim"> · {{ s[1] }}</span>
         </li>
       </ul>
-    </section>
+    </TripRowsEditor>
 
     <TripListEditor
       v-for="grp in tipGroups"
@@ -53,21 +76,38 @@
       @save="saveList(grp.key, $event)"
     />
 
-    <section v-if="stay && (stay.h || stay.a)" class="dd-sec">
-      <h4 class="dd-h">住宿</h4>
-      <div class="dd-stay">
-        <div class="dd-stay-txt">
-          <b>{{ stay.h }}</b>
-          <span v-if="stay.a" class="dd-dim">{{ stay.a }}</span>
+    <section class="dd-sec">
+      <div class="dd-sec-head">
+        <h4 class="dd-h">住宿</h4>
+        <button v-if="!editStay" type="button" class="dd-b" @click="startStay">
+          {{ hasStay ? '✎ 编辑' : '＋ 添加' }}
+        </button>
+      </div>
+      <template v-if="!editStay">
+        <div v-if="hasStay" class="dd-stay">
+          <div class="dd-stay-txt">
+            <b>{{ stay.h }}</b>
+            <span v-if="stay.a" class="dd-dim">{{ stay.a }}</span>
+          </div>
+          <!-- 外链到系统地图:不嵌第三方地图,既不违反 CSP 也不把坐标交出去 -->
+          <a
+            v-if="stayMap"
+            class="dd-maplink"
+            :href="stayMap"
+            target="_blank"
+            rel="noopener noreferrer"
+          >📍 地图</a>
         </div>
-        <!-- 外链到系统地图:不嵌第三方地图,既不违反 CSP 也不把坐标交出去 -->
-        <a
-          v-if="stayMap"
-          class="dd-maplink"
-          :href="stayMap"
-          target="_blank"
-          rel="noopener noreferrer"
-        >📍 地图</a>
+        <p v-else class="dd-none">还没有内容</p>
+      </template>
+      <div v-else class="dd-head-edit">
+        <input v-model="stayDraft.h" class="dd-in" placeholder="酒店名">
+        <input v-model="stayDraft.a" class="dd-in" placeholder="地址(留空也能按名字搜地图)">
+        <div class="dd-edit-foot">
+          <span class="dd-spacer"></span>
+          <button type="button" class="dd-b" @click="editStay = false">取消</button>
+          <button type="button" class="dd-b primary" @click="saveStay">保存</button>
+        </div>
       </div>
     </section>
 
@@ -121,6 +161,7 @@ import api from '@/api'
 import TripMap from '@/components/TripMap.vue'
 import TripPhotoSheet from '@/components/TripPhotoSheet.vue'
 import TripListEditor from '@/components/TripListEditor.vue'
+import TripRowsEditor from '@/components/TripRowsEditor.vue'
 import { mapUrl } from '@/utils/maplink'
 import { photoList, photoUrl } from '@/utils/tripPhotos'
 
@@ -131,13 +172,34 @@ const props = defineProps({
 const emit = defineEmits(['saved'])
 
 const journalDraft = ref('')
+// 这两个开关声明在 watch 之前:下面那个 watch 是 immediate 的,setup 阶段
+// 就会跑一次,声明写在后面会撞上 TDZ(整个详情面板直接白掉)
+const editHead = ref(false)
+const headDraft = ref({ route: '', transport: '', meal: '' })
+const editStay = ref(false)
+const stayDraft = ref({ h: '', a: '' })
 const saving = ref(false)
 const journalHint = ref('')
 
 watch(() => props.day, (d) => {
   journalDraft.value = d?.journal || ''
   journalHint.value = ''
+  // 换了一天就把没保存的编辑状态收起来,免得改着改着串到别天去
+  editHead.value = false
+  editStay.value = false
 }, { immediate: true })
+
+// 每行的格子:时间 / 事项 / 备注 / 是否重点(重点那格是 0|1,不是文字)
+const SCHED_FIELDS = [
+  { i: 0, label: '时间', narrow: true, placeholder: '09:00' },
+  { i: 3, label: '标为重点', flag: true },
+  { i: 1, label: '事项', placeholder: '做什么' },
+  { i: 2, label: '备注', placeholder: '备注,可留空' },
+]
+const SPOT_FIELDS = [
+  { i: 0, label: '名称', placeholder: '景点名' },
+  { i: 1, label: '时长', placeholder: '停留多久,如 15min' },
+]
 
 const detail = computed(() => props.day?.detail || {})
 const sched = computed(() => detail.value.sched || [])
@@ -148,6 +210,7 @@ const stayMap = computed(() => {
   const s = stay.value
   return s ? mapUrl({ lat: s.lat, lng: s.lng, name: s.h, addr: s.a }) : ''
 })
+const hasStay = computed(() => !!(stay.value && (stay.value.h || stay.value.a)))
 const stops = computed(() => detail.value.stops || [])
 const hasStops = computed(() =>
   stops.value.some(s => isFinite(Number(s.lat)) && isFinite(Number(s.lng))))
@@ -180,21 +243,69 @@ const tipGroups = computed(() => [
   { key: 'warn', label: '注意', ai: 'day_warn', items: detail.value.warn || [] },
 ])
 
-/** 这几条都挂在 detail_json 里,所以整块 detail 一起 PATCH。
- *  直接改 props.day 上那个对象——父组件 days 里就是同一个,改完各处同步。 */
-async function saveList(key, items) {
+function saveList(key, items) {
+  return saveDetail(key, items.length ? items : undefined)
+}
+
+function startHead() {
+  const d = props.day || {}
+  headDraft.value = { route: d.route || '', transport: d.transport || '', meal: d.meal || '' }
+  editHead.value = true
+}
+
+async function saveHead() {
+  const next = {
+    route: headDraft.value.route.trim(),
+    transport: headDraft.value.transport.trim(),
+    meal: headDraft.value.meal.trim(),
+  }
+  const before = { route: props.day.route, transport: props.day.transport, meal: props.day.meal }
+  Object.assign(props.day, next)        // 先改本地,父组件 days 里是同一个对象
+  editHead.value = false
+  try {
+    await api.patch(`/api/trips/${props.tripId}/days/${props.day.day_no}`, next)
+  } catch {
+    Object.assign(props.day, before)
+    ElMessage.error('保存失败')
+  }
+}
+
+function startStay() {
+  stayDraft.value = { h: stay.value?.h || '', a: stay.value?.a || '' }
+  editStay.value = true
+}
+
+function saveStay() {
+  const h = stayDraft.value.h.trim()
+  const a = stayDraft.value.a.trim()
+  // 坐标是 AI / 导入时带来的,手改名字不该把它丢掉——留着地图才能精确落点
+  const next = { ...(stay.value || {}), h, a }
+  if (!h) delete next.h
+  if (!a) delete next.a
+  editStay.value = false
+  return saveDetail('stay', (h || a) ? next : undefined)
+}
+
+/** detail 里某一块的保存。整块 detail 一起 PATCH(后端就是整体替换),
+ *  所以要直接改 props.day.detail 上那个对象,父组件手里是同一个。 */
+async function saveDetail(key, value) {
   const d = props.day?.detail
   if (!d) return
+  const had = key in d
   const before = d[key]
-  if (items.length) d[key] = items
-  else delete d[key]
+  if (value === undefined) delete d[key]
+  else d[key] = value
   try {
     await api.patch(`/api/trips/${props.tripId}/days/${props.day.day_no}`, { detail: d })
   } catch {
-    if (before === undefined) delete d[key]
-    else d[key] = before
+    if (had) d[key] = before
+    else delete d[key]
     ElMessage.error('保存失败')
   }
+}
+
+function saveRows(key, rows) {
+  return saveDetail(key, rows.length ? rows : undefined)
 }
 
 function prettyDate(iso) {
@@ -223,6 +334,29 @@ async function saveJournal() {
 </script>
 
 <style scoped>
+.dd-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dd-none { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.dd-spacer { flex: 1; }
+.dd-b {
+  appearance: none; border: 1px solid var(--color-border-light); background: var(--color-surface);
+  color: var(--color-text-muted); font: inherit; font-size: 11.5px;
+  padding: 3px 12px; border-radius: 999px; cursor: pointer; flex: 0 0 auto;
+}
+.dd-b.primary {
+  background: var(--trip-accent, var(--color-primary));
+  border-color: var(--trip-accent, var(--color-primary)); color: #fff; font-weight: 700;
+}
+.dd-head-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.dd-head-edit-row { display: flex; gap: 6px; }
+.dd-head-edit-row .dd-in { flex: 1; min-width: 0; }
+.dd-in {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
+  border: 1px solid var(--color-border-light); border-radius: 8px; padding: 6px 8px;
+  background: var(--color-surface); color: var(--color-text);
+}
+.dd-in:focus { outline: none; border-color: var(--trip-accent, var(--color-primary)); }
+.dd-edit-foot { display: flex; align-items: center; gap: 8px; }
+
 .dd-head { padding-bottom: 10px; border-bottom: 1px solid var(--trip-line, var(--color-border-light)); }
 .dd-head-main { display: flex; align-items: baseline; gap: 10px; }
 .dd-dayno {

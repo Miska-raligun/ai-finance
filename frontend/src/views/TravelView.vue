@@ -33,6 +33,7 @@
             >⋯</button>
             <div v-if="showMore" class="more-mask" @click="showMore = false"></div>
             <div v-if="showMore" class="more-menu">
+              <button type="button" @click="showMore = false; startEditTrip()">✎ 编辑行程信息</button>
               <button type="button" @click="showMore = false; openShare()">🔗 分享 / 导出</button>
               <button type="button" class="danger" @click="showMore = false; removeTrip()">
                 🗑 删除这趟行程
@@ -261,6 +262,49 @@
         <el-button type="primary" :loading="creating" @click="createTrip">创建</el-button>
       </template>
     </el-dialog>
+
+    <!-- 编辑行程信息。日期不在这儿改:改起止日要连带增删每一天,
+         那是"重排行程"而不是"改个名字",容易把已经写好的内容冲掉。 -->
+    <el-dialog v-model="showEdit" title="编辑行程信息" :width="dialogWidth">
+      <el-form label-width="76px" size="small">
+        <el-form-item label="名称">
+          <el-input v-model="editForm.title" placeholder="如：逃离地球计划" />
+        </el-form-item>
+        <el-form-item label="副标题">
+          <el-input v-model="editForm.subtitle" placeholder="如：北欧四国 · 冰岛四晚" />
+        </el-form-item>
+        <el-form-item label="编号">
+          <el-input v-model="editForm.code" placeholder="团号 / 自定义，可空" />
+        </el-form-item>
+        <el-form-item label="卷首语">
+          <el-input
+            v-model="editForm.cover_note"
+            type="textarea"
+            :rows="2"
+            placeholder="封面上那句话，可空"
+          />
+        </el-form-item>
+        <el-form-item label="主题色">
+          <div class="accent-picker">
+            <button
+              v-for="a in ACCENT_LIST"
+              :key="a.key"
+              type="button"
+              class="accent-dot"
+              :class="{ on: editForm.accent === a.key }"
+              :style="{ background: a.color }"
+              :title="a.label"
+              @click="editForm.accent = a.key"
+            />
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="edit-hint">日期要改的话，新建一趟更稳妥</span>
+        <el-button @click="showEdit = false">取消</el-button>
+        <el-button type="primary" :loading="savingTrip" @click="saveTrip">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -298,6 +342,9 @@ const selectedDayNo = ref(0)
 const loading = ref(true)
 const showCreate = ref(false)
 const creating = ref(false)
+const showEdit = ref(false)
+const savingTrip = ref(false)
+const editForm = ref({ title: '', subtitle: '', code: '', cover_note: '', accent: 'glacier' })
 const showDrawer = ref(false)
 const leftMode = ref('calendar')   // calendar | map
 const TRIP_JOB_KINDS = 'import_notice,from_idea,fill_days,fill_spots,block'
@@ -486,6 +533,44 @@ async function createTrip() {
   }
 }
 
+function startEditTrip() {
+  const t = trip.value
+  if (!t) return
+  editForm.value = {
+    title: t.title || '', subtitle: t.subtitle || '', code: t.code || '',
+    cover_note: t.cover_note || '', accent: t.accent || 'glacier',
+  }
+  showEdit.value = true
+}
+
+async function saveTrip() {
+  const next = {
+    title: editForm.value.title.trim(),
+    subtitle: editForm.value.subtitle.trim(),
+    code: editForm.value.code.trim(),
+    cover_note: editForm.value.cover_note.trim(),
+    accent: editForm.value.accent,
+  }
+  if (!next.title) {
+    ElMessage.warning('名称不能为空')
+    return
+  }
+  savingTrip.value = true
+  try {
+    await api.patch(`/api/trips/${trip.value.id}`, next)
+    Object.assign(trip.value, next)
+    // 顶上的选择器读的是 trips 列表那份,也要跟着改,否则标题两处不一致
+    const row = trips.value.find(t => t.id === trip.value.id)
+    if (row) Object.assign(row, { title: next.title, accent: next.accent })
+    showEdit.value = false
+    ElMessage.success('已保存')
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    savingTrip.value = false
+  }
+}
+
 async function removeTrip() {
   if (!trip.value) return
   try {
@@ -659,6 +744,7 @@ onBeforeUnmount(() => clearTimeout(jobTimer))
   border: 1px dashed var(--trip-accent); background: var(--trip-accent-weak);
   color: var(--trip-accent-ink); font-size: 12.5px;
 }
+.edit-hint { float: left; font-size: 11.5px; color: var(--color-text-muted); line-height: 32px; }
 .blank-tip b { font-variant-numeric: tabular-nums; }
 .blank-tip button {
   margin-left: auto; appearance: none; cursor: pointer; font: inherit;
