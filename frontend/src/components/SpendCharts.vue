@@ -78,14 +78,7 @@ async function drawChart() {
       },
       plugins: {
         legend: {
-          position: 'bottom',
-          labels: {
-            boxWidth: 10,
-            padding: 10,
-            font: {
-              size: 12
-            }
-          }
+          display: false
         }
       }
     }
@@ -104,7 +97,7 @@ form {
   gap: 10px;
   flex-wrap: wrap;
 }
-@media (max-width: 600px) {
+@media (hover: none) and (pointer: coarse) {
   form {
     flex-direction: column;
     align-items: stretch;

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" aria-hidden="true">
+  <!-- 240×240 平铺图案：浅色叶子 / 贝壳 / 小星 / 圆点 散布
+       透明度 0.10-0.18，足够柔和不抢主体色 -->
+  <defs>
+    <g id="leaf">
+      <ellipse cx="0" cy="0" rx="9" ry="4" fill="#6fba2c"/>
+      <line x1="-9" y1="0" x2="9" y2="0" stroke="#5a9e1e" stroke-width="0.6"/>
+    </g>
+    <g id="shell">
+      <path d="M0 0 L-7 6 Q-3 9 0 9 Q3 9 7 6 Z" fill="#f8a6b2"/>
+      <line x1="0" y1="0" x2="-3.5" y2="7" stroke="#e08a96" stroke-width="0.4"/>
+      <line x1="0" y1="0" x2="0" y2="9" stroke="#e08a96" stroke-width="0.4"/>
+      <line x1="0" y1="0" x2="3.5" y2="7" stroke="#e08a96" stroke-width="0.4"/>
+    </g>
+    <g id="star">
+      <text font-size="14" font-family="serif" fill="#19c8b9" text-anchor="middle" dominant-baseline="middle">✦</text>
+    </g>
+    <g id="dot">
+      <circle r="2.5" fill="#f7cd67"/>
+    </g>
+  </defs>
+
+  <g opacity="0.18">
+    <use href="#leaf" transform="translate(40 40) rotate(-25)"/>
+    <use href="#shell" transform="translate(160 60) rotate(15)"/>
+    <use href="#star" transform="translate(200 30)"/>
+    <use href="#dot" transform="translate(110 90)"/>
+    <use href="#leaf" transform="translate(180 130) rotate(35)"/>
+    <use href="#shell" transform="translate(50 170) rotate(-20)"/>
+    <use href="#leaf" transform="translate(125 195) rotate(-10)"/>
+    <use href="#star" transform="translate(20 200)"/>
+    <use href="#dot" transform="translate(220 220)"/>
+    <use href="#dot" transform="translate(80 110)"/>
+  </g>
+</svg>

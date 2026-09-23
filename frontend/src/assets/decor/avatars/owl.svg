@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+  <!-- 猫头鹰：投资理财（睿智） -->
+  <!-- 圆胖身体 -->
+  <ellipse cx="32" cy="38" rx="22" ry="22" fill="#b77dee"/>
+  <!-- 头顶羽毛角 -->
+  <polygon points="16,12 18,22 22,18" fill="#b77dee"/>
+  <polygon points="48,12 46,22 42,18" fill="#b77dee"/>
+  <!-- 肚子浅色 -->
+  <ellipse cx="32" cy="44" rx="14" ry="14" fill="#e0c3f5"/>
+  <!-- 双眼大眼镜 -->
+  <circle cx="24" cy="32" r="7" fill="#fff5f0"/>
+  <circle cx="40" cy="32" r="7" fill="#fff5f0"/>
+  <circle cx="24" cy="32" r="3.5" fill="#3b2419"/>
+  <circle cx="40" cy="32" r="3.5" fill="#3b2419"/>
+  <circle cx="25.2" cy="30.5" r="1.1" fill="#fff"/>
+  <circle cx="41.2" cy="30.5" r="1.1" fill="#fff"/>
+  <!-- 黄色喙 -->
+  <polygon points="32,36 28,40 36,40" fill="#f5c31c"/>
+  <polygon points="32,38 30,42 34,42" fill="#dba90e"/>
+  <!-- 腹部羽毛纹理（小弧线） -->
+  <path d="M26 50 q 2 2 4 0 q 2 2 4 0 q 2 2 4 0" stroke="#b77dee" stroke-width="1" fill="none" opacity="0.6"/>
+</svg>

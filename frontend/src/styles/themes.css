@@ -1,0 +1,119 @@
+/* ===========================================================================
+ * 主题色板预设。
+ * 默认是 Animal Island 暖米 + 薄荷青（定义在 App.vue :root 里）。
+ * 这里仅覆盖 :root 变量，body[data-theme="xxx"] 选择器激活。
+ * ========================================================================= */
+
+/* —— 暗色主题（动森"晚上"）—— */
+body[data-theme="dark"] {
+  --color-bg: #2b2118;
+  --color-surface: #3d3028;
+  --color-surface-2: #4a3c32;
+  --color-text: #f0e3cf;
+  --color-text-strong: #ffd9a3;
+  --color-text-muted: #b5a48e;
+  --color-text-disabled: #7a6a55;
+
+  --color-primary: #5fe3d3;
+  --color-primary-dark: #38c9b8;
+  --color-primary-hover: #82eadc;
+  --color-primary-light: rgba(95, 227, 211, 0.18);
+
+  --color-border: #5c4a3c;
+  --color-border-light: #4a3c32;
+
+  --color-success: #82d23e;
+  --color-warning: #ffd33d;
+  --color-error: #ff7676;
+  --color-focus: #ffd33d;
+
+  --shadow-anchor: #1a130d;
+  --shadow-anchor-light: #2b2118;
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* 涨/盈 跌/亏（暗底用更亮的对比色） */
+  --color-up: #ff8080;
+  --color-down: #82e25c;
+
+  /* element-plus 内部变量同步 */
+  --el-bg-color: var(--color-surface);
+  --el-bg-color-page: var(--color-bg);
+  --el-bg-color-overlay: var(--color-surface);
+  --el-fill-color-light: var(--color-surface-2);
+  --el-fill-color-blank: var(--color-surface);
+  --el-text-color-primary: var(--color-text);
+  --el-text-color-regular: var(--color-text);
+  --el-text-color-secondary: var(--color-text-muted);
+  --el-border-color: var(--color-border);
+  --el-border-color-light: var(--color-border-light);
+  --el-border-color-lighter: #4a3c32;
+}
+
+/* —— 春樱：粉嫩 —— */
+body[data-theme="spring"] {
+  --color-bg: #fff5f5;
+  --color-surface: #ffeef0;
+  --color-text: #6b3d4d;
+  --color-text-strong: #99355a;
+  --color-text-muted: #b08395;
+  --color-primary: #ff6b9d;
+  --color-primary-dark: #db4a82;
+  --color-primary-hover: #ff85b5;
+  --color-primary-light: #ffe0ec;
+  --color-border: #e4b8c4;
+  --color-border-light: #f0d8df;
+  --shadow-anchor: #d6a5b2;
+  --shadow-anchor-light: #e4b8c4;
+}
+
+/* —— 夏海：清凉蓝 —— */
+body[data-theme="summer"] {
+  --color-bg: #f0faff;
+  --color-surface: #e0f4fc;
+  --color-text: #1d4a6b;
+  --color-text-strong: #0e3a55;
+  --color-text-muted: #6a8fa3;
+  --color-primary: #00b4d8;
+  --color-primary-dark: #0095b3;
+  --color-primary-hover: #1fc4e6;
+  --color-primary-light: #cdf0fa;
+  --color-border: #a3c8d8;
+  --color-border-light: #c4ddea;
+  --shadow-anchor: #8fb5c8;
+  --shadow-anchor-light: #b3cfdb;
+}
+
+/* —— 秋叶：橙黄 —— */
+body[data-theme="autumn"] {
+  --color-bg: #fff5e6;
+  --color-surface: #fce8c8;
+  --color-text: #6b4523;
+  --color-text-strong: #8c3d12;
+  --color-text-muted: #b08560;
+  --color-primary: #e87935;
+  --color-primary-dark: #c25e1d;
+  --color-primary-hover: #ed8c52;
+  --color-primary-light: #fde2c9;
+  --color-border: #e0b884;
+  --color-border-light: #ecd0a8;
+  --shadow-anchor: #b8956b;
+  --shadow-anchor-light: #cdaa84;
+}
+
+/* —— 冬雪：清冷紫白 —— */
+body[data-theme="winter"] {
+  --color-bg: #f4f6fb;
+  --color-surface: #e8ecf5;
+  --color-text: #3a4561;
+  --color-text-strong: #1f2c4f;
+  --color-text-muted: #7d869e;
+  --color-primary: #6b87d8;
+  --color-primary-dark: #4862b5;
+  --color-primary-hover: #87a0e3;
+  --color-primary-light: #dfe5f5;
+  --color-border: #b4bfd4;
+  --color-border-light: #cdd5e5;
+  --shadow-anchor: #99a4bf;
+  --shadow-anchor-light: #b4bfd4;
+}

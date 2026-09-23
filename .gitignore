@@ -1,5 +1,13 @@
 .env
 /backend/venv
 /backend/__pycache__
+**/__pycache__/
 /backend/records.db
+/records.db
 /frontend/node_modules
+*.log
+/backend/reset_admin_passwd.py
+
+# Runtime artifacts — sensitive (initial admin password / user uploads), never commit
+/backend/logs/
+/backend/uploads/

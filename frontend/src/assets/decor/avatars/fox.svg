@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+  <!-- 狐狸：用户管理（管理员，机灵 / 全局视角） -->
+  <!-- 尖耳 -->
+  <polygon points="12,6 22,4 18,22" fill="#e59266"/>
+  <polygon points="52,6 42,4 46,22" fill="#e59266"/>
+  <polygon points="14,9 18,7 17,18" fill="#3b2419"/>
+  <polygon points="50,9 46,7 47,18" fill="#3b2419"/>
+  <!-- 倒三角脸（橘红） -->
+  <path d="M32 56 Q 8 38 12 18 Q 32 14 52 18 Q 56 38 32 56 Z" fill="#e59266"/>
+  <!-- 脸下白色区 -->
+  <path d="M32 56 Q 22 46 22 32 Q 32 28 42 32 Q 42 46 32 56 Z" fill="#fff5f0"/>
+  <!-- 眼睛（细长狐眼） -->
+  <ellipse cx="24" cy="30" rx="3" ry="2.5" fill="#3b2419" transform="rotate(-12 24 30)"/>
+  <ellipse cx="40" cy="30" rx="3" ry="2.5" fill="#3b2419" transform="rotate(12 40 30)"/>
+  <circle cx="25" cy="29.5" r="0.9" fill="#fff"/>
+  <circle cx="39" cy="29.5" r="0.9" fill="#fff"/>
+  <!-- 黑鼻三角 -->
+  <polygon points="32,38 29,42 35,42" fill="#3b2419"/>
+  <!-- 狡黠微笑 -->
+  <path d="M28 47 q 4 3 8 0" stroke="#3b2419" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+</svg>
