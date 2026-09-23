@@ -137,6 +137,9 @@ def ai_block(trip_id: int):
     spots = [x for x in spots if x]
     if kind == "spot_geos" and not spots:
         return jsonify({"error": "缺少地点列表"}), 400
+    # 手记原文由后端从库里取(见 travel_jobs.run_block),所以这里只要天号
+    if kind == "journal_expenses" and day_no is None:
+        return jsonify({"error": "缺少天号"}), 400
 
     job_id = ai_jobs.submit(g.user_id, "block", {
         "kind": kind, "day_no": day_no, "spot": spot or None, "spots": spots or None,

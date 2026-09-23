@@ -17,7 +17,8 @@ from datetime import date, datetime, timedelta
 
 from prompts.travel import (
     BLOCK_KINDS, DAY_SYSTEM, FACTS_EXTRACT_SYSTEM, OUTLINE_SYSTEM,
-    SPOT_DESCS_SYSTEM, SPOT_GEOS_SYSTEM, build_block_prompt, build_day_prompt,
+    JOURNAL_EXPENSES_SYSTEM, SPOT_DESCS_SYSTEM, SPOT_GEOS_SYSTEM,
+    build_block_prompt, build_day_prompt, build_journal_expenses_prompt,
     build_facts_extract_prompt, build_outline_from_idea,
     build_outline_from_notice, build_spot_descs_prompt, build_spot_geos_prompt,
 )
@@ -189,6 +190,7 @@ def clean_outline(raw, *, shift_to_future: bool = False) -> dict:
 
 
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def clean_day_detail(raw) -> dict:
@@ -451,6 +453,59 @@ def pair_by_name(items, names: list[str]) -> dict[str, dict]:
     return out
 
 
+_EXPENSE_KINDS = ("expense", "income")
+# 一笔旅行花费不会到七位数。真有那种数目也该手动记,不该让模型从游记里抽
+_MAX_AMOUNT = 1_000_000
+
+
+def gen_journal_expenses(trip: dict, day: dict, text: str,
+                         llm: dict | None = None) -> list[dict]:
+    """从手记里找出记账候选。
+
+    **只提取,不落库**——从一段游记里抽出来的金额,币种、是不是人均、
+    是不是真付过,全都可能判错。返回的是候选,由用户逐条确认。
+    """
+    from constants import LLM_TIMEOUT_LONG
+    if not (text or "").strip():
+        return []
+    raw = _json_call(JOURNAL_EXPENSES_SYSTEM,
+                     build_journal_expenses_prompt(trip, day, text),
+                     endpoint="travel.journal_expenses", timeout=LLM_TIMEOUT_LONG,
+                     temperature=0.2, llm=llm)
+    if not isinstance(raw, dict):
+        return []
+
+    out = []
+    for it in (raw.get("items") or [])[:20]:
+        if not isinstance(it, dict):
+            continue
+        try:
+            amount = round(float(it.get("amount")), 2)
+        except (TypeError, ValueError):
+            continue
+        if not (0 < amount <= _MAX_AMOUNT):
+            continue
+        cur = (_s(it.get("currency"), 8) or "").upper()
+        # 币种只认三个字母的代码。判断不出来就留空,由用户来选——
+        # 默认成人民币会把 240 克朗记成 240 块,而且看不出错
+        if not re.fullmatch(r"[A-Z]{3}", cur or ""):
+            cur = ""
+        kind = it.get("kind") if it.get("kind") in _EXPENSE_KINDS else "expense"
+        date = _s(it.get("date"), 10) or ""
+        if not _DATE_RE.fullmatch(date):
+            date = _s(day.get("date"), 10) or ""
+        out.append({
+            "note": _s(it.get("note"), 80) or "",
+            "amount": amount,
+            "currency": cur,
+            "category": _s(it.get("category"), 20) or ("退款" if kind == "income" else "其它"),
+            "kind": kind,
+            "date": date,
+            "sure": 1 if it.get("sure") in (1, True, "1", "true") else 0,
+        })
+    return out
+
+
 def gen_spot_geos(trip: dict, day: dict, names: list[str],
                   llm: dict | None = None, on_progress=None) -> list[dict]:
     """一次给一批地点定位。
@@ -526,6 +581,9 @@ def gen_block(kind: str, ctx: dict, llm: dict | None = None) -> dict:
     # 十几二十条 JSON,共享端点高峰期根本跑不完,表现就是点了没反应。
     from constants import LLM_TIMEOUT_LONG
     # 批量定位有自己的一套提示词和配对逻辑,不走通用的那条路
+    if kind == "journal_expenses":
+        return {"items": gen_journal_expenses(ctx.get("trip") or {}, ctx.get("day") or {},
+                                              ctx.get("text") or "", llm=llm)}
     if kind == "spot_geos":
         names = [n for n in (ctx.get("spots") or []) if isinstance(n, str) and n.strip()]
         return {"items": gen_spot_geos(ctx.get("trip") or {}, ctx.get("day") or {},

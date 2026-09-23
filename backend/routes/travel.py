@@ -386,6 +386,68 @@ def trip_spending_detach(trip_id: int):
     return jsonify(detach_all(g.user_id, trip_id))
 
 
+@travel_bp.route("/api/trips/<int:trip_id>/journal/records", methods=["POST"])
+@login_required
+def commit_journal_records(trip_id: int):
+    """把用户从手记里**逐条确认过**的花费记进账本。
+
+    AI 只负责从手记里找出候选,记不记、记多少、算哪个分类都是用户点过头的——
+    所以这个端点收的是确认后的结果,不重新跑一遍模型。
+
+    金额一律当人民币收:账本没有币种这一列,外币折算在前端由用户确认过。
+    """
+    from handlers.records import add_record
+    from handlers.income import add_income
+    from constants import PARAM_AMOUNT, PARAM_CATEGORY, PARAM_DATE, PARAM_NOTE
+
+    trip = _own_trip(trip_id)
+    if not trip:
+        return jsonify({"error": "行程不存在"}), 404
+    items = (request.get_json() or {}).get("items")
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "没有要记的条目"}), 400
+    if len(items) > 50:
+        return jsonify({"error": "一次最多记 50 条"}), 400
+
+    created, errors = 0, []
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            errors.append({"i": i, "error": "格式不对"})
+            continue
+        try:
+            amount = round(float(it.get("amount")), 2)
+        except (TypeError, ValueError):
+            errors.append({"i": i, "error": "金额不是数字"})
+            continue
+        if not (0 < amount <= 1_000_000):
+            errors.append({"i": i, "error": "金额超出范围"})
+            continue
+        date = (it.get("date") or "").strip()
+        if not _valid_date(date):
+            errors.append({"i": i, "error": "日期格式应为 YYYY-MM-DD"})
+            continue
+        category = (it.get("category") or "").strip()[:20]
+        if not category:
+            errors.append({"i": i, "error": "缺少分类"})
+            continue
+        params = {
+            PARAM_CATEGORY: category,
+            PARAM_AMOUNT: amount,
+            PARAM_NOTE: (it.get("note") or "").strip()[:200],
+            PARAM_DATE: date,
+            "trip_id": trip_id,          # 用户当面认过是这趟,比按日期猜准
+        }
+        fn = add_income if it.get("kind") == "income" else add_record
+        msg = fn(g.user_id, params)
+        # handler 用「⚠️ 开头」表示没写成(分类类型冲突这类)
+        if isinstance(msg, str) and msg.startswith("⚠️"):
+            errors.append({"i": i, "error": msg.lstrip("⚠️ ")})
+        else:
+            created += 1
+
+    return jsonify({"created": created, "errors": errors})
+
+
 # ---------- 离线导出 ----------
 
 @travel_bp.route("/api/trips/<int:trip_id>/export.html", methods=["GET"])

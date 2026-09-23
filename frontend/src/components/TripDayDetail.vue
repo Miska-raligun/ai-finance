@@ -147,6 +147,9 @@
         <span class="dd-dim">{{ journalHint }}</span>
         <el-button size="small" :loading="saving" @click="saveJournal">保存</el-button>
       </div>
+
+      <!-- 手记里写的花费能变成账:找出候选 → 逐条确认 → 记进账本,并归到这趟 -->
+      <TripJournalExpenses :trip-id="tripId" :day="day" />
     </section>
   </div>
 
@@ -170,6 +173,7 @@ import TripMap from '@/components/TripMap.vue'
 import TripPhotoSheet from '@/components/TripPhotoSheet.vue'
 import TripListEditor from '@/components/TripListEditor.vue'
 import TripRowsEditor from '@/components/TripRowsEditor.vue'
+import TripJournalExpenses from '@/components/TripJournalExpenses.vue'
 import { mapUrl } from '@/utils/maplink'
 import { photoList, photoUrl } from '@/utils/tripPhotos'
 

@@ -132,6 +132,27 @@ def build_facts_extract_prompt(notice: str) -> str:
 
 # ---------- 2.6 批量补景点介绍 ----------
 
+JOURNAL_EXPENSES_SYSTEM = (
+    "你从旅行手记里找出**实际发生的花费**,整理成结构化的记账候选。\n"
+    + _JSON_RULE + "\n"
+    '输出结构:{"items":[{"i":1,"note":"买了什么","amount":240,"currency":"SEK",'
+    '"category":"餐饮","kind":"expense","date":"2026-10-02","sure":1}]}\n'
+    "规则:\n"
+    "- **只要真花出去的钱**。手记里常出现没花的数字:菜单上的价格、门票多少钱\n"
+    "  但没进去、别人请客、打听到的行情——这些一律不要\n"
+    "- 拿不准是不是真付了(比如「看了看要 300」)就 sure 写 0,别直接丢掉,\n"
+    "  让用户自己判断\n"
+    "- currency 写 ISO 代码(SEK/EUR/JPY/CNY…)。手记里说「克朗」「欧」这类\n"
+    "  按上下文判断是哪国的;**实在判断不出就给 null,不要默认成人民币**\n"
+    "- amount 是这一笔的总额。写了「两人 480」就记 480,不要自己除以 2;\n"
+    "  写了「每人 240」且说明了几个人才乘\n"
+    "- kind:退税、退款、别人还钱写 income,其余 expense\n"
+    "- category 用中文常见分类:餐饮 / 交通 / 门票 / 购物 / 住宿 / 通讯 / 其它\n"
+    "- date 用 YYYY-MM-DD。手记没写日期就用我给的当天日期\n"
+    "- 一笔都没有就回 {\"items\":[]},不要硬凑"
+)
+
+
 SPOT_GEOS_SYSTEM = (
     "你给旅行行程里的地点标经纬度。\n"
     + _JSON_RULE + "\n"
@@ -159,6 +180,17 @@ SPOT_DESCS_SYSTEM = (
     "- 机场、码头、服务区这种纯交通节点,一句话说清它在行程里的作用就够\n"
     "- 不认识的地点就**不要**放进 items,宁可少给几条也不要编"
 )
+
+
+def build_journal_expenses_prompt(trip: dict, day: dict, text: str) -> str:
+    return (
+        f"行程:{trip.get('title') or ''} {trip.get('subtitle') or ''}"
+        f"({trip.get('start_date')} ~ {trip.get('end_date')})\n"
+        f"这一天:第 {day.get('day_no')} 天 · {day.get('date') or ''} · "
+        f"{day.get('route') or ''}\n"
+        f"手记没写日期时就用:{day.get('date') or ''}\n\n"
+        "手记原文:\n" + (text or "")[:4000]
+    )
 
 
 def build_spot_geos_prompt(trip: dict, day: dict, names: list[str]) -> str:
@@ -219,9 +251,10 @@ _BLOCK_SPECS = {
         "  实在不知道就 lat/lng 都给 null,**不要猜一个大概的城市中心糊弄过去**\n"
         "- 有当天路线和行程信息时据此消歧(比如同名的城市选路线上的那个)",
     ),
-    # 批量定位不走 _BLOCK_SPECS 的提示词(它有自己的 SPOT_GEOS_SYSTEM),
-    # 放在这里只是为了让它成为一个合法的 block kind
+    # 这两个不走 _BLOCK_SPECS 的提示词(各有各的 SYSTEM),放在这里只是
+    # 为了让它们成为合法的 block kind
     "spot_geos": ("(见 SPOT_GEOS_SYSTEM)", "批量给地点标经纬度。"),
+    "journal_expenses": ("(见 JOURNAL_EXPENSES_SYSTEM)", "从手记里找出记账候选。"),
     "packing": (
         '{"items":[{"grp":"分组","label":"物品","hint":"一句说明或 null"}]}',
         "按这趟行程的目的地、季节和活动,列一份打包清单,12~24 条,按分组归类。",

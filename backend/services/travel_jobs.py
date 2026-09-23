@@ -84,6 +84,14 @@ def run_block(ctx):
             blk["day"] = dict(drow)
     if ctx.payload.get("spot"):
         blk["spot"] = ctx.payload["spot"]
+    if ctx.payload.get("kind") == "journal_expenses":
+        # 手记原文从库里取,不让前端传:前端传什么就抽什么的话,等于多开了
+        # 一个"往 LLM 里塞任意文本"的口子
+        drow = get_db().execute(
+            "SELECT journal FROM trip_days WHERE trip_id = ? AND day_no = ?",
+            (ctx.trip_id, day_no),
+        ).fetchone()
+        blk["text"] = (drow["journal"] if drow else "") or ""
     if ctx.payload.get("spots"):
         blk["spots"] = ctx.payload["spots"]
         n = len(ctx.payload["spots"])
@@ -103,8 +111,56 @@ def run_block(ctx):
         _fail(ctx, steps, steps[0], e)
         return None
 
+    if ctx.payload.get("kind") == "journal_expenses":
+        result = _enrich_expenses(ctx, result)
+
     steps[0].update(status="done")
     ctx.set_steps(steps)
+    return result
+
+
+def _enrich_expenses(ctx, result: dict) -> dict:
+    """给记账候选补两样只有库里才知道的事。
+
+    1. 重复提醒:同一笔很可能在聊天里已经记过一次了。同一天、金额一样就标出来
+       ——只提醒不拦截,毕竟一天吃两顿一样贵的饭完全正常。
+    2. 汇率:账本只存一个数字,没有币种这一列。所以非人民币的金额必须由用户
+       确认折算后再入账,这里只把**今天的**汇率带过去当默认值。
+       不是当天的历史汇率——刚回来的行程差不了多少,差很多的话用户自己改。
+    """
+    items = result.get("items") or []
+    if not items:
+        return result
+
+    db = get_db()
+    dates = sorted({it["date"] for it in items if it.get("date")})
+    seen: set[tuple] = set()
+    if dates:
+        marks = ",".join("?" * len(dates))
+        # 收入也要查:退税、退款很可能已经在聊天里记过一次了
+        for table, kind in (("records", "expense"), ("income", "income")):
+            rows = db.execute(
+                f"SELECT date, amount FROM {table} WHERE user_id = ? AND deleted_at IS NULL "
+                f"AND date IN ({marks})",
+                [ctx.user_id, *dates],
+            ).fetchall()
+            seen |= {(kind, r["date"], round(float(r["amount"]), 2)) for r in rows}
+
+    from services.quotes import get_fx_to_cny
+    rates: dict[str, float] = {}
+    for it in items:
+        cur = it.get("currency") or ""
+        if cur and cur != "CNY":
+            if cur not in rates:
+                try:
+                    rates[cur] = round(float(get_fx_to_cny(cur)), 4)
+                except Exception:  # noqa: BLE001  汇率取不到不该让整件事失败
+                    rates[cur] = 0
+            it["fx"] = rates[cur]
+        # 查重要拿**折算后**的金额去比:账本里存的是人民币,
+        # 用 165 克朗去比 112.2 元永远比不上,查重就等于没有
+        amt = round(float(it.get("amount") or 0) * (it.get("fx") or 1), 2)
+        it["dup"] = 1 if (it.get("kind"), it.get("date"), amt) in seen else 0
     return result
 
 

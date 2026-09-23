@@ -43,8 +43,10 @@ def add_record(user_id: int, params: dict[str, Any]) -> str:
 
     # 这一天正好在某趟行程里就自动归过去——旅行当中记的账十有八九就是这趟的。
     # 只有恰好一趟覆盖时才归(见 auto_trip_for),猜错比不猜糟;用户随时能改。
+    # 调用方明确指定了就听它的(比如从手记里逐条确认后入账),
+    # 那种场景下这笔账属于哪趟是用户当面认过的,比按日期猜准
     from services.trip_spending import auto_trip_for
-    trip_id = auto_trip_for(user_id, date)
+    trip_id = params.get("trip_id") or auto_trip_for(user_id, date)
 
     db.execute(
         "INSERT INTO records (user_id, category, amount, note, date, anomaly_score, "

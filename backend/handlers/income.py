@@ -41,11 +41,14 @@ def add_income(user_id: int, params: dict[str, Any]) -> str:
 
     # 和支出一样:日期落在某趟行程里就自动归过去(退税、退款是旅行里
     # 真实存在的回流,只算支出会把这趟成本算高)
+    # 调用方明确指定了就听它的(比如从手记里逐条确认后入账),
+    # 那种场景下这笔账属于哪趟是用户当面认过的,比按日期猜准
     from services.trip_spending import auto_trip_for
     db.execute(
         "INSERT INTO income (user_id, category, amount, note, date, trip_id) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, category, amount, note, date, auto_trip_for(user_id, date))
+        (user_id, category, amount, note, date,
+         params.get("trip_id") or auto_trip_for(user_id, date))
     )
     db.commit()
     invalidate_user(user_id)
