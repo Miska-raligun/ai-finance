@@ -38,7 +38,7 @@ def store_photo(user_id: int, trip_id: int, image_bytes: bytes, mime: str) -> di
     os.makedirs(_UPLOAD_BASE, exist_ok=True)
     sha = hashlib.sha256(image_bytes).hexdigest()
     rel_path = f"uploads/trips/{sha}.{_EXT_BY_MIME[mime]}"
-    abs_path = os.path.join(os.path.dirname(__file__), "..", rel_path)
+    abs_path = absolute_path(rel_path)
     if not os.path.exists(abs_path):
         with open(abs_path, "wb") as f:
             f.write(image_bytes)
@@ -70,7 +70,9 @@ def find_photo(trip_id: int, sha: str):
 
 
 def absolute_path(rel_path: str) -> str:
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", rel_path))
+    # 库里记的是 uploads/trips/<文件名>,实际目录一律以 _UPLOAD_BASE 为准——
+    # 写入和读取都走这里,目录改了(比如测试里指到临时目录)两边才对得上
+    return os.path.normpath(os.path.join(_UPLOAD_BASE, os.path.basename(rel_path)))
 
 
 def gc_trip_photos(trip_id: int) -> int:
