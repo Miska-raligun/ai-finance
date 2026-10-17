@@ -2,7 +2,7 @@ import os
 import logging
 import requests
 from datetime import datetime
-from constants import DEFAULT_LLM_URL, DEFAULT_LLM_MODEL, DEFAULT_PERSONA
+from constants import DEFAULT_LLM_URL, DEFAULT_LLM_MODEL, DEFAULT_PERSONA, LLM_TIMEOUT_LONG
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +377,11 @@ def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None
         {"role": "system", "content": "你是一个善于总结和分析的财务顾问。"},
         {"role": "user", "content": summary_prompt},
     ]
-    result = _call_llm(messages, llm=llm, timeout=30, endpoint="chat.summary")
+    # 聊天页「本月分析 / 推荐预算 / 预算余额 / 存钱建议」都走这里:先调工具查账,
+    # 再让模型写分析。本月分析要求"不限字数的详细分析",原来写死 30s,
+    # 慢一点的模型(尤其带推理的)还没写完就被判超时。和其它长生成一样用 LLM_TIMEOUT_LONG。
+    # 注意这是同步请求:Nginx 的 proxy_read_timeout、Cloudflare 的 100s 上限也会卡住它。
+    result = _call_llm(messages, llm=llm, timeout=LLM_TIMEOUT_LONG, endpoint="chat.summary")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"]
     if result and "error" in result:
