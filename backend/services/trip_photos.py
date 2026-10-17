@@ -25,9 +25,12 @@ _EXT_BY_MIME = {
 
 # 前端上传前会先缩到 1280px / JPEG,这里只是兜底,防止有人直接打接口
 MAX_BYTES = 4 * 1024 * 1024
+# 缩略图(480px JPEG)正常几十 KB
+MAX_THUMB_BYTES = 512 * 1024
 
 
-def store_photo(user_id: int, trip_id: int, image_bytes: bytes, mime: str) -> dict:
+def store_photo(user_id: int, trip_id: int, image_bytes: bytes, mime: str,
+                thumb: bytes | None = None) -> dict:
     if mime not in _EXT_BY_MIME:
         raise ValueError("只支持 JPEG / PNG / WebP")
     if not image_bytes:
@@ -42,6 +45,12 @@ def store_photo(user_id: int, trip_id: int, image_bytes: bytes, mime: str) -> di
     if not os.path.exists(abs_path):
         with open(abs_path, "wb") as f:
             f.write(image_bytes)
+    # 缩略图跟原图共用 sha,只认 JPEG;不合格就当没传,取图时回落到原图
+    if thumb and len(thumb) <= MAX_THUMB_BYTES and thumb[:3] == b"\xff\xd8\xff":
+        tp = thumb_path(rel_path)
+        if not os.path.exists(tp):
+            with open(tp, "wb") as f:
+                f.write(thumb)
 
     db = get_db()
     row = db.execute(
@@ -73,6 +82,12 @@ def absolute_path(rel_path: str) -> str:
     # 库里记的是 uploads/trips/<文件名>,实际目录一律以 _UPLOAD_BASE 为准——
     # 写入和读取都走这里,目录改了(比如测试里指到临时目录)两边才对得上
     return os.path.normpath(os.path.join(_UPLOAD_BASE, os.path.basename(rel_path)))
+
+
+def thumb_path(rel_path: str) -> str:
+    """原图旁边的缩略图:<sha>.jpg → <sha>_t.jpg(缩略图一律是 JPEG)。"""
+    stem = os.path.splitext(os.path.basename(rel_path))[0]
+    return os.path.normpath(os.path.join(_UPLOAD_BASE, f"{stem}_t.jpg"))
 
 
 def gc_trip_photos(trip_id: int) -> int:
@@ -115,10 +130,11 @@ def gc_trip_photos(trip_id: int) -> int:
             "SELECT COUNT(*) FROM trip_photos WHERE sha256 = ?", (r["sha256"],),
         ).fetchone()[0]
         if others == 0:
-            try:
-                os.remove(absolute_path(r["path"]))
-            except OSError:
-                pass
+            for p in (absolute_path(r["path"]), thumb_path(r["path"])):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
     if removed:
         db.commit()
     return removed

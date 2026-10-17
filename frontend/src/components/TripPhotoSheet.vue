@@ -57,7 +57,7 @@
                 :disabled="busy !== null"
                 @click="askSource(si)"
               >
-                <span v-if="busy === si" class="phs-add-t">上传中…</span>
+                <span v-if="busy === si" class="phs-add-t">上传中{{ progress ? ` ${progress}` : '…' }}</span>
                 <template v-else>
                   <span class="phs-add-i">＋</span>
                   <span class="phs-add-t">加照片</span>
@@ -99,7 +99,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import TripPhotoViewer from '@/components/TripPhotoViewer.vue'
-import { photoList, photoUrl, uploadPhoto } from '@/utils/tripPhotos'
+import { photoList, photoUrl, uploadPhotos, uploadErrorText } from '@/utils/tripPhotos'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -111,6 +111,7 @@ const emit = defineEmits(['close', 'changed'])
 
 const editing = ref(false)
 const busy = ref(null)
+const progress = ref('')   // 多张时显示 "2/5"
 const err = ref('')
 const viewIndex = ref(null)
 const viewStop = ref(0)
@@ -127,7 +128,7 @@ const stops = computed(() => props.day?.detail?.stops || [])
 const total = computed(() => stops.value.reduce((n, s) => n + photoList(s).length, 0))
 
 function photosOf(si) { return photoList(stops.value[si]) }
-function url(sha) { return photoUrl({ tripId: props.tripId }, sha) }
+function url(sha) { return photoUrl({ tripId: props.tripId }, sha, { thumb: true }) }
 
 const viewPhotos = computed(() => photosOf(viewStop.value))
 function open3(si, i) { viewStop.value = si; viewIndex.value = i }
@@ -178,15 +179,21 @@ async function onFiles(e) {
   err.value = ''
   const next = [...photosOf(si)]
   try {
-    for (const f of files) {
-      const sha = await uploadPhoto(props.tripId, f)
-      if (!next.includes(sha)) next.push(sha)   // 内容寻址,同一张图天然去重
+    const { shas, error } = await uploadPhotos(props.tripId, files, (d, n) => {
+      progress.value = n > 1 ? `${d}/${n}` : ''
+    })
+    for (const sha of shas) if (!next.includes(sha)) next.push(sha)   // 内容寻址,同一张图天然去重
+    // 传成功的先存上,别因为其中一张失败把整批都丢了
+    if (shas.length) await persist(si, next)
+    if (error) {
+      const failed = files.length - shas.length
+      err.value = (files.length > 1 ? `${failed} 张没传上:` : '') + uploadErrorText(error)
     }
-    await persist(si, next)
   } catch (e2) {
-    err.value = e2?.response?.data?.error || '上传失败'
+    err.value = uploadErrorText(e2)
   } finally {
     busy.value = null
+    progress.value = ''
   }
 }
 

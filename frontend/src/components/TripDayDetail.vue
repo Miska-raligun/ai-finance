@@ -246,7 +246,7 @@ function openPhotos() {
 const allShas = computed(() => stops.value.flatMap(st => photoList(st)))
 const photoCount = computed(() => allShas.value.length)
 const coverShas = computed(() => allShas.value.slice(0, 3))
-function coverUrl(sha) { return photoUrl({ tripId: props.tripId }, sha) }
+function coverUrl(sha) { return photoUrl({ tripId: props.tripId }, sha, { thumb: true }) }
 const tipGroups = computed(() => [
   { key: 'todo', label: '贴士', ai: 'day_tips', items: detail.value.todo || [] },
   { key: 'cam', label: '拍摄建议', ai: 'day_cam', items: detail.value.cam || [] },

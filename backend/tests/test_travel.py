@@ -275,6 +275,74 @@ def test_photo_rejects_garbage(app, auth_client, tmp_path, monkeypatch):
                             ).status_code == 400
 
 
+def _jpeg(tag: bytes) -> bytes:
+    """够过 JPEG 魔数校验的假图;tag 不同 → sha 不同。"""
+    return b"\xff\xd8\xff\xe0" + tag + b"\xff\xd9"
+
+
+def _multipart(image: bytes, thumb: bytes | None = None):
+    import io
+    data = {"image": (io.BytesIO(image), "photo.jpg", "image/jpeg")}
+    if thumb is not None:
+        data["thumb"] = (io.BytesIO(thumb), "thumb.jpg", "image/jpeg")
+    return data
+
+
+def test_photo_multipart_with_thumb(app, auth_client, tmp_path, monkeypatch):
+    """新前端走 multipart 传二进制 + 缩略图;?s=t 取缩略图,并且允许浏览器长缓存。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    full, thumb = _jpeg(b"full" * 100), _jpeg(b"thumb")
+
+    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(full, thumb),
+                         content_type="multipart/form-data")
+    assert r.status_code == 201
+    sha = r.get_json()["sha256"]
+
+    got = auth_client.get(f"/api/trips/{tid}/photos/{sha}")
+    assert got.data == full and got.mimetype == "image/jpeg"
+    assert "immutable" in got.headers["Cache-Control"]
+    assert "private" in got.headers["Cache-Control"]
+
+    small = auth_client.get(f"/api/trips/{tid}/photos/{sha}?s=t")
+    assert small.data == thumb
+
+    # 分享页也能拿缩略图,但缓存时间短一些(分享能撤销)
+    token = _share_token(auth_client, tid)
+    pub = app.test_client().get(f"/api/public/trips/{token}/photos/{sha}?s=t")
+    assert pub.data == thumb
+    assert "max-age=86400" in pub.headers["Cache-Control"]
+
+
+def test_photo_thumb_falls_back_to_full(app, auth_client, tmp_path, monkeypatch):
+    """老照片(以及缩略图不合格的)没有缩略图,?s=t 回落到原图,而不是 404。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
+    got = auth_client.get(f"/api/trips/{tid}/photos/{sha}?s=t")
+    assert got.status_code == 200 and got.mimetype == "image/png"
+
+    # 缩略图不是 JPEG → 当没传
+    full = _jpeg(b"x")
+    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(full, b"not a jpeg"),
+                         content_type="multipart/form-data")
+    sha2 = r.get_json()["sha256"]
+    assert auth_client.get(f"/api/trips/{tid}/photos/{sha2}?s=t").data == full
+
+
+def test_photo_gc_removes_thumb(app, auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    tid = _mk_trip(auth_client).get_json()["id"]
+    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(_jpeg(b"a"), _jpeg(b"t")),
+                         content_type="multipart/form-data")
+    sha = r.get_json()["sha256"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [f"{sha}.jpg", f"{sha}_t.jpg"]
+
+    # 没有任何停留点引用它 → 改一次 detail 触发收尾,原图和缩略图一起删
+    auth_client.patch(f"/api/trips/{tid}/days/1", json={"detail": {"stops": [{"t": "x"}]}})
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_photo_public_only_via_valid_share(app, auth_client, tmp_path, monkeypatch):
     """分享页要能匿名取图，但只认这趟行程的 token + 这趟行程名下的 sha。"""
     monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))

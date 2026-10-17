@@ -318,32 +318,57 @@ def upload_trip_photo(trip_id: int):
 
     if not _own_trip(trip_id):
         return jsonify({"error": "行程不存在"}), 404
-    data = request.get_json() or {}
-    blob, mime = _decode_data_url(data.get("image"))
+    thumb = None
+    if request.files:
+        # 现在的前端:multipart 直接传二进制,比 base64 小三分之一,外加一张缩略图
+        f = request.files.get("image")
+        blob, mime = (f.read(), f.mimetype) if f else (None, None)
+        t = request.files.get("thumb")
+        thumb = t.read() if t else None
+    else:
+        # 旧的 JSON + data URL,留着兼容还没刷新的页面
+        data = request.get_json(silent=True) or {}
+        blob, mime = _decode_data_url(data.get("image"))
     if not blob:
         return jsonify({"error": "图片数据不合法"}), 400
     try:
-        out = store_photo(g.user_id, trip_id, blob, mime)
+        out = store_photo(g.user_id, trip_id, blob, mime, thumb=thumb)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(out), 201
 
 
+def _send_photo(info: dict, max_age: int):
+    """?s=t 要缩略图;没有缩略图的老照片回落到原图。
+    文件按 sha 寻址、内容永远不变,所以可以放心让浏览器长缓存。"""
+    from flask import send_file
+    from services.trip_photos import absolute_path, thumb_path
+
+    path = absolute_path(info["path"])
+    mime = info["mime"]
+    if request.args.get("s") == "t":
+        tp = thumb_path(info["path"])
+        if os.path.isfile(tp):
+            path, mime = tp, "image/jpeg"
+    if not os.path.isfile(path):
+        return jsonify({"error": "文件已丢失"}), 410
+    resp = send_file(path, mimetype=mime, max_age=max_age)
+    # private:不让中间的 CDN / 代理缓存,只留在看图的人自己的浏览器里
+    resp.headers["Cache-Control"] = f"private, max-age={max_age}, immutable"
+    return resp
+
+
 @travel_bp.route("/api/trips/<int:trip_id>/photos/<sha>", methods=["GET"])
 @login_required
 def get_trip_photo(trip_id: int, sha: str):
-    from flask import send_file
-    from services.trip_photos import find_photo, absolute_path
+    from services.trip_photos import find_photo
 
     if not _own_trip(trip_id):
         return jsonify({"error": "行程不存在"}), 404
     info = find_photo(trip_id, sha)
     if not info:
         return jsonify({"error": "照片不存在"}), 404
-    path = absolute_path(info["path"])
-    if not os.path.isfile(path):
-        return jsonify({"error": "文件已丢失"}), 410
-    return send_file(path, mimetype=info["mime"])
+    return _send_photo(info, max_age=365 * 86400)
 
 
 # ---------- 行程花费:和账本打通 ----------
@@ -598,8 +623,7 @@ def public_trip(token: str):
 def public_trip_photo(token: str, sha: str):
     """分享页取景点照片。**无需登录**——能不能看完全由 token 决定,
     并且只认这趟行程名下的 sha,拿别的行程的 sha 来也取不到。"""
-    from flask import send_file
-    from services.trip_photos import find_photo, absolute_path
+    from services.trip_photos import find_photo
 
     trip_id = _shared_trip_id(token)
     if not trip_id:
@@ -607,10 +631,8 @@ def public_trip_photo(token: str, sha: str):
     info = find_photo(trip_id, sha)
     if not info:
         return jsonify({"error": "照片不存在"}), 404
-    path = absolute_path(info["path"])
-    if not os.path.isfile(path):
-        return jsonify({"error": "文件已丢失"}), 410
-    return send_file(path, mimetype=info["mime"])
+    # 分享可以撤销,缓存别太久:撤销后最多一天,对方浏览器里的副本也就过期了
+    return _send_photo(info, max_age=86400)
 
 
 # ---------- 速查信息 ----------

@@ -26,7 +26,7 @@
 
       <!-- 拍照上传位:手机上 capture 会直接唤起相机 -->
       <button v-if="canEdit" type="button" class="ps-add" :class="{ busy }" :disabled="busy" @click="picking = true">
-        <span v-if="busy" class="ps-add-t">上传中…</span>
+        <span v-if="busy" class="ps-add-t">上传中{{ progress ? ` ${progress}` : '…' }}</span>
         <template v-else>
           <span class="ps-add-i">＋</span>
           <span class="ps-add-t">加照片</span>
@@ -65,7 +65,7 @@
 <script setup>
 import { ref } from 'vue'
 import TripPhotoViewer from '@/components/TripPhotoViewer.vue'
-import { photoUrl, uploadPhoto } from '@/utils/tripPhotos'
+import { photoUrl, uploadPhotos, uploadErrorText } from '@/utils/tripPhotos'
 
 const props = defineProps({
   photos: { type: Array, default: () => [] },
@@ -77,6 +77,7 @@ const props = defineProps({
 const emit = defineEmits(['change'])
 
 const busy = ref(false)
+const progress = ref('')   // 多张时显示 "2/5"
 const picking = ref(false)
 const camRef = ref(null)
 const libRef = ref(null)
@@ -88,7 +89,7 @@ const err = ref('')
 const viewing = ref(null)
 
 function url(sha) {
-  return photoUrl({ tripId: props.tripId, shareToken: props.shareToken }, sha)
+  return photoUrl({ tripId: props.tripId, shareToken: props.shareToken }, sha, { thumb: true })
 }
 
 async function onPick(e) {
@@ -100,15 +101,21 @@ async function onPick(e) {
   err.value = ''
   const next = [...props.photos]
   try {
-    for (const f of files) {
-      const sha = await uploadPhoto(props.tripId, f)
-      if (!next.includes(sha)) next.push(sha)   // 同一张图去重,内容寻址天然支持
+    const { shas, error } = await uploadPhotos(props.tripId, files, (d, n) => {
+      progress.value = n > 1 ? `${d}/${n}` : ''
+    })
+    for (const sha of shas) if (!next.includes(sha)) next.push(sha)   // 同一张图去重,内容寻址天然支持
+    // 传成功的先交出去存上,别因为其中一张失败把整批都丢了
+    if (shas.length) emit('change', next)
+    if (error) {
+      const failed = files.length - shas.length
+      err.value = (files.length > 1 ? `${failed} 张没传上:` : '') + uploadErrorText(error)
     }
-    emit('change', next)
   } catch (e2) {
-    err.value = e2?.response?.data?.error || '上传失败'
+    err.value = uploadErrorText(e2)
   } finally {
     busy.value = false
+    progress.value = ''
   }
 }
 
