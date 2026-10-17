@@ -89,7 +89,7 @@ const err = ref('')
 const viewing = ref(null)
 
 function url(sha) {
-  return photoUrl({ tripId: props.tripId, shareToken: props.shareToken }, sha, { thumb: true })
+  return photoUrl({ tripId: props.tripId, shareToken: props.shareToken }, sha)
 }
 
 async function onPick(e) {

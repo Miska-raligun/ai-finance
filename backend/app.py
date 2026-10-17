@@ -141,6 +141,12 @@ with app.app_context():
     except Exception:  # noqa: BLE001
         _logger.exception("启动时清理孤儿 pending/running 报告失败（不阻断启动）")
     try:
+        # 旧版本存下的大图就地缩成显示尺寸;已经合格的只读个文件头,很快
+        from services.trip_photos import shrink_existing_photos
+        shrink_existing_photos()
+    except Exception:  # noqa: BLE001
+        _logger.exception("启动时缩小旧照片失败（不阻断启动）")
+    try:
         from services.ai_jobs import cleanup_orphans as _cleanup_ai_jobs
         _cleanup_ai_jobs()
     except Exception:  # noqa: BLE001

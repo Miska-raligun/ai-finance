@@ -128,7 +128,7 @@ const stops = computed(() => props.day?.detail?.stops || [])
 const total = computed(() => stops.value.reduce((n, s) => n + photoList(s).length, 0))
 
 function photosOf(si) { return photoList(stops.value[si]) }
-function url(sha) { return photoUrl({ tripId: props.tripId }, sha, { thumb: true }) }
+function url(sha) { return photoUrl({ tripId: props.tripId }, sha) }
 
 const viewPhotos = computed(() => photosOf(viewStop.value))
 function open3(si, i) { viewStop.value = si; viewIndex.value = i }

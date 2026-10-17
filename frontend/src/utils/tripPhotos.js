@@ -5,16 +5,13 @@
  *  是两套,存死了分享出去就取不到。
  */
 
-/** @param {{tripId?: number, shareToken?: string}} ctx
- *  @param {{thumb?: boolean}} [opt] 缩略图:格子、封面这种小位置用它,
- *    76px 的格子没必要拉 1280px 的原图。旧照片没有缩略图,服务端会回落到原图。 */
-export function photoUrl(ctx, sha, opt = {}) {
+/** @param {{tripId?: number, shareToken?: string}} ctx */
+export function photoUrl(ctx, sha) {
   if (!sha) return ''
-  const q = opt.thumb ? '?s=t' : ''
   if (ctx?.shareToken) {
-    return `/api/public/trips/${encodeURIComponent(ctx.shareToken)}/photos/${sha}${q}`
+    return `/api/public/trips/${encodeURIComponent(ctx.shareToken)}/photos/${sha}`
   }
-  return ctx?.tripId ? `/api/trips/${ctx.tripId}/photos/${sha}${q}` : ''
+  return ctx?.tripId ? `/api/trips/${ctx.tripId}/photos/${sha}` : ''
 }
 
 /** 一个停留点的照片列表。photos 是数组,photo 是最早的单张字段,两者都认。 */
@@ -24,8 +21,10 @@ export function photoList(stop) {
   return stop.photo ? [stop.photo] : []
 }
 
-const FULL_MAX = 1280
-const THUMB_MAX = 480     // 够格子(76px)和地图弹窗封面(~400px 宽)在 2x 屏上用
+// 服务端只存这一份显示用的图,不留原图。和 backend/services/trip_photos.py
+// 的 DISPLAY_MAX 保持一致——超过的话服务端会再缩一次,白白多传
+const DISPLAY_MAX = 800
+const QUALITY = 0.75
 
 function scaled(src, w0, h0, max) {
   const k = Math.min(1, max / Math.max(w0, h0))
@@ -42,10 +41,10 @@ function toJpeg(canvas, quality) {
   })
 }
 
-/** 上传前在浏览器里缩到 1280px 的 JPEG,顺手出一张 480px 的缩略图。
- *  手机直出动辄 5MB,服务端单请求上限 8MB;这些图只是留念用的配图,
- *  1280 足够,传得也快——在外面用移动网络传照片这点很实在。
- *  只解码一次:缩略图从缩好的那张再缩,不再碰原图。 */
+/** 上传前在浏览器里缩成长边 800px 的 JPEG,只传这一张。
+ *  手机直出动辄 5MB;这些图只是留念用的配图,800 在手机上看足够,
+ *  一张一两百 KB 以内,在外面用移动网络也传得动。
+ *  canvas 重新编码还会顺带去掉 EXIF(里面可能有拍摄地的 GPS)。 */
 export async function shrink(file) {
   let bmp
   try {
@@ -54,19 +53,15 @@ export async function shrink(file) {
     // 典型是安卓/电脑上的 HEIC:浏览器解不开,给句人话而不是"上传失败"
     throw new Error('这张图浏览器读不了(可能是 HEIC 格式),换成 JPG 再试')
   }
-  const full = scaled(bmp, bmp.width, bmp.height, FULL_MAX)
+  const canvas = scaled(bmp, bmp.width, bmp.height, DISPLAY_MAX)
   bmp.close?.()
-  const thumb = scaled(full, full.width, full.height, THUMB_MAX)
-  const [image, thumbBlob] = await Promise.all([toJpeg(full, 0.82), toJpeg(thumb, 0.75)])
-  return { image, thumb: thumbBlob }
+  return toJpeg(canvas, QUALITY)
 }
 
 /** @returns {Promise<string>} sha256 */
 export async function uploadPhoto(tripId, file) {
-  const { image, thumb } = await shrink(file)
   const form = new FormData()
-  form.append('image', image, 'photo.jpg')
-  form.append('thumb', thumb, 'thumb.jpg')
+  form.append('image', await shrink(file), 'photo.jpg')
   const { default: api } = await import('@/api')
   const res = await api.post(`/api/trips/${tripId}/photos`, form)
   return res.data.sha256

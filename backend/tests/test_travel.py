@@ -275,72 +275,107 @@ def test_photo_rejects_garbage(app, auth_client, tmp_path, monkeypatch):
                             ).status_code == 400
 
 
-def _jpeg(tag: bytes) -> bytes:
-    """够过 JPEG 魔数校验的假图;tag 不同 → sha 不同。"""
-    return b"\xff\xd8\xff\xe0" + tag + b"\xff\xd9"
-
-
-def _multipart(image: bytes, thumb: bytes | None = None):
+def _jpeg(w: int, h: int, exif: bool = False, noise: bool = False) -> bytes:
     import io
-    data = {"image": (io.BytesIO(image), "photo.jpg", "image/jpeg")}
-    if thumb is not None:
-        data["thumb"] = (io.BytesIO(thumb), "thumb.jpg", "image/jpeg")
-    return data
+    import os as _os
+    from PIL import Image
+    if noise:   # 噪点图压不小,用来造"体积超标"的图
+        im = Image.frombytes("RGB", (w, h), _os.urandom(w * h * 3))
+    else:
+        im = Image.new("RGB", (w, h), (200, 80, 40))
+    out = io.BytesIO()
+    kw = {}
+    if exif:
+        ex = Image.Exif()
+        ex[0x010F] = "PhoneMaker"            # Make;带 EXIF 的图要被重新编码掉
+        kw["exif"] = ex.tobytes()
+    im.save(out, "JPEG", quality=90, **kw)
+    return out.getvalue()
 
 
-def test_photo_multipart_with_thumb(app, auth_client, tmp_path, monkeypatch):
-    """新前端走 multipart 传二进制 + 缩略图;?s=t 取缩略图,并且允许浏览器长缓存。"""
+def _multipart(image: bytes):
+    import io
+    return {"image": (io.BytesIO(image), "photo.jpg", "image/jpeg")}
+
+
+def _size_of(data: bytes):
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data))
+    return im.size, bool(im.info.get("exif"))
+
+
+def test_photo_multipart_upload_and_cache(app, auth_client, tmp_path, monkeypatch):
+    """multipart 传二进制;取图允许浏览器缓存(私有一年,分享页一天)。"""
     monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
     tid = _mk_trip(auth_client).get_json()["id"]
-    full, thumb = _jpeg(b"full" * 100), _jpeg(b"thumb")
+    img = _jpeg(800, 600)
 
-    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(full, thumb),
+    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(img),
                          content_type="multipart/form-data")
     assert r.status_code == 201
     sha = r.get_json()["sha256"]
 
     got = auth_client.get(f"/api/trips/{tid}/photos/{sha}")
-    assert got.data == full and got.mimetype == "image/jpeg"
-    assert "immutable" in got.headers["Cache-Control"]
+    assert got.data == img                     # 本来就合格的图原样存,不二次压缩
     assert "private" in got.headers["Cache-Control"]
+    assert "immutable" in got.headers["Cache-Control"]
 
-    small = auth_client.get(f"/api/trips/{tid}/photos/{sha}?s=t")
-    assert small.data == thumb
-
-    # 分享页也能拿缩略图,但缓存时间短一些(分享能撤销)
     token = _share_token(auth_client, tid)
-    pub = app.test_client().get(f"/api/public/trips/{token}/photos/{sha}?s=t")
-    assert pub.data == thumb
+    pub = app.test_client().get(f"/api/public/trips/{token}/photos/{sha}")
+    assert pub.data == img
     assert "max-age=86400" in pub.headers["Cache-Control"]
 
 
-def test_photo_thumb_falls_back_to_full(app, auth_client, tmp_path, monkeypatch):
-    """老照片(以及缩略图不合格的)没有缩略图,?s=t 回落到原图,而不是 404。"""
+def test_photo_server_keeps_display_size_only(app, auth_client, tmp_path, monkeypatch):
+    """不留原图:超尺寸、超体积、带 EXIF 的,服务端一律缩成长边 800 的 JPEG。"""
+    monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    from services.trip_photos import DISPLAY_MAX
+    tid = _mk_trip(auth_client).get_json()["id"]
+
+    for img in (_jpeg(4000, 3000), _jpeg(600, 400, exif=True), _jpeg(790, 790, noise=True)):
+        r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(img),
+                             content_type="multipart/form-data")
+        assert r.status_code == 201
+        got = auth_client.get(f"/api/trips/{tid}/photos/{r.get_json()['sha256']}")
+        (w, h), has_exif = _size_of(got.data)
+        assert max(w, h) <= DISPLAY_MAX and not has_exif
+        assert got.data != img and len(got.data) < len(img)   # 都被重新编码过,而且变小了
+    # 磁盘上只有一份图,没有另存的原图或缩略图
+    assert len(list(tmp_path.iterdir())) == 3
+
+
+def test_photo_rejects_unparseable_image(app, auth_client, tmp_path, monkeypatch):
     monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
     tid = _mk_trip(auth_client).get_json()["id"]
-    sha = auth_client.post(f"/api/trips/{tid}/photos", json={"image": _PNG}).get_json()["sha256"]
-    got = auth_client.get(f"/api/trips/{tid}/photos/{sha}?s=t")
-    assert got.status_code == 200 and got.mimetype == "image/png"
-
-    # 缩略图不是 JPEG → 当没传
-    full = _jpeg(b"x")
-    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(full, b"not a jpeg"),
+    junk = b"\xff\xd8\xff" + b"x" * (400 * 1024)   # 魔数对、内容是垃圾,体积超标逼它去解码
+    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(junk),
                          content_type="multipart/form-data")
-    sha2 = r.get_json()["sha256"]
-    assert auth_client.get(f"/api/trips/{tid}/photos/{sha2}?s=t").data == full
+    assert r.status_code == 400
 
 
-def test_photo_gc_removes_thumb(app, auth_client, tmp_path, monkeypatch):
+def test_shrink_existing_photos(app, auth_client, tmp_path, monkeypatch):
+    """旧版本存下的大图就地缩小、删掉旁边的缩略图;sha 不变,链接照样能用。"""
     monkeypatch.setattr("services.trip_photos._UPLOAD_BASE", str(tmp_path))
+    from services import trip_photos
     tid = _mk_trip(auth_client).get_json()["id"]
-    r = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(_jpeg(b"a"), _jpeg(b"t")),
-                         content_type="multipart/form-data")
-    sha = r.get_json()["sha256"]
-    assert sorted(p.name for p in tmp_path.iterdir()) == [f"{sha}.jpg", f"{sha}_t.jpg"]
+    small = _jpeg(800, 600)
+    sha = auth_client.post(f"/api/trips/{tid}/photos", data=_multipart(small),
+                           content_type="multipart/form-data").get_json()["sha256"]
 
-    # 没有任何停留点引用它 → 改一次 detail 触发收尾,原图和缩略图一起删
-    auth_client.patch(f"/api/trips/{tid}/days/1", json={"detail": {"stops": [{"t": "x"}]}})
-    assert list(tmp_path.iterdir()) == []
+    # 模拟上一版:文件被换成 1280 的大图,旁边还有一张 _t 缩略图
+    big = _jpeg(1280, 960, noise=True)
+    (tmp_path / f"{sha}.jpg").write_bytes(big)
+    (tmp_path / f"{sha}_t.jpg").write_bytes(small)
+
+    with app.app_context():
+        assert trip_photos.shrink_existing_photos() == 1
+        assert trip_photos.shrink_existing_photos() == 0      # 幂等,第二次什么都不做
+    assert sorted(p.name for p in tmp_path.iterdir()) == [f"{sha}.jpg"]
+
+    got = auth_client.get(f"/api/trips/{tid}/photos/{sha}")
+    assert got.status_code == 200 and len(got.data) < len(big)
+    assert max(_size_of(got.data)[0]) <= trip_photos.DISPLAY_MAX
 
 
 def test_photo_public_only_via_valid_share(app, auth_client, tmp_path, monkeypatch):

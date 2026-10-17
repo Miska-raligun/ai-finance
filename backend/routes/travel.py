@@ -318,13 +318,11 @@ def upload_trip_photo(trip_id: int):
 
     if not _own_trip(trip_id):
         return jsonify({"error": "行程不存在"}), 404
-    thumb = None
     if request.files:
-        # 现在的前端:multipart 直接传二进制,比 base64 小三分之一,外加一张缩略图
+        # 现在的前端:multipart 直接传二进制,比 base64 小三分之一
+        # (上一版还会多传一个 thumb 字段,不再需要,忽略即可)
         f = request.files.get("image")
         blob, mime = (f.read(), f.mimetype) if f else (None, None)
-        t = request.files.get("thumb")
-        thumb = t.read() if t else None
     else:
         # 旧的 JSON + data URL,留着兼容还没刷新的页面
         data = request.get_json(silent=True) or {}
@@ -332,27 +330,22 @@ def upload_trip_photo(trip_id: int):
     if not blob:
         return jsonify({"error": "图片数据不合法"}), 400
     try:
-        out = store_photo(g.user_id, trip_id, blob, mime, thumb=thumb)
+        out = store_photo(g.user_id, trip_id, blob, mime)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(out), 201
 
 
 def _send_photo(info: dict, max_age: int):
-    """?s=t 要缩略图;没有缩略图的老照片回落到原图。
-    文件按 sha 寻址、内容永远不变,所以可以放心让浏览器长缓存。"""
+    """文件按 sha 寻址,可以让浏览器长缓存。
+    (服务端只有一份显示尺寸的图,上一版前端带的 ?s=t 直接忽略。)"""
     from flask import send_file
-    from services.trip_photos import absolute_path, thumb_path
+    from services.trip_photos import absolute_path
 
     path = absolute_path(info["path"])
-    mime = info["mime"]
-    if request.args.get("s") == "t":
-        tp = thumb_path(info["path"])
-        if os.path.isfile(tp):
-            path, mime = tp, "image/jpeg"
     if not os.path.isfile(path):
         return jsonify({"error": "文件已丢失"}), 410
-    resp = send_file(path, mimetype=mime, max_age=max_age)
+    resp = send_file(path, mimetype=info["mime"], max_age=max_age)
     # private:不让中间的 CDN / 代理缓存,只留在看图的人自己的浏览器里
     resp.headers["Cache-Control"] = f"private, max-age={max_age}, immutable"
     return resp
