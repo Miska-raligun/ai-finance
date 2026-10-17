@@ -262,14 +262,30 @@ def _call_llm(
     return data
 
 
+class _Thinking:
+    """stream_llm 产出的"模型还在思考"标记(不是文本)。"""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "THINKING"
+
+
+THINKING = _Thinking()
+_THINKING_EVERY = 2.0   # 推理阶段每隔这么多秒报一次信,不必每个 token 都报
+
+
 def stream_llm(messages: list[dict], llm: dict | None = None, *,
                temperature: float = 0.5, timeout: int = 60,
-               endpoint: str = "unknown"):
+               endpoint: str = "unknown", with_thinking: bool = False):
     """流式生成器:逐段 yield 文本增量。
 
     provider 支持 call_stream 时走真流式;否则退回一次性 _call_llm 后整段 yield
     (Anthropic/Gemini 目前走这条降级路径,体验上仍是"一次到位"但不报错)。
     配额预占 / usage 记录与非流式一致。异常以 yield 一段错误文案收尾,不抛。
+
+    with_thinking=True 时,推理模型出正文之前的"思考"阶段会隔几秒 yield 一次
+    THINKING(不是 str,调用方自己判断),用来告诉用户在想、也让连接保持有数据。
+    timeout 对流式是"两次收到数据之间最多等多久",不是总时长。
     """
     from services.llm_providers import resolve as _resolve_provider
     import time as _time
@@ -295,6 +311,7 @@ def stream_llm(messages: list[dict], llm: dict | None = None, *,
     usage: dict = {}
     err: str | None = None
     got_any = False
+    last_tick = 0.0
 
     def _finish(status):
         elapsed = int((_time.perf_counter() - t0) * 1000)
@@ -314,6 +331,11 @@ def stream_llm(messages: list[dict], llm: dict | None = None, *,
                 if "delta" in ev:
                     got_any = True
                     yield ev["delta"]
+                elif "reasoning" in ev:
+                    now = _time.perf_counter()
+                    if with_thinking and now - last_tick >= _THINKING_EVERY:
+                        last_tick = now
+                        yield THINKING
                 elif "usage" in ev:
                     usage = ev["usage"]
                 elif "error" in ev:
@@ -359,8 +381,7 @@ def call_llm_intent(message: str, llm: dict | None = None, finance_tools: list |
     )
 
 
-def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None) -> str:
-    """操作结果总结"""
+def _summary_messages(user_msg: str, handler_result: str, llm: dict | None) -> list[dict]:
     llm = llm or {}
     persona = llm.get("persona") or DEFAULT_PERSONA
     summary_prompt = (
@@ -373,10 +394,15 @@ def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None
         "不要做()括起来的额外回复。\n"
         "如果用户此次操作为本月消费分析请求，给出消费行为详细分析及评分，此时不限制回答字数，必须分别分析当月消费和总体消费，严禁混淆分析！"
     )
-    messages = [
+    return [
         {"role": "system", "content": "你是一个善于总结和分析的财务顾问。"},
         {"role": "user", "content": summary_prompt},
     ]
+
+
+def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None) -> str:
+    """操作结果总结"""
+    messages = _summary_messages(user_msg, handler_result, llm)
     # 聊天页「本月分析 / 推荐预算 / 预算余额 / 存钱建议」都走这里:先调工具查账,
     # 再让模型写分析。本月分析要求"不限字数的详细分析",原来写死 30s,
     # 慢一点的模型(尤其带推理的)还没写完就被判超时。和其它长生成一样用 LLM_TIMEOUT_LONG。
@@ -390,9 +416,15 @@ def call_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None
     return "⚠️ 暂时无法获取 AI 总结，请稍后重试"
 
 
-def call_llm_chat(history: list[dict], llm: dict | None = None,
-                  extra_system: str | None = None) -> str:
-    """当用户没有执行记账相关操作时，与其闲聊。"""
+def stream_llm_summary(user_msg: str, handler_result: str, llm: dict | None = None):
+    """call_llm_summary 的流式版:同一套提示词,逐段 yield(含 THINKING 标记)。"""
+    yield from stream_llm(_summary_messages(user_msg, handler_result, llm), llm=llm,
+                          temperature=0.3, timeout=LLM_TIMEOUT_LONG,
+                          endpoint="chat.summary", with_thinking=True)
+
+
+def _chat_messages(history: list[dict], llm: dict | None,
+                   extra_system: str | None) -> list[dict]:
     llm = llm or {}
     persona = llm.get("persona") or DEFAULT_PERSONA
     prompt = (
@@ -403,10 +435,24 @@ def call_llm_chat(history: list[dict], llm: dict | None = None,
     if extra_system:
         messages.append({"role": "system", "content": extra_system})
     messages += history[-10:]
+    return messages
+
+
+def call_llm_chat(history: list[dict], llm: dict | None = None,
+                  extra_system: str | None = None) -> str:
+    """当用户没有执行记账相关操作时，与其闲聊。"""
+    messages = _chat_messages(history, llm, extra_system)
     result = _call_llm(messages, llm=llm, timeout=10, endpoint="chat.freeform")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"]
     return "⚠️ 暂时无法回复"
+
+
+def stream_llm_chat(history: list[dict], llm: dict | None = None,
+                    extra_system: str | None = None):
+    """call_llm_chat 的流式版。闲聊回复本来就短,不报 THINKING。"""
+    yield from stream_llm(_chat_messages(history, llm, extra_system), llm=llm,
+                          temperature=0.3, timeout=30, endpoint="chat.freeform")
 
 
 def call_llm_budget_advice(prompt: str, llm: dict | None = None) -> str:
@@ -471,19 +517,33 @@ def call_llm_rebalance_suggest(risk_level: str | None, types: list[dict],
     }
 
 
-def call_llm_portfolio_advice(allocation: dict, drift: list[dict], returns: dict,
-                              risk_level: str | None = None, llm: dict | None = None,
-                              holdings: list[dict] | None = None) -> str:
-    """Portfolio Analyst：输入持仓 + 漂移 + 回报 + 单品种明细，输出诊断与行动项。"""
-    from prompts.investment import (
-        PORTFOLIO_ANALYST_SYSTEM, build_portfolio_analyst_prompt, DISCLAIMER,
-    )
-    messages = [
+def _portfolio_messages(allocation, drift, returns, risk_level, holdings) -> list[dict]:
+    from prompts.investment import PORTFOLIO_ANALYST_SYSTEM, build_portfolio_analyst_prompt
+    return [
         {"role": "system", "content": PORTFOLIO_ANALYST_SYSTEM},
         {"role": "user", "content": build_portfolio_analyst_prompt(
             allocation, drift, returns, risk_level, holdings=holdings,
         )},
     ]
+
+
+def stream_portfolio_advice(allocation: dict, drift: list[dict], returns: dict,
+                            risk_level: str | None = None, llm: dict | None = None,
+                            holdings: list[dict] | None = None):
+    """一键诊断持仓的流式版:同一套提示词,末尾附免责声明。"""
+    from prompts.investment import DISCLAIMER
+    yield from stream_llm(_portfolio_messages(allocation, drift, returns, risk_level, holdings),
+                          llm=llm, temperature=0.4, timeout=LLM_TIMEOUT_LONG,
+                          endpoint="invest.portfolio_advice", with_thinking=True)
+    yield DISCLAIMER
+
+
+def call_llm_portfolio_advice(allocation: dict, drift: list[dict], returns: dict,
+                              risk_level: str | None = None, llm: dict | None = None,
+                              holdings: list[dict] | None = None) -> str:
+    """Portfolio Analyst：输入持仓 + 漂移 + 回报 + 单品种明细，输出诊断与行动项。"""
+    from prompts.investment import DISCLAIMER
+    messages = _portfolio_messages(allocation, drift, returns, risk_level, holdings)
     result = _call_llm(messages, llm=llm, temperature=0.4, timeout=60, endpoint="invest.portfolio_advice")
     if result and "choices" in result:
         return result["choices"][0]["message"]["content"] + DISCLAIMER
@@ -699,8 +759,8 @@ def stream_advisor_chat(history: list[dict], context: dict | None = None, llm: d
     """投资顾问对话的流式版:逐段 yield 文本增量,末尾附免责声明。"""
     from prompts.investment import DISCLAIMER
     messages = _advisor_messages(history, context)
-    yield from stream_llm(messages, llm=llm, temperature=0.5, timeout=45,
-                          endpoint="invest.advisor_chat")
+    yield from stream_llm(messages, llm=llm, temperature=0.5, timeout=LLM_TIMEOUT_LONG,
+                          endpoint="invest.advisor_chat", with_thinking=True)
     yield DISCLAIMER
 
 

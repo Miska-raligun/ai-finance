@@ -225,6 +225,73 @@ def chat():
     })
 
 
+@chat_bp.route("/api/chat/stream", methods=["POST"])
+@login_required
+def chat_stream():
+    """/api/chat 的流式版,流程完全一样:意图识别 → 调工具 → 总结/闲聊。
+
+    区别只在最后一步:回复边生成边推给前端(SSE,格式见 services/sse.py)。
+    「本月分析」这类长回复不用再等整段写完,也不会再因为同步等太久被
+    Nginx / Cloudflare 掐断。待确认卡片在调完工具后先推过去(meta 事件)。
+    """
+    from services.llm import stream_llm_summary, stream_llm_chat
+    from services.llm_config import current_llm
+    from services.profile import context_message
+    from services.sse import sse_response, with_heartbeat, relay_text
+
+    data = request.get_json(silent=True) or {}
+    user_msg = data.get("message", "")
+    if not isinstance(user_msg, str) or not user_msg.strip():
+        return jsonify({"error": "消息不能为空"}), 400
+    llm_cfg = current_llm(data)
+    latest_msg = user_msg.strip().split("\n")[-1]
+
+    add_chat_message(g.user_id, "user", user_msg)
+    chat_history = get_chat_history(g.user_id)
+    profile_ctx = context_message(g.user_id)
+
+    def events():
+        reply = ""
+        try:
+            yield {"status": "思考中…"}
+            response = yield from with_heartbeat(
+                lambda: call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS, extra_system=profile_ctx))
+
+            quota_msg = _quota_reply(response)
+            if quota_msg:
+                reply = quota_msg
+                yield {"delta": quota_msg}
+                return
+
+            pieces = None
+            if response and "choices" in response:
+                msg_obj = response["choices"][0].get("message", {})
+                tool_calls = msg_obj.get("tool_calls")
+                if tool_calls:
+                    yield {"status": "正在查账…"}
+                    results, p_records, p_assets, p_goals = yield from with_heartbeat(
+                        lambda: _process_tool_calls(tool_calls, llm_cfg))
+                    if p_records or p_assets or p_goals:
+                        yield {"meta": {"pending_records": p_records,
+                                        "pending_assets": p_assets,
+                                        "pending_goals": p_goals}}
+                    if results:
+                        llm_logger.info("Tools: %s", [tc['function']['name'] for tc in tool_calls])
+                        yield {"status": "正在分析…"}
+                        pieces = stream_llm_summary(latest_msg, "\n".join(results), llm_cfg)
+                elif msg_obj.get("content"):
+                    pieces = [msg_obj["content"]]
+
+            if pieces is None:
+                pieces = stream_llm_chat(chat_history, llm_cfg, extra_system=profile_ctx)
+            reply = yield from relay_text(pieces, thinking_status="正在分析…")
+        finally:
+            # 前端中途断开(关页面)也把已经生成的部分存下来,下次进来历史里还在
+            add_chat_message(g.user_id, "assistant", reply or "⚠️ 暂时无法回复")
+
+    return sse_response(events())
+
+
 # ── 图片识别异步任务 ────────────────────────────────────────────
 # OCR + LLM 全链路可能 30-60s。以前同步扛在请求里,用户干等、还容易撞反代
 # 超时;现在上传立即返回 task_id,识别在线程池里跑,前端轮询取结果。

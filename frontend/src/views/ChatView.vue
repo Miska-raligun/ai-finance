@@ -26,8 +26,8 @@
         <img v-if="msg.sender === 'assistant'" src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
         <div class="msg-body">
           <img v-if="msg.image" :src="msg.image" class="chat-image" alt="uploaded" />
-          <div v-if="msg.content" :class="['bubble', msg._recognizing ? 'bubble-recognizing' : '']">
-            {{ msg.content }}
+          <div v-if="msg.content || msg._streaming" :class="['bubble', msg._recognizing ? 'bubble-recognizing' : '']">
+            <ChatText :content="msg.content" :streaming="!!msg._streaming" :status="msg._status" />
             <el-button
               v-if="msg._retryFile"
               size="small"
@@ -134,12 +134,6 @@
         </div>
       </div>
 
-      <div v-if="loading" class="msg assistant">
-        <img src="/favicon.ico" class="avatar ai-avatar" alt="Anon" />
-        <div class="bubble typing">
-          <span></span><span></span><span></span>
-        </div>
-      </div>
     </div>
 
     <div class="quick-actions animal-pop" :style="{ '--i': 1 }">
@@ -201,11 +195,13 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useCategoryStore } from '@/stores/categories'
 import { useChatStore } from '@/stores/chat'
-import { useInvestmentStore } from '@/stores/investment'
 import bus from '@/event-bus'
 import VoiceInput from '@/components/VoiceInput.vue'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
+import ChatText from '@/components/ChatText.vue'
+import { streamChat } from '@/utils/chatStream'
+import { decoratePending, usePendingCards } from '@/composables/usePendingCards'
 import iconBunny from '@/assets/decor/avatars/bunny.svg'
 import iconShiba from '@/assets/decor/avatars/shiba.svg'
 import iconOwl from '@/assets/decor/avatars/owl.svg'
@@ -214,7 +210,7 @@ import iconBeaver from '@/assets/decor/avatars/beaver.svg'
 const userStore = useUserStore()
 const categoryStore = useCategoryStore()
 const chatStore = useChatStore()
-const investmentStore = useInvestmentStore()
+const { confirmAsset, confirmGoal } = usePendingCards()
 
 // 动物建议卡：每个角色对应一个常用咨询场景
 const quickActions = [
@@ -250,47 +246,30 @@ const currentUser = computed(() => userStore.username)
 
 async function sendMessage() {
   const msg = userInput.value.trim()
-  if (!msg) return
+  if (!msg || loading.value) return   // 上一条还在生成:回车也不能插队
   chatStore.pushMessage({ sender: 'user', content: msg })
   userInput.value = ''
   loading.value = true
   await scrollToBottom()
 
+  // 先放一个空气泡,回复边生成边往里写;正文出来之前显示进度("正在查账…")
+  const reply = reactive({ sender: 'assistant', content: '', _streaming: true, _status: '' })
+  chatStore.pushMessage(reply)
+  await scrollToBottom()
   try {
-    const llm = userStore.llmPayload
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ message: msg, llm })
+    await streamChat('/api/chat/stream', { message: msg, llm: userStore.llmPayload }, {
+      onStatus: (s) => { reply._status = s },
+      onDelta: (d) => { reply.content += d; scrollToBottom() },
+      onMeta: (m) => { decoratePending(m, reply); scrollToBottom() },
+      onError: (e) => { reply.content += (reply.content ? '\n\n' : '') + `⚠️ ${e}` },
     })
-    const data = await res.json()
-    const assistantMsg = { sender: 'assistant', content: data.reply || '⚠️ 无法解析' }
-    decoratePending(data, assistantMsg)
-    chatStore.pushMessage(assistantMsg)
-  } catch {
-    chatStore.pushMessage({ sender: 'assistant', content: '❌ 网络异常，请检查后端是否启动！' })
+    if (!reply.content) reply.content = '⚠️ 暂时无法回复'
+  } catch (e) {
+    reply.content += (reply.content ? '\n\n' : '') + `❌ ${e.message || '网络异常，请稍后重试'}`
   } finally {
+    reply._streaming = false
     loading.value = false
     await scrollToBottom()
-  }
-}
-
-function decoratePending(data, assistantMsg) {
-  if (data.pending_records && data.pending_records.length > 0) {
-    assistantMsg.pending_records = data.pending_records.map(rec => ({
-      ...rec, _state: 'pending', _edit: { ...rec },
-    }))
-  }
-  if (data.pending_assets && data.pending_assets.length > 0) {
-    assistantMsg.pending_assets = data.pending_assets.map(rec => ({
-      ...rec, _state: 'pending', _edit: { ...rec },
-    }))
-  }
-  if (data.pending_goals && data.pending_goals.length > 0) {
-    assistantMsg.pending_goals = data.pending_goals.map(rec => ({
-      ...rec, _state: 'pending', _edit: { ...rec },
-    }))
   }
 }
 
@@ -403,42 +382,6 @@ async function confirmRecord(rec) {
   } catch {
     rec._state = _prevState
     ElMessage.error('网络异常，请重试')
-  }
-}
-
-async function confirmAsset(rec) {
-  rec._state = 'saving'
-  rec._error = ''
-  try {
-    const res = await investmentStore.commitPendingAsset({ ...rec._edit })
-    if (res?.success) {
-      rec._state = 'confirmed'
-      ElMessage.success('已添加到投资理财')
-    } else {
-      rec._state = 'error'
-      rec._error = res?.message || '入库失败'
-    }
-  } catch (e) {
-    rec._state = 'error'
-    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
-  }
-}
-
-async function confirmGoal(rec) {
-  rec._state = 'saving'
-  rec._error = ''
-  try {
-    const res = await investmentStore.commitPendingGoal({ ...rec._edit })
-    if (res?.success) {
-      rec._state = 'confirmed'
-      ElMessage.success('已添加理财目标')
-    } else {
-      rec._state = 'error'
-      rec._error = res?.message || '入库失败'
-    }
-  } catch (e) {
-    rec._state = 'error'
-    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
   }
 }
 
@@ -556,27 +499,6 @@ onActivated(() => {
   border: 1px solid var(--color-border);
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-
-/* 打字动画气泡 */
-.typing {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 16px;
-}
-.typing span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  animation: blink 1.2s infinite;
-}
-.typing span:nth-child(2) { animation-delay: 0.2s; }
-.typing span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes blink {
-  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
-  40% { opacity: 1; transform: scale(1); }
 }
 
 /* 确认卡片 */

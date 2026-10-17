@@ -83,6 +83,10 @@ class _OpenAICompat:
             yield {"error": f"HTTP {resp.status_code}: {body}"}
             return
 
+        # SSE 规定一律 UTF-8,但很多服务只回 `Content-Type: text/event-stream` 不带
+        # charset;requests 碰到 text/* 没写 charset 时按 ISO-8859-1 解码,中文就成了
+        # "ä½ å¥½" 这种乱码。显式指定。
+        resp.encoding = "utf-8"
         for raw in resp.iter_lines(decode_unicode=True):
             if not raw or not raw.startswith("data:"):
                 continue
@@ -95,9 +99,13 @@ class _OpenAICompat:
                 continue
             choices = obj.get("choices") or []
             if choices:
-                delta = (choices[0].get("delta") or {}).get("content")
-                if delta:
-                    yield {"delta": delta}
+                d = choices[0].get("delta") or {}
+                if d.get("content"):
+                    yield {"delta": d["content"]}
+                elif d.get("reasoning_content"):
+                    # 推理模型先"想"一阵才出正文;不转发想的内容,只报个信,
+                    # 让上层能告诉用户"在思考",也让连接不至于长时间没动静
+                    yield {"reasoning": True}
             if obj.get("usage"):
                 yield {"usage": obj["usage"]}
 

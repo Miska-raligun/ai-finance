@@ -1,7 +1,7 @@
 """投资顾问对话：general / portfolio / goal 三种 mode。"""
 from __future__ import annotations
 
-from flask import Response, g, jsonify, request, stream_with_context
+from flask import g, jsonify, request
 
 from auth import login_required
 from db import get_db
@@ -91,26 +91,37 @@ def advisor_chat():
 @investment_bp.route("/api/investment/advisor/chat/stream", methods=["POST"])
 @login_required
 def advisor_chat_stream():
-    """general 模式的流式版:SSE 逐段推送文本。每段 `data: {json}`,末尾 `data: [DONE]`。"""
-    from services.llm import stream_advisor_chat
-    import json as _json
+    """投资顾问的流式版,和记账聊天共用 services/sse.py 的事件格式。
 
-    data = request.get_json() or {}
-    history = data.get("history") or []
-    if not history:
-        return jsonify({"error": "history 不能为空"}), 400
+    mode=general(默认):按对话历史回答;mode=portfolio:一键诊断持仓。
+    """
+    from services.llm import stream_advisor_chat, stream_portfolio_advice
+    from services.sse import sse_response, relay_text
+
+    data = request.get_json(silent=True) or {}
+    mode = (data.get("mode") or "general").strip()
     llm_cfg = load_llm_cfg(data)
-    context = _build_advisor_context()
 
-    @stream_with_context
-    def _gen():
-        try:
-            for delta in stream_advisor_chat(history, context=context, llm=llm_cfg):
-                if delta:
-                    yield f"data: {_json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
-        except Exception:  # noqa: BLE001
-            yield f"data: {_json.dumps({'delta': '⚠️ 生成中断，请重试。'})}\n\n"
-        yield "data: [DONE]\n\n"
+    if mode == "portfolio":
+        assets = fetch_assets()
+        if not assets:
+            return sse_response(iter([{"delta": "请先在资产列表中添加持仓，再查看投资组合分析。"}]))
+        risk_row = get_db().execute(
+            "SELECT level FROM risk_profiles WHERE user_id = ?", (g.user_id,),
+        ).fetchone()
+        pieces = stream_portfolio_advice(
+            compute_allocation(assets), [], compute_return(assets),
+            risk_row["level"] if risk_row else None, llm=llm_cfg,
+            holdings=build_holding_details(assets),
+        )
+    else:
+        history = data.get("history") or []
+        if not history:
+            return jsonify({"error": "history 不能为空"}), 400
+        pieces = stream_advisor_chat(history, context=_build_advisor_context(), llm=llm_cfg)
 
-    return Response(_gen(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    def events():
+        yield {"status": "思考中…"}
+        yield from relay_text(pieces)
+
+    return sse_response(events())

@@ -28,8 +28,9 @@
         <div class="bubble" :class="m.role">
           <div class="bubble-role">{{ m.role === 'user' ? '你' : 'Anon' }}</div>
           <img v-if="m.image" :src="m.image" class="msg-image" />
-          <div v-if="m.content" class="bubble-content" v-html="render(m.content)"></div>
-          <span v-if="m._streaming" class="typing-caret" :class="{ empty: !m.content }">▋</span>
+          <div v-if="m.content || m._streaming" class="bubble-content">
+            <ChatText :content="m.content" :streaming="!!m._streaming" :status="m._status" />
+          </div>
         </div>
         <template v-if="m.pending_assets && m.pending_assets.length">
           <PendingAssetCard
@@ -49,10 +50,6 @@
             @confirm="confirmGoal(rec)"
           />
         </template>
-      </div>
-      <div v-if="loading" class="bubble assistant">
-        <div class="bubble-role">Anon</div>
-        <div class="bubble-content typing">正在思考…</div>
       </div>
     </div>
 
@@ -86,14 +83,15 @@
 <script setup>
 import { ref, reactive, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useInvestmentStore } from '@/stores/investment'
 import { useUserStore } from '@/stores/user'
-import { getCsrfToken, CSRF_HEADER } from '@/api'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
+import ChatText from '@/components/ChatText.vue'
+import { streamChat } from '@/utils/chatStream'
+import { decoratePending, usePendingCards } from '@/composables/usePendingCards'
 
-const store = useInvestmentStore()
 const userStore = useUserStore()
+const { confirmAsset, confirmGoal } = usePendingCards()
 
 const messages = ref([])
 const draft = ref('')
@@ -107,88 +105,43 @@ function scrollToBottom() {
   })
 }
 
-async function send() {
+/** 发一条问题,回复流式写进一个新气泡。general 对话和一键诊断都走这里,
+ *  后端同一个流式接口,用 mode 区分。 */
+async function ask(userText, body) {
+  if (loading.value) return
+  messages.value.push({ role: 'user', content: userText })
+  loading.value = true
+  const reply = reactive({ role: 'assistant', content: '', _streaming: true, _status: '' })
+  messages.value.push(reply)
+  scrollToBottom()
+  try {
+    await streamChat('/api/investment/advisor/chat/stream', { ...body, llm: userStore.llmPayload }, {
+      onStatus: (s) => { reply._status = s },
+      onDelta: (d) => { reply.content += d; scrollToBottom() },
+      onError: (e) => { reply.content += (reply.content ? '\n\n' : '') + `⚠️ ${e}` },
+    })
+    if (!reply.content) reply.content = '（空回复）'
+  } catch (e) {
+    reply.content += (reply.content ? '\n\n' : '') + `⚠️ ${e.message || '暂时无法获取回复，请稍后再试。'}`
+  } finally {
+    reply._streaming = false
+    loading.value = false
+    scrollToBottom()
+  }
+}
+
+function send() {
   const text = draft.value.trim()
   if (!text || loading.value) return
-  messages.value.push({ role: 'user', content: text })
   draft.value = ''
-  loading.value = true
-  scrollToBottom()
-
-  const history = messages.value.map(m => ({ role: m.role, content: m.content }))
-  // 先插一条空的助手消息,流式增量往里追加(打字机)
-  const reply = reactive({ role: 'assistant', content: '', _streaming: true })
-  messages.value.push(reply)
-  try {
-    await streamAdvisor(history, reply)
-  } catch (e) {
-    reply._streaming = false
-    if (!reply.content) {
-      reply.content = '⚠️ 暂时无法获取回复，请稍后再试。'
-      ElMessage.error('对话失败，请稍后重试')
-    }
-  } finally {
-    reply._streaming = false
-    loading.value = false
-    scrollToBottom()
-  }
+  // 历史里带上这一条;正在生成的那条空气泡还没进来
+  const history = [...messages.value, { role: 'user', content: text }]
+    .map(m => ({ role: m.role, content: m.content }))
+  ask(text, { history })
 }
 
-async function streamAdvisor(history, reply) {
-  const res = await fetch('/api/investment/advisor/chat/stream', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      [CSRF_HEADER]: getCsrfToken(),
-    },
-    body: JSON.stringify({ history, llm: userStore.llmPayload }),
-  })
-  if (!res.ok || !res.body) {
-    // 流式不可用(如 4xx):降级到一次性接口
-    const r = await store.askAdvisor({ mode: 'general', history, llm: userStore.llmPayload })
-    reply.content = r.reply || '（空回复）'
-    return
-  }
-  const readerDecoder = new TextDecoder()
-  const reader = res.body.getReader()
-  let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += readerDecoder.decode(value, { stream: true })
-    const lines = buffer.split('\n\n')
-    buffer = lines.pop()   // 末尾可能是半条,留到下一轮
-    for (const block of lines) {
-      const line = block.trim()
-      if (!line.startsWith('data:')) continue
-      const payload = line.slice(5).trim()
-      if (payload === '[DONE]') return
-      try {
-        const obj = JSON.parse(payload)
-        if (obj.delta) {
-          reply.content += obj.delta
-          scrollToBottom()
-        }
-      } catch { /* 半条 JSON,忽略 */ }
-    }
-  }
-}
-
-async function analyzePortfolio() {
-  if (loading.value) return
-  loading.value = true
-  messages.value.push({ role: 'user', content: '帮我分析当前投资组合' })
-  scrollToBottom()
-  try {
-    const res = await store.askAdvisor({ mode: 'portfolio', llm: userStore.llmPayload })
-    messages.value.push({ role: 'assistant', content: res.reply || '（空回复）' })
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || 'AI 诊断失败')
-  } finally {
-    loading.value = false
-    scrollToBottom()
-  }
+function analyzePortfolio() {
+  ask('帮我分析当前投资组合', { mode: 'portfolio' })
 }
 
 function clear() {
@@ -226,12 +179,7 @@ async function uploadImage(file) {
       return
     }
     const msg = { role: 'assistant', content: data.reply || '已识别' }
-    if (data.pending_assets?.length) {
-      msg.pending_assets = data.pending_assets.map(a => ({ ...a, _state: 'pending', _edit: { ...a } }))
-    }
-    if (data.pending_goals?.length) {
-      msg.pending_goals = data.pending_goals.map(g => ({ ...g, _state: 'pending', _edit: { ...g } }))
-    }
+    decoratePending(data, msg)
     messages.value.push(msg)
   } catch {
     messages.value.push({ role: 'assistant', content: '❌ 网络异常，请稍后重试。' })
@@ -239,52 +187,6 @@ async function uploadImage(file) {
     loading.value = false
     scrollToBottom()
   }
-}
-
-async function confirmAsset(rec) {
-  rec._state = 'saving'
-  rec._error = ''
-  try {
-    const res = await store.commitPendingAsset({ ...rec._edit })
-    if (res?.success) {
-      rec._state = 'confirmed'
-      ElMessage.success('已添加到投资理财')
-    } else {
-      rec._state = 'error'
-      rec._error = res?.message || '入库失败'
-    }
-  } catch (e) {
-    rec._state = 'error'
-    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
-  }
-}
-
-async function confirmGoal(rec) {
-  rec._state = 'saving'
-  rec._error = ''
-  try {
-    const res = await store.commitPendingGoal({ ...rec._edit })
-    if (res?.success) {
-      rec._state = 'confirmed'
-      ElMessage.success('已添加理财目标')
-    } else {
-      rec._state = 'error'
-      rec._error = res?.message || '入库失败'
-    }
-  } catch (e) {
-    rec._state = 'error'
-    rec._error = e?.response?.data?.message || e?.response?.data?.error || '网络异常'
-  }
-}
-
-function render(md) {
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return esc(md)
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-    .replace(/\n/g, '<br/>')
 }
 </script>
 
@@ -302,14 +204,6 @@ function render(md) {
   font-size: 12px;
   line-height: 1.6;
 }
-.typing-caret {
-  display: inline-block;
-  margin-left: 1px;
-  color: var(--color-primary);
-  animation: caret-blink 1s steps(1) infinite;
-}
-.typing-caret.empty { margin-left: 0; }
-@keyframes caret-blink { 50% { opacity: 0; } }
 .messages {
   height: 360px;
   overflow-y: auto;
@@ -348,7 +242,6 @@ function render(md) {
   opacity: 0.7;
   margin-bottom: 4px;
 }
-.typing { font-style: italic; opacity: 0.8; }
 
 .msg-wrapper {
   display: flex;
