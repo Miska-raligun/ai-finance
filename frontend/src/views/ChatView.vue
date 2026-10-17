@@ -200,7 +200,7 @@ import VoiceInput from '@/components/VoiceInput.vue'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
 import ChatText from '@/components/ChatText.vue'
-import { streamChat } from '@/utils/chatStream'
+import { runChatJob } from '@/utils/chatJob'
 import { decoratePending, usePendingCards } from '@/composables/usePendingCards'
 import iconBunny from '@/assets/decor/avatars/bunny.svg'
 import iconShiba from '@/assets/decor/avatars/shiba.svg'
@@ -257,13 +257,13 @@ async function sendMessage() {
   chatStore.pushMessage(reply)
   await scrollToBottom()
   try {
-    await streamChat('/api/chat/stream', { message: msg, llm: userStore.llmPayload }, {
+    const result = await runChatJob('/api/chat/async', { message: msg, llm: userStore.llmPayload }, {
       onStatus: (s) => { reply._status = s },
       onDelta: (d) => { reply.content += d; scrollToBottom() },
       onMeta: (m) => { decoratePending(m, reply); scrollToBottom() },
-      onError: (e) => { reply.content += (reply.content ? '\n\n' : '') + `⚠️ ${e}` },
     })
-    if (!reply.content) reply.content = '⚠️ 暂时无法回复'
+    reply.content = result.reply || reply.content || '⚠️ 暂时无法回复'   // 以最终结果为准
+    if (!reply.pending_records && !reply.pending_assets && !reply.pending_goals) decoratePending(result, reply)
   } catch (e) {
     reply.content += (reply.content ? '\n\n' : '') + `❌ ${e.message || '网络异常，请稍后重试'}`
   } finally {

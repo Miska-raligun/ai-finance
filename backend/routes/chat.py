@@ -13,6 +13,7 @@ from flask import Blueprint, current_app, request, jsonify, g
 from db import get_db, add_chat_message, get_chat_history
 from auth import login_required
 from tools import handlers, FINANCE_TOOLS
+from services import ai_jobs
 from services.llm import call_llm_intent, call_llm_summary, call_llm_chat, llm_logger
 from constants import PARAM_CATEGORY, PARAM_AMOUNT, PARAM_NOTE, PARAM_DATE, LLM_TIMEOUT_LONG
 
@@ -225,71 +226,125 @@ def chat():
     })
 
 
-@chat_bp.route("/api/chat/stream", methods=["POST"])
-@login_required
-def chat_stream():
-    """/api/chat 的流式版,流程完全一样:意图识别 → 调工具 → 总结/闲聊。
+# ── 聊天回复:后台作业 + 轮询 ────────────────────────────────────
+# 回复(尤其「本月分析」这种长分析)可能要写一两分钟。同步等,或者用 SSE
+# 一直挂着连接,都会占住 waitress 仅有的几个工作线程,还会撞 Nginx /
+# Cloudflare 的超时。所以走 ai_jobs:提交立刻返回 job_id,回复在作业线程池
+# 里边生成边写进作业,前端轮询 /api/chat/jobs/<id>?since=N 取新增的字,
+# 看起来还是一个字一个字出来。投资顾问也走这一套(kind=advisor_reply)。
 
-    区别只在最后一步:回复边生成边推给前端(SSE,格式见 services/sse.py)。
-    「本月分析」这类长回复不用再等整段写完,也不会再因为同步等太久被
-    Nginx / Cloudflare 掐断。待确认卡片在调完工具后先推过去(meta 事件)。
-    """
+def _run_chat_reply(ctx) -> dict:
+    """意图识别 → 调工具 → 总结 / 闲聊,和 /api/chat 同一个流程。"""
     from services.llm import stream_llm_summary, stream_llm_chat
-    from services.llm_config import current_llm
     from services.profile import context_message
-    from services.sse import sse_response, with_heartbeat, relay_text
+
+    llm_cfg = ctx.llm or {}
+    latest_msg = ctx.payload["latest_msg"]
+    reply = ""
+    pending = {"pending_records": [], "pending_assets": [], "pending_goals": []}
+    try:
+        ctx.set_status("思考中…")
+        profile_ctx = context_message(ctx.user_id)
+        response = call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS, extra_system=profile_ctx)
+
+        quota_msg = _quota_reply(response)
+        if quota_msg:
+            reply = quota_msg
+            ctx.say(quota_msg)
+            return {"reply": reply, **pending}
+
+        pieces = None
+        if response and "choices" in response:
+            msg_obj = response["choices"][0].get("message", {})
+            tool_calls = msg_obj.get("tool_calls")
+            if tool_calls:
+                ctx.set_status("正在查账…")
+                results, p_records, p_assets, p_goals = _process_tool_calls(tool_calls, llm_cfg)
+                pending = {"pending_records": p_records, "pending_assets": p_assets,
+                           "pending_goals": p_goals}
+                if p_records or p_assets or p_goals:
+                    ctx.set_meta(**pending)          # 卡片不用等分析写完
+                if results:
+                    llm_logger.info("Tools: %s", [tc['function']['name'] for tc in tool_calls])
+                    ctx.set_status("正在分析…")
+                    pieces = stream_llm_summary(latest_msg, "\n".join(results), llm_cfg)
+            elif msg_obj.get("content"):
+                pieces = [msg_obj["content"]]
+        elif response and response.get("error"):
+            # 意图识别就失败了(超时、key 不对…):说清楚,别装作在闲聊
+            err = response["error"]
+            raise RuntimeError(err.get("message") if isinstance(err, dict) else str(err))
+
+        if pieces is None:
+            pieces = stream_llm_chat(get_chat_history(ctx.user_id), llm_cfg,
+                                     extra_system=profile_ctx)
+        reply = ctx.relay(pieces)
+        return {"reply": reply or "⚠️ 暂时无法回复", **pending}
+    except Exception as e:
+        # 作业记成 failed,前端把原因显示在气泡里;历史里也存这句,刷新后还看得到
+        reply = (reply + "\n\n" if reply else "") + f"⚠️ 出错了：{e}"
+        raise
+    finally:
+        # 取消 / 出错也把已经写出来的部分存进历史,下次进来还看得到
+        add_chat_message(ctx.user_id, "assistant", reply or "⚠️ 暂时无法回复")
+
+
+ai_jobs.register("chat_reply", _run_chat_reply)
+
+
+@chat_bp.route("/api/chat/async", methods=["POST"])
+@login_required
+def chat_async():
+    """提交一条聊天消息,立刻返回 job_id;回复去 /api/chat/jobs/<id> 取。"""
+    from services.llm_config import current_llm
 
     data = request.get_json(silent=True) or {}
     user_msg = data.get("message", "")
     if not isinstance(user_msg, str) or not user_msg.strip():
         return jsonify({"error": "消息不能为空"}), 400
-    llm_cfg = current_llm(data)
-    latest_msg = user_msg.strip().split("\n")[-1]
-
     add_chat_message(g.user_id, "user", user_msg)
-    chat_history = get_chat_history(g.user_id)
-    profile_ctx = context_message(g.user_id)
+    job_id = ai_jobs.submit(g.user_id, "chat_reply",
+                            {"latest_msg": user_msg.strip().split("\n")[-1]},
+                            current_llm(data))
+    return jsonify({"job_id": job_id}), 202
 
-    def events():
-        reply = ""
-        try:
-            yield {"status": "思考中…"}
-            response = yield from with_heartbeat(
-                lambda: call_llm_intent(latest_msg, llm_cfg, FINANCE_TOOLS, extra_system=profile_ctx))
 
-            quota_msg = _quota_reply(response)
-            if quota_msg:
-                reply = quota_msg
-                yield {"delta": quota_msg}
-                return
+@chat_bp.route("/api/chat/jobs/<int:job_id>", methods=["GET"])
+@login_required
+def chat_job(job_id: int):
+    """聊天类作业(记账聊天 / 投资顾问)的进度。
 
-            pieces = None
-            if response and "choices" in response:
-                msg_obj = response["choices"][0].get("message", {})
-                tool_calls = msg_obj.get("tool_calls")
-                if tool_calls:
-                    yield {"status": "正在查账…"}
-                    results, p_records, p_assets, p_goals = yield from with_heartbeat(
-                        lambda: _process_tool_calls(tool_calls, llm_cfg))
-                    if p_records or p_assets or p_goals:
-                        yield {"meta": {"pending_records": p_records,
-                                        "pending_assets": p_assets,
-                                        "pending_goals": p_goals}}
-                    if results:
-                        llm_logger.info("Tools: %s", [tc['function']['name'] for tc in tool_calls])
-                        yield {"status": "正在分析…"}
-                        pieces = stream_llm_summary(latest_msg, "\n".join(results), llm_cfg)
-                elif msg_obj.get("content"):
-                    pieces = [msg_obj["content"]]
+    since=N:前端已经拿到前 N 个字,这里只回之后新增的,轮询再勤也不重复传。
+    跑完以后 result 里是完整回复,前端以它为准。
 
-            if pieces is None:
-                pieces = stream_llm_chat(chat_history, llm_cfg, extra_system=profile_ctx)
-            reply = yield from relay_text(pieces, thinking_status="正在分析…")
-        finally:
-            # 前端中途断开(关页面)也把已经生成的部分存下来,下次进来历史里还在
-            add_chat_message(g.user_id, "assistant", reply or "⚠️ 暂时无法回复")
+    放在 /api/chat 下而不是通用的 /api/ai-jobs:聊天要轮询得勤(不到 1 秒一次),
+    /api/chat 前缀在安全中间件的白名单里,不会被当成高频请求封 IP。
+    """
+    job = ai_jobs.get(g.user_id, job_id)
+    if not job or job["kind"] not in _CHAT_JOB_KINDS:
+        return jsonify({"error": "任务不存在"}), 404
+    try:
+        since = max(0, int(request.args.get("since") or 0))
+    except ValueError:
+        since = 0
+    out = {"status": job["status"], "error": job["error"]}
+    if job["status"] in ("done", "failed", "cancelled"):
+        out["result"] = job["result"]
+    else:
+        out.update(ai_jobs.live(job_id, since))
+    return jsonify(out)
 
-    return sse_response(events())
+
+@chat_bp.route("/api/chat/jobs/<int:job_id>/cancel", methods=["POST"])
+@login_required
+def chat_job_cancel(job_id: int):
+    job = ai_jobs.get(g.user_id, job_id)
+    if not job or job["kind"] not in _CHAT_JOB_KINDS:
+        return jsonify({"error": "任务不存在"}), 404
+    return jsonify({"success": ai_jobs.cancel(g.user_id, job_id)})
+
+
+_CHAT_JOB_KINDS = ("chat_reply", "advisor_reply")
 
 
 # ── 图片识别异步任务 ────────────────────────────────────────────

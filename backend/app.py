@@ -155,11 +155,11 @@ with app.app_context():
 # LLM 成本敏感端点的用户级限流（IP 级仍由 llm_security_middleware 兜底）
 apply_endpoint_limits(app, {
     "chat.chat": "60/minute",
-    "chat.chat_stream": "60/minute",
+    "chat.chat_async": "60/minute",
     "chat.chat_image": "10/minute",
     "chat.commit_record": "120/minute",
     "investment.advisor_chat": "30/minute",
-    "investment.advisor_chat_stream": "30/minute",
+    "investment.advisor_chat_async": "30/minute",
     "investment.submit_risk_quiz": "10/minute",
     "reports.api_generate_report": "5/minute",
     "reports.api_recap": "20/minute",

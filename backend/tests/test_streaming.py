@@ -1,4 +1,4 @@
-"""LLM 流式:stream_llm 逐段产出 + advisor SSE 端点。"""
+"""LLM 流式:stream_llm 逐段产出、上游 SSE 解码,以及聊天回复的后台作业(边写边轮询)。"""
 from __future__ import annotations
 
 import pytest
@@ -36,30 +36,6 @@ def test_stream_llm_fallback_when_no_call_stream(app, monkeypatch):
         out = "".join(llm.stream_llm([{"role": "user", "content": "hi"}],
                                      llm={"apikey": "k"}, endpoint="test"))
     assert out == "整段回复"
-
-
-def test_advisor_stream_endpoint_sse(app, auth_client, monkeypatch):
-    from routes.investment import investment_bp  # noqa: F401 ensure registered
-
-    def _fake_stream(history, context=None, llm=None):
-        yield "根据你的持仓，"
-        yield "建议均衡配置。"
-
-    monkeypatch.setattr("services.llm.stream_advisor_chat", _fake_stream)
-
-    r = auth_client.post("/api/investment/advisor/chat/stream",
-                         json={"history": [{"role": "user", "content": "怎么配"}]})
-    assert r.status_code == 200
-    assert "text/event-stream" in r.content_type
-    body = r.get_data(as_text=True)
-    assert "根据你的持仓，" in body
-    assert "建议均衡配置。" in body
-    assert "[DONE]" in body
-
-
-def test_advisor_stream_requires_history(app, auth_client):
-    r = auth_client.post("/api/investment/advisor/chat/stream", json={"history": []})
-    assert r.status_code == 400
 
 
 # ---------- 乱码:上游 SSE 不带 charset ----------
@@ -120,49 +96,10 @@ def test_stream_llm_thinking_marker_only_when_asked(app, monkeypatch):
     assert marked == [llm.THINKING, "好"]
 
 
-# ---------- 共用 SSE 工具 ----------
+# ---------- 聊天回复:后台作业 + 轮询 ----------
 
-def test_with_heartbeat_pings_while_waiting(app):
-    import time
-    from flask import g
-    from services.sse import HEARTBEAT, with_heartbeat
+import time
 
-    def gen():
-        result = yield from with_heartbeat(lambda: (time.sleep(0.35), g.user_id)[1], interval=0.1)
-        yield ("result", result)
-
-    with app.test_request_context():
-        g.user_id = 42
-        out = list(gen())
-    assert out[-1] == ("result", 42)          # 后台线程里也拿得到 g.user_id
-    assert out.count(HEARTBEAT) >= 2
-
-
-def test_with_heartbeat_reraises(app):
-    from services.sse import with_heartbeat
-
-    def boom():
-        raise ValueError("坏了")
-
-    def gen():
-        yield from with_heartbeat(boom, interval=0.05)
-
-    with app.test_request_context():
-        with pytest.raises(ValueError):
-            list(gen())
-
-
-def _events(body: str):
-    import json
-    out = []
-    for block in body.split("\n\n"):
-        block = block.strip()
-        if block.startswith("data:") and block[5:].strip() != "[DONE]":
-            out.append(json.loads(block[5:].strip()))
-    return out
-
-
-# ---------- /api/chat/stream ----------
 
 @pytest.fixture
 def chat_client(app, auth_client):
@@ -172,82 +109,155 @@ def chat_client(app, auth_client):
     return auth_client
 
 
-def _intent_with_tool(name="query_budget", args="{}"):
+def _drain(client, job_id, timeout=8.0):
+    """像前端那样按 since 轮询到结束。
+    返回 (拼起来的增量, 见过的进度提示, 见过的 meta, 终态记录, 是否中途拿到过正文)。"""
+    got, statuses, metas, partial = "", [], [], False
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = client.get(f"/api/chat/jobs/{job_id}?since={len(got)}")
+        assert r.status_code == 200, r.get_json()
+        job = r.get_json()
+        if job["status"] in ("done", "failed", "cancelled"):
+            return got, statuses, metas, job, partial
+        assert job["status"] in ("pending", "running"), job   # 进度提示不能盖掉作业状态
+        if job.get("length", 0) > len(got):
+            got += job["text"]
+            partial = True
+        if job.get("meta"):
+            metas.append(job["meta"])
+        if job.get("step"):
+            statuses.append(job["step"])
+        time.sleep(0.02)
+    raise AssertionError("作业没在时限内结束")
+
+
+def _intent_with_tool(name="budget_remain", args="{}"):
     return {"choices": [{"message": {"tool_calls": [
         {"id": "1", "type": "function", "function": {"name": name, "arguments": args}}]}}]}
 
 
-def test_chat_stream_tool_then_streamed_summary(chat_client, monkeypatch):
-    """快捷按钮那条路:调工具 → 总结逐段推送,并且整段回复存进历史。"""
+def _slow(pieces, delay=0.05):
+    def gen(*a, **kw):
+        for p in pieces:
+            time.sleep(delay)
+            yield p
+    return gen
+
+
+def test_chat_async_tool_then_summary(chat_client, monkeypatch):
+    """快捷按钮那条路:提交立刻拿 job_id,分析边写边能取到,写完整段存进历史。"""
     monkeypatch.setattr("routes.chat.call_llm_intent", lambda *a, **kw: _intent_with_tool())
     monkeypatch.setattr("routes.chat._process_tool_calls",
                         lambda tc, cfg: (["本月餐饮预算剩 300 元"], [], [], []))
+    import services.llm as llm_mod
+    monkeypatch.setattr("services.llm.stream_llm_summary",
+                        _slow([llm_mod.THINKING, "餐饮", "还剩 ", "300 元。"]))
 
-    def fake_summary(user_msg, result, llm=None):
-        import services.llm as llm_mod
-        yield llm_mod.THINKING
-        yield "餐饮还剩 "
-        yield "300 元。"
-
-    monkeypatch.setattr("services.llm.stream_llm_summary", fake_summary)
-
-    r = chat_client.post("/api/chat/stream", json={"message": "查询本月各分类预算余额"})
-    assert r.status_code == 200 and "text/event-stream" in r.content_type
-    body = r.get_data(as_text=True)
-    evs = _events(body)
-    assert "".join(e.get("delta", "") for e in evs) == "餐饮还剩 300 元。"
-    assert {"status": "正在查账…"} in evs and {"status": "正在分析…"} in evs
-    assert body.rstrip().endswith("data: [DONE]")
+    r = chat_client.post("/api/chat/async", json={"message": "查询本月各分类预算余额"})
+    assert r.status_code == 202
+    got, steps, _, job, partial = _drain(chat_client, r.get_json()["job_id"])
+    assert job["status"] == "done"
+    assert "正在分析…" in steps                                   # 正文出来之前有进度提示
+    assert job["result"]["reply"] == "餐饮还剩 300 元。"
+    assert partial and job["result"]["reply"].startswith(got)   # 中途就拿到过一部分
 
     hist = chat_client.get("/api/chat/history").get_json()
     assert hist[-2]["content"] == "查询本月各分类预算余额"
     assert hist[-1] == {"role": "assistant", "content": "餐饮还剩 300 元。"}
 
 
-def test_chat_stream_pushes_pending_cards(chat_client, monkeypatch):
+def test_chat_async_pending_cards_arrive_early(chat_client, monkeypatch):
     rec = {"type": "expense", "category": "餐饮", "amount": 20, "date": "2026-10-17", "note": ""}
     monkeypatch.setattr("routes.chat.call_llm_intent", lambda *a, **kw: _intent_with_tool("add_record"))
     monkeypatch.setattr("routes.chat._process_tool_calls",
                         lambda tc, cfg: (["已识别一笔支出"], [rec], [], []))
-    monkeypatch.setattr("services.llm.stream_llm_summary", lambda *a, **kw: iter(["记好啦"]))
+    monkeypatch.setattr("services.llm.stream_llm_summary", _slow(["记", "好", "啦"], delay=0.1))
 
-    evs = _events(chat_client.post("/api/chat/stream", json={"message": "吃饭20"}).get_data(as_text=True))
-    meta = [e["meta"] for e in evs if "meta" in e]
-    assert meta == [{"pending_records": [rec], "pending_assets": [], "pending_goals": []}]
+    job_id = chat_client.post("/api/chat/async", json={"message": "吃饭20"}).get_json()["job_id"]
+    _, _, metas, job, _ = _drain(chat_client, job_id)
+    assert metas and metas[0]["pending_records"] == [rec]       # 写完之前卡片就到了
+    assert job["result"]["pending_records"] == [rec]
 
 
-def test_chat_stream_freeform(chat_client, monkeypatch):
-    """没调工具也没内容 → 闲聊,同样流式。"""
+def test_chat_async_freeform(chat_client, monkeypatch):
     monkeypatch.setattr("routes.chat.call_llm_intent",
                         lambda *a, **kw: {"choices": [{"message": {"content": None}}]})
     monkeypatch.setattr("services.llm.stream_llm_chat", lambda *a, **kw: iter(["哈喽", "～"]))
-    evs = _events(chat_client.post("/api/chat/stream", json={"message": "哈喽"}).get_data(as_text=True))
-    assert "".join(e.get("delta", "") for e in evs) == "哈喽～"
+    job_id = chat_client.post("/api/chat/async", json={"message": "哈喽"}).get_json()["job_id"]
+    assert _drain(chat_client, job_id)[3]["result"]["reply"] == "哈喽～"
 
 
-def test_chat_stream_quota(chat_client, monkeypatch):
+def test_chat_async_quota(chat_client, monkeypatch):
     monkeypatch.setattr("routes.chat.call_llm_intent",
                         lambda *a, **kw: {"error": {"code": "quota_exceeded", "message": "x"}})
-    evs = _events(chat_client.post("/api/chat/stream", json={"message": "hi"}).get_data(as_text=True))
-    assert "额度已用完" in "".join(e.get("delta", "") for e in evs)
+    job_id = chat_client.post("/api/chat/async", json={"message": "hi"}).get_json()["job_id"]
+    assert "额度已用完" in _drain(chat_client, job_id)[3]["result"]["reply"]
 
 
-def test_chat_stream_error_midway_still_finishes(chat_client, monkeypatch):
-    def boom(*a, **kw):
-        raise RuntimeError("上游炸了")
-    monkeypatch.setattr("routes.chat.call_llm_intent", boom)
-    body = chat_client.post("/api/chat/stream", json={"message": "hi"}).get_data(as_text=True)
-    assert {"error": "生成中断，请重试。"} in _events(body)
-    assert body.rstrip().endswith("data: [DONE]")
+def test_chat_async_failure_is_reported(chat_client, monkeypatch):
+    """意图识别就超时了:作业 failed 并带原因(前端显示在气泡里),历史里也存了。"""
+    monkeypatch.setattr("routes.chat.call_llm_intent",
+                        lambda *a, **kw: {"error": {"message": "请求超时（10s）"}})
+    job_id = chat_client.post("/api/chat/async", json={"message": "分析一下"}).get_json()["job_id"]
+    job = _drain(chat_client, job_id)[3]
+    assert job["status"] == "failed" and "请求超时" in job["error"]
+    assert "请求超时" in chat_client.get("/api/chat/history").get_json()[-1]["content"]
 
 
-def test_chat_stream_rejects_empty(chat_client):
-    assert chat_client.post("/api/chat/stream", json={"message": "  "}).status_code == 400
+def test_chat_async_cancel(chat_client, monkeypatch):
+    monkeypatch.setattr("routes.chat.call_llm_intent",
+                        lambda *a, **kw: {"choices": [{"message": {"content": None}}]})
+    monkeypatch.setattr("services.llm.stream_llm_chat", _slow(["字"] * 200, delay=0.02))
+    job_id = chat_client.post("/api/chat/async", json={"message": "hi"}).get_json()["job_id"]
+    time.sleep(0.2)
+    assert chat_client.post(f"/api/chat/jobs/{job_id}/cancel").get_json()["success"]
+    assert _drain(chat_client, job_id)[3]["status"] == "cancelled"
 
 
-# ---------- 一键诊断持仓也走流式 ----------
+def test_chat_async_rejects_empty(chat_client):
+    assert chat_client.post("/api/chat/async", json={"message": "  "}).status_code == 400
 
-def test_advisor_stream_portfolio_mode(app, auth_client, monkeypatch):
+
+def test_chat_jobs_endpoint_only_serves_chat_kinds(app, chat_client):
+    """/api/chat/jobs 只给聊天类作业用,别的作业(比如行程生成)从这里查不到。"""
+    from services import ai_jobs
+    ai_jobs.register("_test_other", lambda ctx: {"x": 1})
+    with app.test_request_context():
+        from flask import g
+        g.user_id = 1
+        other = ai_jobs.submit(1, "_test_other", {}, None)
+    assert chat_client.get(f"/api/chat/jobs/{other}").status_code == 404
+
+
+def test_job_live_since_offset(app):
+    """live(job, since) 只回 since 之后新增的字。"""
+    from services import ai_jobs
+    ctx = ai_jobs.JobCtx(987654, 1, "chat_reply", {}, None, None)
+    ctx.set_status("正在查账…")
+    ctx.say("你好，")
+    ctx.say("世界")
+    snap = ai_jobs.live(987654, since=3)
+    assert snap == {"text": "世界", "length": 5, "step": "正在查账…", "meta": {}}
+    ai_jobs._live.pop(987654, None)
+
+
+# ---------- 投资顾问 ----------
+
+def test_advisor_async_general(app, chat_client, monkeypatch):
+    monkeypatch.setattr("services.llm.stream_advisor_chat",
+                        _slow(["根据你的持仓，", "建议均衡配置。"]))
+    r = chat_client.post("/api/investment/advisor/chat/async",
+                         json={"history": [{"role": "user", "content": "怎么配"}]})
+    assert r.status_code == 202
+    assert _drain(chat_client, r.get_json()["job_id"])[3]["result"]["reply"] == "根据你的持仓，建议均衡配置。"
+
+
+def test_advisor_async_requires_history(chat_client):
+    assert chat_client.post("/api/investment/advisor/chat/async", json={"history": []}).status_code == 400
+
+
+def test_advisor_async_portfolio(chat_client, monkeypatch):
     monkeypatch.setattr("routes.investment.advisor.fetch_assets",
                         lambda: [{"type": "股票", "amount": 100}])
     monkeypatch.setattr("routes.investment.advisor.compute_allocation", lambda a: {})
@@ -255,13 +265,13 @@ def test_advisor_stream_portfolio_mode(app, auth_client, monkeypatch):
     monkeypatch.setattr("routes.investment.advisor.build_holding_details", lambda a: [])
     monkeypatch.setattr("services.llm.stream_portfolio_advice",
                         lambda *a, **kw: iter(["持仓偏股，", "注意分散。"]))
-    evs = _events(auth_client.post("/api/investment/advisor/chat/stream",
-                                   json={"mode": "portfolio"}).get_data(as_text=True))
-    assert "".join(e.get("delta", "") for e in evs) == "持仓偏股，注意分散。"
+    job_id = chat_client.post("/api/investment/advisor/chat/async",
+                              json={"mode": "portfolio"}).get_json()["job_id"]
+    assert _drain(chat_client, job_id)[3]["result"]["reply"] == "持仓偏股，注意分散。"
 
 
-def test_advisor_stream_portfolio_without_assets(app, auth_client, monkeypatch):
+def test_advisor_async_portfolio_without_assets(chat_client, monkeypatch):
     monkeypatch.setattr("routes.investment.advisor.fetch_assets", lambda: [])
-    evs = _events(auth_client.post("/api/investment/advisor/chat/stream",
-                                   json={"mode": "portfolio"}).get_data(as_text=True))
-    assert "请先在资产列表中添加持仓" in "".join(e.get("delta", "") for e in evs)
+    job_id = chat_client.post("/api/investment/advisor/chat/async",
+                              json={"mode": "portfolio"}).get_json()["job_id"]
+    assert "请先在资产列表中添加持仓" in _drain(chat_client, job_id)[3]["result"]["reply"]

@@ -87,7 +87,7 @@ import { useUserStore } from '@/stores/user'
 import PendingAssetCard from '@/components/PendingAssetCard.vue'
 import PendingGoalCard from '@/components/PendingGoalCard.vue'
 import ChatText from '@/components/ChatText.vue'
-import { streamChat } from '@/utils/chatStream'
+import { runChatJob } from '@/utils/chatJob'
 import { decoratePending, usePendingCards } from '@/composables/usePendingCards'
 
 const userStore = useUserStore()
@@ -105,8 +105,8 @@ function scrollToBottom() {
   })
 }
 
-/** 发一条问题,回复流式写进一个新气泡。general 对话和一键诊断都走这里,
- *  后端同一个流式接口,用 mode 区分。 */
+/** 发一条问题,回复边生成边写进一个新气泡。general 对话和一键诊断都走这里,
+ *  后端同一个接口,用 mode 区分;出错的原因直接显示在气泡里。 */
 async function ask(userText, body) {
   if (loading.value) return
   messages.value.push({ role: 'user', content: userText })
@@ -115,12 +115,12 @@ async function ask(userText, body) {
   messages.value.push(reply)
   scrollToBottom()
   try {
-    await streamChat('/api/investment/advisor/chat/stream', { ...body, llm: userStore.llmPayload }, {
-      onStatus: (s) => { reply._status = s },
-      onDelta: (d) => { reply.content += d; scrollToBottom() },
-      onError: (e) => { reply.content += (reply.content ? '\n\n' : '') + `⚠️ ${e}` },
-    })
-    if (!reply.content) reply.content = '（空回复）'
+    const result = await runChatJob('/api/investment/advisor/chat/async',
+      { ...body, llm: userStore.llmPayload }, {
+        onStatus: (s) => { reply._status = s },
+        onDelta: (d) => { reply.content += d; scrollToBottom() },
+      })
+    reply.content = result.reply || reply.content || '（空回复）'   // 以最终结果为准
   } catch (e) {
     reply.content += (reply.content ? '\n\n' : '') + `⚠️ ${e.message || '暂时无法获取回复，请稍后再试。'}`
   } finally {

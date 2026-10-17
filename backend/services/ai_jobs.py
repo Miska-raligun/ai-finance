@@ -42,6 +42,12 @@ _cancelled: set[int] = set()
 
 _TERMINAL = ("done", "failed", "cancelled")
 
+# 正在生成的文字(聊天回复这类边写边看的作业)。只放内存:每个 token 都写库
+# 太浪费,而且作业本来就活不过重启(启动时收尸)。写完以后完整结果进
+# result_json,这里的条目随作业结束清掉。
+# job_id -> {"text": str, "status": str, "meta": dict}
+_live: dict[int, dict] = {}
+
 
 def register(kind: str, fn: Callable[["JobCtx"], dict | None]) -> None:
     with _lock:
@@ -89,6 +95,49 @@ class JobCtx:
     def set_trip(self, trip_id: int) -> None:
         self.trip_id = trip_id
         _set(self.job_id, trip_id=trip_id)
+
+    # -- 边写边看的作业用(聊天回复)--
+
+    def _live_slot(self) -> dict:
+        return _live.setdefault(self.job_id, {"text": "", "status": "", "meta": {}})
+
+    def say(self, text: str) -> None:
+        """追加一段正文。前端轮询时按偏移量取新增的部分。"""
+        if text:
+            with _lock:
+                self._live_slot()["text"] += text
+
+    def set_status(self, status: str) -> None:
+        """正文出来之前的进度提示,比如"正在查账…"。"""
+        with _lock:
+            self._live_slot()["status"] = status
+
+    def set_meta(self, **meta) -> None:
+        """正文以外、需要尽早给前端的东西(比如待确认卡片)。"""
+        with _lock:
+            self._live_slot()["meta"].update(meta)
+
+    def relay(self, pieces, *, thinking_status: str = "正在分析…") -> str:
+        """把 stream_llm 一类的产出写进作业:文本追加,THINKING 标记变成
+        进度提示。用户取消了就停。返回完整正文。"""
+        import time
+        from services.llm import THINKING
+
+        parts: list[str] = []
+        checked = time.monotonic()
+        for piece in pieces:
+            # 是否被取消要查库,别每个字都查
+            if time.monotonic() - checked > 0.5:
+                checked = time.monotonic()
+                if self.cancelled:
+                    break
+            if piece is THINKING:
+                if not parts:
+                    self.set_status(thinking_status)
+            elif piece:
+                parts.append(piece)
+                self.say(piece)
+        return "".join(parts)
 
     @property
     def cancelled(self) -> bool:
@@ -153,6 +202,17 @@ def get(user_id: int, job_id: int) -> dict | None:
         except (TypeError, ValueError):
             d[dst] = None if dst == "result" else []
     return d
+
+
+def live(job_id: int, since: int = 0) -> dict:
+    """正在生成的作业里,从第 since 个字开始新增的正文,外加进度和附加数据。
+    作业没有(或已经没有)实时内容时返回空的。"""
+    with _lock:
+        slot = _live.get(job_id) or {}
+        text = slot.get("text", "")
+        # 进度提示叫 step 而不是 status:status 是作业本身的状态(running/done…)
+        return {"text": text[max(0, since):], "length": len(text),
+                "step": slot.get("status", ""), "meta": dict(slot.get("meta") or {})}
 
 
 def list_jobs(user_id: int, *, kinds: tuple[str, ...] | None = None,
@@ -280,3 +340,4 @@ def _run(app, job_id: int, user_id: int, kind: str,
         finally:
             with _lock:
                 _cancelled.discard(job_id)
+                _live.pop(job_id, None)
