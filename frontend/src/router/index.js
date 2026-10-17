@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { installStaleBuildGuard } from '@/utils/staleBuild'
 
 // 入口三件套(Login + Home + Chat)同步引入,登录后立刻可交互;它们均不静态依赖
 // ECharts / Chart.js,主 bundle 里不会被这些大库绑住。
@@ -34,5 +35,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 })
+
+// 部署了新版本而页面还开着时,切页面改成整页加载,免得新页面缺样式
+installStaleBuildGuard(router)
 
 export default router

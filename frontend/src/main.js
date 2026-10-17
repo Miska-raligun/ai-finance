@@ -36,6 +36,19 @@ import '@/styles/themes.css'
     }
   } catch { /* localStorage 不可用时降级为默认 */ }
 })()
+// 部署新版本后，已经打开的页面（或缓存里的旧 index）还指着上一版的分包文件名，
+// 那些文件已被删掉：样式表取不到时页面只剩内容、框架全散。Vite 在分包 / 样式
+// 加载失败时会发 vite:preloadError，这里整页刷新一次换成新版本。
+// 30 秒内只刷一次，免得服务器真出问题时陷入无限刷新。
+window.addEventListener('vite:preloadError', (event) => {
+  try {
+    const last = Number(sessionStorage.getItem('chunk_reload_at') || 0)
+    if (Date.now() - last < 30_000) return
+    sessionStorage.setItem('chunk_reload_at', String(Date.now()))
+  } catch { /* sessionStorage 不可用：照样刷新一次 */ }
+  event.preventDefault()
+  window.location.reload()
+})
 // ECharts 全局主题注册：让所有 echarts 实例默认走动森配色
 import * as echarts from 'echarts/core'
 import { ANIMAL_ECHARTS_THEME } from '@/echarts-theme'
